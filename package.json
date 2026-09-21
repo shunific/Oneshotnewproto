@@ -71,7 +71,7 @@
     "@radix-ui/react-toggle-group": "1.1.2",
     "@radix-ui/react-tooltip": "1.1.8",
     "@supabase/supabase-js": "^2.110.7",
-    "brain.js": "^2.0.0-beta.24",
+    "brain.js": "^1.6.1",
     "canvas-confetti": "1.9.4",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
@@ -81,7 +81,7 @@
     "dotenv": "^17.4.2",
     "embla-carousel-react": "8.6.0",
     "express": "^5.2.1",
-    "gpu.js": "^2.24.0",
+    "gpu.js": "^1.10.4",
     "input-otp": "1.4.2",
     "lucide-react": "0.487.0",
     "motion": "12.23.24",
@@ -94,7 +94,7 @@
     "react-popper": "2.3.0",
     "react-resizable-panels": "2.1.7",
     "react-responsive-masonry": "2.7.1",
-    "react-router": "7.13.0",
+    "react-router": "^7.18.4",
     "react-slick": "0.31.0",
     "recharts": "2.15.2",
     "sonner": "2.0.3",
@@ -104,7 +104,7 @@
     "vaul": "1.1.2"
   },
   "devDependencies": {
-    "@electron/rebuild": "^3.6.1",
+    "@electron/rebuild": "^4.2.0",
     "@tailwindcss/vite": "4.1.12",
     "@vitejs/plugin-react": "4.7.0",
     "concurrently": "^10.0.3",
@@ -112,7 +112,7 @@
     "electron": "^43.1.0",
     "electron-builder": "^26.15.3",
     "tailwindcss": "4.1.12",
-    "vite": "6.3.5",
+    "vite": "^6.4.3",
     "wait-on": "^9.0.10"
   },
   "peerDependencies": {
