@@ -1,7 +1,7 @@
 const { app, BrowserWindow, globalShortcut, dialog } = require('electron');
 const path = require('path');
 const { fork } = require('child_process'); // 🟢 FIXED: Using standard child_process for native SQLite compatibility
-const serverProcess = fork(path.join(__dirname, '../server.cjs'));
+let serverProcess;
 
 let mainWindow;
 
@@ -16,14 +16,15 @@ function startServer() {
   let serverStderr = ''; 
 
   serverProcess = fork(serverPath, [], {
-    stdio: 'pipe', 
-    env: { 
-      ...process.env, 
-      PORT: '3001', 
-      USER_DATA_PATH: userDataPath,
-      NODE_ENV: isDev ? 'development' : 'production'
-    }
-  });
+      stdio: 'pipe',
+  env: {
+    ...process.env,
+    NODE_PATH: path.join(process.resourcesPath, 'app.asar', 'node_modules'),
+    PORT: '3001',
+    USER_DATA_PATH: userDataPath,
+    NODE_ENV: isDev ? 'development' : 'production'
+  }
+});
 
   serverProcess.stdout.on('data', (data) => console.log(`[Backend]: ${data.toString()}`));
   

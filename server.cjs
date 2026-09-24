@@ -1,12 +1,25 @@
 // ====================================================================
 // ONE SHOT BAR & BILLIARDS: LOCAL EDGE SERVER (CommonJS)
 // ====================================================================
-require('dotenv').config();
+const fs = require('fs');
+const path = require('path');
+const dotenv = require('dotenv');
+
+const envPath = process.env.NODE_ENV === 'production'
+  ? path.join(process.resourcesPath, '.env')
+  : path.join(__dirname, '.env');
+
+const envResult = dotenv.config({ path: envPath });
+
+if (envResult.error) {
+  console.error(`❌ [ENV ERROR]: Could not load ${envPath}`);
+} else {
+  console.log(`✅ [ENV]: Loaded ${Object.keys(envResult.parsed || {}).length} variables from ${envPath}`);
+}
 
 const express = require('express');
 const cors = require('cors');
 const sqlite3Pkg = require('sqlite3');
-const path = require('path');
 const multer = require('multer');
 const { createClient } = require('@supabase/supabase-js');
 const brain = require('brain.js'); // 🧠 QUEUE AI LIBRARY
@@ -546,8 +559,19 @@ app.post('/api/sync-to-cloud', async (req, res) => {
           if (err || !rows || rows.length === 0) return resolve();
           try {
             const payload = rows.map(mapFn);
-            const { error } = await supabase.from(cloudTable).upsert(payload, { onConflict: conflictKey });
-            if (error) syncErrors.push(`${cloudTable}: ${error.message}`);
+            console.log(`☁️ Syncing ${localTable}: ${payload.length} row(s)`);
+
+const { data, error } = await supabase
+  .from(cloudTable)
+  .upsert(payload, { onConflict: conflictKey })
+  .select();
+
+if (error) {
+  console.error(`❌ ${cloudTable} sync failed:`, error.message);
+  syncErrors.push(`${cloudTable}: ${error.message}`);
+} else {
+  console.log(`✅ ${cloudTable} synced: ${data?.length || 0} row(s)`);
+}
           } catch (e) {
             syncErrors.push(`${cloudTable}: ${e.message}`);
           }

@@ -23,6 +23,12 @@
       "dist/**/*",
       "server.cjs"
     ],
+    "extraResources": [
+  {
+    "from": ".env.tester1",
+    "to": ".env"
+  }
+],
     "directories": {
       "output": "release/"
     },

@@ -79,7 +79,7 @@ export type Activity = {
 };
 
 export type PromoCode = {
-  id: string; code: string; discountPercent: number; description: string; isActive: boolean; maxUsage: number; usageCount: number; startDate?: Date; expiresAt?: Date; createdAt: Date;
+  id: string; code: string; discountPercent: number; description: string; isActive: boolean; isLimitedUses: boolean; maxUsage: number; usageCount: number; startDate?: Date; expiresAt?: Date; createdAt: Date;
 };
 
 export type Event = {
