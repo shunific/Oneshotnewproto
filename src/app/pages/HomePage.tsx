@@ -583,8 +583,7 @@ export function HomePage() {
 
   const maxAllowedDuration = getMaxDuration();
 
-  const validateTimeSlotHelper = (time: string, duration: number, dateObj: Date | null, tableId: string | null) => {
-    if (!time || !dateObj) return 'invalid';
+const validateTimeSlotHelper = (time: string, duration: number, dateObj: Date | null, tableId: string | null): string => {    if (!time || !dateObj) return 'invalid';
     if (!tableId) return 'no_table';
     const parseToMins = (t: string) => {
       const [hh = '0', mm = '0'] = (t || '').split(':');
@@ -1562,6 +1561,43 @@ export function HomePage() {
                               </div>
                             </div>
 
+{/* Promo Code */}
+<div className="border-t border-neutral-800 pt-4">
+  <p className="text-xs text-neutral-500 uppercase tracking-wider font-bold mb-2">Promo Code</p>
+  {appliedPromo ? (
+    <div className="flex items-center justify-between bg-emerald-950/30 border border-emerald-800/50 rounded-lg px-3 py-2">
+      <span className="text-xs text-emerald-400 font-bold flex items-center gap-1.5">
+        <Tag size={12} /> {appliedPromo.code} applied ({appliedPromo.discountPercent}% off)
+      </span>
+      <button 
+        type="button" 
+        onClick={() => { setAppliedPromo(null); setPromoCodeInput(''); setPromoError(''); }} 
+        className="text-neutral-500 hover:text-white"
+      >
+        <X size={14} />
+      </button>
+    </div>
+  ) : (
+    <div className="flex gap-2">
+      <input 
+        type="text" 
+        value={promoCodeInput} 
+        onChange={e => { setPromoCodeInput(e.target.value.toUpperCase()); setPromoError(''); }} 
+        placeholder="Enter promo code" 
+        className="flex-1 bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-100 uppercase tracking-widest outline-none focus:border-emerald-500" 
+      />
+      <button 
+        type="button" 
+        onClick={handleApplyPromo} 
+        className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-white text-xs font-bold rounded-lg transition-colors"
+      >
+        Apply
+      </button>
+    </div>
+  )}
+  {promoError && <p className="text-[10px] text-rose-400 mt-1.5">{promoError}</p>}
+</div>
+
                             {/* Payment Block */}
                             <div className="space-y-3 border-t border-neutral-800 pt-4">
                               <div className="flex justify-between items-center">
@@ -1572,30 +1608,42 @@ export function HomePage() {
                                   </span>
                                 </div>
                               </div>
+                              </div>
+{!isDownPaymentWaived && resForm.paymentMethod === 'gcash' && (
+  <div className="flex flex-col items-center gap-2 mb-3">
+    <img 
+      src="https://olywhyaozjlkjrnsdydg.supabase.co/storage/v1/object/public/oneshot-assets/GCASH%20QR%20OPTIMIZED.jpg" 
+      alt="GCash QR Code" 
+      className="w-40 h-40 object-contain rounded-lg border border-neutral-700 bg-white p-1" 
+    />
+    <p className="text-[10px] text-neutral-500 text-center max-w-xs">
+      Scan to pay via GCash, then enter your reference number or upload your receipt below.
+    </p>
+  </div>
+)}
 
-                              {!isDownPaymentWaived ? (
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                  <div>
-                                    <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Ref No.</label>
-                                    <input type="text" value={resForm.paymentRef} onChange={e => setResForm(f => ({ ...f, paymentRef: e.target.value.replace(/\D/g, '').slice(0, 13) }))} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:border-amber-500 font-mono tracking-widest mt-1.5 outline-none" />
-                                  </div>
-                                  <div>
-                                    <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Receipt Image</label>
-                                    <div className="flex items-center gap-3 mt-1.5">
-                                      <label className="flex-1 cursor-pointer bg-neutral-950 border border-dashed border-neutral-700 rounded-lg px-3 py-2 text-center h-[42px] flex items-center justify-center hover:border-neutral-500 transition-colors">
-                                        <input type="file" accept="image/jpeg, image/png" className="hidden" onChange={e => { const file = e.target.files?.[0]; if (file) { setReceiptPreview(URL.createObjectURL(file)); setReceiptFile(file); } }} />
-                                        <span className="text-[10px] text-neutral-400 font-semibold">{receiptPreview ? 'Change Image' : 'Upload JPG/PNG'}</span>
-                                      </label>
-                                    </div>
-                                  </div>
-                                </div>
-                              ) : (
-                                <div className="bg-emerald-950/20 border border-emerald-900/30 rounded-xl p-3 flex items-center gap-3">
-                                  <CheckCircle size={16} className="text-emerald-400 flex-shrink-0" />
-                                  <p className="text-xs text-emerald-400 font-bold">Down payment is waived for Trusted Customers. Your booking will be instantly confirmed.</p>
-                                </div>
-                              )}
-                            </div>
+{!isDownPaymentWaived ? (
+  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+    <div>
+      <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Ref No.</label>
+      <input type="text" value={resForm.paymentRef} onChange={e => setResForm(f => ({ ...f, paymentRef: e.target.value.replace(/\D/g, '').slice(0, 13) }))} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:border-amber-500 font-mono tracking-widest mt-1.5 outline-none" />
+    </div>
+    <div>
+      <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Receipt Image</label>
+      <div className="flex items-center gap-3 mt-1.5">
+        <label className="flex-1 cursor-pointer bg-neutral-950 border border-dashed border-neutral-700 rounded-lg px-3 py-2 text-center h-[42px] flex items-center justify-center hover:border-neutral-500 transition-colors">
+          <input type="file" accept="image/jpeg, image/png" className="hidden" onChange={e => { const file = e.target.files?.[0]; if (file) { setReceiptPreview(URL.createObjectURL(file)); setReceiptFile(file); } }} />
+          <span className="text-[10px] text-neutral-400 font-semibold">{receiptPreview ? 'Change Image' : 'Upload JPG/PNG'}</span>
+        </label>
+      </div>
+    </div>
+  </div>
+) : (
+  <div className="bg-emerald-950/20 border border-emerald-900/30 rounded-xl p-3 flex items-center gap-3">
+    <CheckCircle size={16} className="text-emerald-400 flex-shrink-0" />
+    <p className="text-xs text-emerald-400 font-bold">Down payment is waived for Trusted Customers. Your booking will be instantly confirmed.</p>
+  </div>
+)}
 
                             <div className="mt-auto pt-4 space-y-4">
                               <div className="bg-neutral-950 rounded-xl p-4 border border-neutral-800/80 text-xs space-y-1.5">
