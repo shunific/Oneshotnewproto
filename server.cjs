@@ -50,7 +50,7 @@ const PORT = process.env.PORT || 3001;
 const SUPABASE_URL = 
   process.env.SUPABASE_URL || 
   process.env.VITE_SUPABASE_URL || 
-  'https://bqnswmjopwmvunzchqzl.supabase.co';
+  'https://olywhyaozjlkjrnsdydg.supabase.co';
 const SUPABASE_SERVICE_KEY = 
   process.env.SUPABASE_SERVICE_KEY || 
   process.env.VITE_SUPABASE_SERVICE_KEY || 
@@ -666,13 +666,28 @@ app.post('/api/promo-codes', (req, res) => {
   });
 });
 
-app.post('/api/images', upload.single('image'), (req, res) => {
+app.post('/api/images', upload.single('image'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No image uploaded' });
-  const id = 'img_' + Date.now() + '_' + Math.round(Math.random() * 1000);
-  db.run(`INSERT INTO images (id, mimeType, data) VALUES (?, ?, ?)`, [id, req.file.mimetype, req.file.buffer], function(err) {
-    if (err) return res.status(500).json({ error: err.message });
-    res.status(201).json({ url: `http://localhost:3001/api/images/${id}` });
-  });
+  const fileExt = req.file.originalname.split('.').pop();
+  const fileName = `img_${Date.now()}_${Math.round(Math.random() * 1000)}.${fileExt}`;
+
+  try {
+    const { error: uploadError } = await supabase.storage
+      .from('oneshot-assets')
+      .upload(fileName, req.file.buffer, { contentType: req.file.mimetype });
+
+    if (uploadError) {
+      return res.status(500).json({ error: uploadError.message });
+    }
+
+    const { data: publicUrlData } = supabase.storage
+      .from('oneshot-assets')
+      .getPublicUrl(fileName);
+
+    res.status(201).json({ url: publicUrlData.publicUrl });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post('/api/tables', (req, res) => {
