@@ -581,7 +581,7 @@ if (error) {
     };
 
    await Promise.all([
-      syncTable('cms', 'cms', r => ({ keyName: r.keyName, settingValue: r.settingValue }), 'keyName'),
+      syncTable('cms', 'cms', r => ({ keyname: r.keyName || r.keyname, settingvalue: r.settingValue || r.settingvalue }), 'keyname'),
       syncTable('systemSettings', 'system_settings', r => ({ key_name: r.keyName, setting_value: r.settingValue }), 'key_name'),
       syncTable('tables', 'tables', r => ({ id: r.id, name: r.name, status: r.status, isActive: r.isActive ? 1 : 0, maintenanceReason: r.maintenanceReason, sessionData: r.sessionData }), 'id'),
       
@@ -596,10 +596,45 @@ if (error) {
       
       syncTable('queue', 'queue', r => ({ id: r.id, customerName: r.customerName, contactNumber: r.contactNumber, partySize: r.partySize, status: r.status, queueNumber: r.queueNumber, notes: r.notes, arrivalTime: r.arrivalTime || new Date().toISOString() }), 'id'),
       syncTable('promo_codes', 'promo_codes', r => ({ id: r.id, code: r.code, discount_percent: r.discount_percent, description: r.description, is_active: !!r.is_active, is_limited_uses: !!r.is_limited_uses, max_usage: r.max_usage, usage_count: r.usage_count, start_date: r.start_date || null, expires_at: r.expires_at || null }), 'id'),
-      syncTable('events', 'events', r => ({ id: r.id, title: r.title, date: r.date || null, type: r.type, description: r.description || '', duration: r.duration || 'Whole Day', registrationLink: r.registrationLink || null, bracketLink: r.bracketLink || null, minParticipants: r.minParticipants || 8, maxParticipants: r.maxParticipants || 32, slotsFull: r.slotsFull ? 1 : 0, attachments: r.attachments || null, allowReservations: r.allowReservations !== 0 ? 1 : 0, reservationTableCount: r.reservationTableCount || 4, caterWalkIns: r.caterWalkIns !== 0 ? 1 : 0, walkInTableCount: r.walkInTableCount || 4, isCancelled: r.isCancelled ? 1 : 0, cancelReason: r.cancelReason || null }), 'id'),
-      syncTable('announcements', 'announcements', r => ({ id: r.id, title: r.title, content: r.content, type: r.type, isActive: r.isActive ? 1 : 0, expiresAt: r.expiresAt || null, createdAt: r.createdAt || new Date().toISOString() }), 'id'),
+      syncTable('events', 'events', r => ({ 
+        id: r.id, 
+        title: r.title, 
+        date: r.date || null, 
+        type: r.type, 
+        description: r.description || '', 
+        duration: r.duration || 'Whole Day', 
+        registrationlink: r.registrationLink || null, 
+        bracketlink: r.bracketLink || null, 
+        minparticipants: r.minParticipants || 8, 
+        maxparticipants: r.maxParticipants || 32, 
+        slotsfull: r.slotsFull ? 1 : 0, 
+        attachments: r.attachments || null, 
+        allowreservations: r.allowReservations !== 0 ? 1 : 0, 
+        reservationtablecount: r.reservationTableCount || 4, 
+        caterwalkins: r.caterWalkIns !== 0 ? 1 : 0, 
+        walkintablecount: r.walkInTableCount || 4, 
+        iscancelled: r.isCancelled ? 1 : 0, 
+        cancelreason: r.cancelReason || null,
+        createdat: r.createdAt || new Date().toISOString()
+      }), 'id'),
+      syncTable('announcements', 'announcements', r => ({ 
+        id: r.id, 
+        title: r.title, 
+        content: r.content, 
+        type: r.type, 
+        isactive: r.isActive ? 1 : 0, 
+        expiresat: r.expiresAt || null, 
+        createdat: r.createdAt || new Date().toISOString() 
+      }), 'id'),
       syncTable('closed_dates', 'closed_dates', r => ({ id: r.id, closed_date: r.closed_date || null, type: r.type, day_of_week: r.day_of_week, reason: r.reason, is_full_day: !!r.is_full_day, open_time: r.open_time, close_time: r.close_time }), 'id'),
-      syncTable('inventory', 'inventory', r => ({ id: r.id, name: r.name, category: r.category, price: r.price, stock: r.stock, isActive: r.isActive ? 1 : 0 }), 'id'),
+      syncTable('inventory', 'inventory', r => ({ 
+        id: r.id, 
+        name: r.name, 
+        category: r.category, 
+        price: r.price, 
+        stock: r.stock, 
+        isactive: r.isActive ? 1 : 0 
+      }), 'id'),
       syncTable('lost_and_found', 'lost_and_found', r => ({ id: r.id, itemName: r.itemName, description: r.description, foundDate: r.foundDate || null, status: r.status, image: r.image || null, claimedBy: r.claimedBy || null, claimedDate: r.claimedDate || null, isArchived: r.isArchived ? 1 : 0 }), 'id'),
       syncTable('feedback', 'feedback', r => ({ id: r.id, customerName: r.customerName, contactInfo: r.contactInfo, feedbackType: r.feedbackType, comment: r.comment, reservationId: r.reservationId, tags: r.tags, date: r.date || new Date().toISOString(), status: r.status || 'pending', notes: r.notes || null }), 'id'),
       syncTable('watchlist', 'watchlist', r => ({ id: r.id, name: r.name, reason: r.reason, description: r.description, status: r.status, evidenceLink: r.evidenceLink || null, dateAdded: r.dateAdded || null, resolvedDate: r.resolvedDate || null, isArchived: r.isArchived ? 1 : 0 }), 'id'),
