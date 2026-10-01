@@ -86,8 +86,8 @@ export type WeatherData = {
   temp: number; condition: string; isRaining: boolean; code: number; locationName: string;
 };
 
-export const HOURLY_RATE = 0;
-export const DOWN_PAYMENT_RATE = 0;
+export const HOURLY_RATE = 150;
+export const DOWN_PAYMENT_RATE = 0.25;
 
 export const generateRandomPromoCode = () => {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -123,13 +123,54 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 export function AppProvider({ children }: { children: ReactNode }) {
   const [isInitializing, setIsInitializing] = useState(true);
 
-  const [tables, setTables] = useState<Table[]>([]);
+  const [tables, setTables] = useState<Table[]>([
+    { id: 't1', name: 'Table 1', status: 'available', isActive: true },
+    { id: 't2', name: 'Table 2', status: 'available', isActive: true },
+    { id: 't3', name: 'Table 3', status: 'available', isActive: true },
+    { id: 't4', name: 'Table 4', status: 'available', isActive: true },
+    { id: 't5', name: 'Table 5', status: 'available', isActive: true },
+    { id: 't6', name: 'Table 6', status: 'available', isActive: true },
+    { id: 't7', name: 'Table 7', status: 'available', isActive: true },
+    { id: 't8', name: 'Table 8', status: 'available', isActive: true },
+    { id: 't9', name: 'Table 9', status: 'available', isActive: true },
+    { id: 't10', name: 'Table 10', status: 'available', isActive: true },
+  ]);
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
   const [promoCodes, setPromoCodes] = useState<PromoCode[]>([]);
-  const [rates, setRates] = useState<RatesConfig>({ hourlyRate: 0, overtimeRate: 0, downPaymentPercent: 0, weekdayStartTime: '', weekdayEndTime: '', isWeekdayHappyHourActive: false, weekdayHappyHourRate: 0, weekdayHappyHourStart: '', weekdayHappyHourEnd: '', weekdayOnlineCapacityLimit: 0, weekendStartTime: '', weekendEndTime: '', isWeekendHappyHourActive: false, weekendHappyHourRate: 0, weekendHappyHourStart: '', weekendHappyHourEnd: '', weekendOnlineCapacityLimit: 0, bookingCutoffMinutes: 60 });
-  const [reservationTerms, setReservationTerms] = useState<ReservationTerms>({ minHours: 0, maxHours: 0, cancellationHours: 0, advanceBookingHours: 1, cancellationPolicy: '', termsAndConditions: '', weekdayMinPartySize: 0, weekdayMaxPartySize: 0, weekendMinPartySize: 0, weekendMaxPartySize: 0 });
+  const [rates, setRates] = useState<RatesConfig>({
+    hourlyRate: 150,
+    overtimeRate: 100,
+    downPaymentPercent: 25,
+    weekdayStartTime: '12:00',
+    weekdayEndTime: '00:00',
+    isWeekdayHappyHourActive: true,
+    weekdayHappyHourRate: 100,
+    weekdayHappyHourStart: '15:00',
+    weekdayHappyHourEnd: '18:00',
+    weekdayOnlineCapacityLimit: 90,
+    weekendStartTime: '12:00',
+    weekendEndTime: '00:00',
+    isWeekendHappyHourActive: false,
+    weekendHappyHourRate: 100,
+    weekendHappyHourStart: '15:00',
+    weekendHappyHourEnd: '18:00',
+    weekendOnlineCapacityLimit: 40,
+    bookingCutoffMinutes: 60
+  });
+  const [reservationTerms, setReservationTerms] = useState<ReservationTerms>({
+    minHours: 1,
+    maxHours: 8,
+    cancellationHours: 23,
+    advanceBookingHours: 1,
+    cancellationPolicy: 'Booking Policy',
+    termsAndConditions: 'Terms & Conditions',
+    weekdayMinPartySize: 1,
+    weekdayMaxPartySize: 10,
+    weekendMinPartySize: 1,
+    weekendMaxPartySize: 10
+  });
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [closedDates, setClosedDates] = useState<ClosedDate[]>([]);
   const [weather, setWeather] = useState<WeatherData | null>(null);
@@ -267,33 +308,88 @@ export function AppProvider({ children }: { children: ReactNode }) {
             queueNumber: q.queueNumber || q.queue_number,
           })) as QueueItem[]);
         }
-        if (annData) setAnnouncements(annData as Announcement[]);
-        if (closedDatesData) setClosedDates(closedDatesData as ClosedDate[]);
-        if (promoData) setPromoCodes(promoData as PromoCode[]);
+        if (annData && annData.length > 0) {
+          setAnnouncements(annData.map((a: any) => ({
+            ...a,
+            id: a.id,
+            title: a.title,
+            content: a.content,
+            type: a.type || 'info',
+            isActive: a.isactive !== undefined ? (a.isactive === 1 || a.isactive === true || a.isactive === 'true') : (a.isActive === 1 || a.isActive === true || a.isActive === 'true'),
+            createdAt: a.createdat ? new Date(a.createdat) : (a.createdAt ? new Date(a.createdAt) : new Date()),
+            expiresAt: a.expiresat ? new Date(a.expiresat) : (a.expiresAt ? new Date(a.expiresAt) : undefined)
+          })) as Announcement[]);
+        }
+        if (closedDatesData && closedDatesData.length > 0) {
+          setClosedDates(closedDatesData.map((cd: any) => ({
+            ...cd,
+            id: cd.id,
+            date: cd.date,
+            reason: cd.reason,
+            isFullDay: cd.isfullday !== undefined ? (cd.isfullday === 1 || cd.isfullday === true) : (cd.is_full_day !== undefined ? (cd.is_full_day === 1 || cd.is_full_day === true) : cd.isFullDay),
+            openTime: cd.opentime || cd.open_time || cd.openTime,
+            closeTime: cd.closetime || cd.close_time || cd.closeTime,
+            dayOfWeek: cd.dayofweek ?? cd.day_of_week ?? cd.dayOfWeek,
+            type: cd.type || 'specific'
+          })) as ClosedDate[]);
+        }
+        if (promoData && promoData.length > 0) {
+          setPromoCodes(promoData.map((p: any) => ({
+            ...p,
+            id: p.id,
+            code: p.code,
+            discountPercent: Number(p.discountpercent ?? p.discount_percent ?? p.discountPercent ?? 0),
+            description: p.description || '',
+            isActive: p.isactive !== undefined ? (p.isactive === 1 || p.isactive === true || p.isactive === 'true') : (p.isActive === 1 || p.isActive === true || p.isActive === 'true'),
+            maxUsage: Number(p.maxusage ?? p.max_usage ?? p.maxUsage ?? 100),
+            usageCount: Number(p.usagecount ?? p.usage_count ?? p.usageCount ?? 0),
+            startDate: p.startdate || p.start_date || p.startDate ? new Date(p.startdate || p.start_date || p.startDate) : undefined,
+            expiresAt: p.expiresat || p.expires_at || p.expiresAt ? new Date(p.expiresat || p.expires_at || p.expiresAt) : undefined,
+            createdAt: p.createdat || p.created_at || p.createdAt ? new Date(p.createdat || p.created_at || p.createdAt) : new Date()
+          })) as PromoCode[]);
+        }
         
-        if (eventsData) {
+        if (eventsData && eventsData.length > 0) {
+          const mappedEvents = eventsData.map((e: any) => ({
+            ...e,
+            id: e.id,
+            title: e.title,
+            date: e.date,
+            type: e.type,
+            description: e.description,
+            registrationLink: e.registrationlink || e.registration_link || e.registrationLink,
+            maxParticipants: e.maxparticipants ?? e.max_participants ?? e.maxParticipants,
+            slotsFull: e.slotsfull !== undefined ? (e.slotsfull === 1 || e.slotsfull === true) : e.slotsFull,
+            allowReservations: e.allowreservations !== undefined ? (e.allowreservations === 1 || e.allowreservations === true) : e.allowReservations,
+            caterWalkIns: e.caterwalkins !== undefined ? (e.caterwalkins === 1 || e.caterwalkins === true) : e.caterWalkIns,
+            walkInTableCount: e.walkintablecount ?? e.walk_in_table_count ?? e.walkInTableCount,
+            promoCodeId: e.promocodeid || e.promo_code_id || e.promoCodeId
+          }));
           setEvents(prev => {
-            const existingIds = new Set(prev.map(e => e.id));
-            const newEvents = (eventsData as Event[]).filter(e => !existingIds.has(e.id));
+            const existingIds = new Set(prev.map(ev => ev.id));
+            const newEvents = mappedEvents.filter((ev: any) => !existingIds.has(ev.id));
             return [...prev, ...newEvents];
           });
         }
 
-        if (cmsData) {
+        if (cmsData && cmsData.length > 0) {
           const configObj = cmsData.reduce((acc: any, curr: any) => {
-            acc[curr.key_name || curr.keyName] = curr.content_value || curr.settingValue;
+            const key = curr.keyname || curr.key_name || curr.keyName;
+            const val = curr.settingvalue !== undefined ? curr.settingvalue : (curr.setting_value !== undefined ? curr.setting_value : (curr.content_value !== undefined ? curr.content_value : curr.settingValue));
+            if (key) acc[key] = val;
             return acc;
           }, {});
-          setSiteConfig(configObj);
+          setSiteConfig((prev: any) => ({ ...prev, ...configObj }));
         }
 
-        if (settingsData) {
+        if (settingsData && settingsData.length > 0) {
           const settingsObj = settingsData.reduce((acc: any, curr: any) => { 
-            let val = curr.setting_value || curr.settingValue;
-            if (val === 'true') val = true;
-            else if (val === 'false') val = false;
-            else if (!isNaN(val) && val.trim() !== '' && !val.includes(':')) val = Number(val);
-            acc[curr.key_name || curr.keyName] = val; 
+            const key = curr.keyname || curr.key_name || curr.keyName;
+            let val = curr.settingvalue !== undefined ? curr.settingvalue : (curr.setting_value !== undefined ? curr.setting_value : (curr.content_value !== undefined ? curr.content_value : curr.settingValue));
+            if (val === 'true' || val === true) val = true;
+            else if (val === 'false' || val === false) val = false;
+            else if (val !== null && val !== undefined && !isNaN(val) && String(val).trim() !== '' && !String(val).includes(':')) val = Number(val);
+            if (key) acc[key] = val; 
             return acc; 
           }, {});
           

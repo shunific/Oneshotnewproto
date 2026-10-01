@@ -583,7 +583,7 @@ export function HomePage() {
 
   const maxAllowedDuration = getMaxDuration();
 
-  const validateTimeSlotHelper = (time: string, duration: number, dateObj: Date | null, tableId: string | null) => {
+  const validateTimeSlotHelper = (time: string, duration: number, dateObj: Date | null, tableId: string | null): string => {
     if (!time || !dateObj) return 'invalid';
     if (!tableId) return 'no_table';
     const parseToMins = (t: string) => {
@@ -1562,6 +1562,65 @@ export function HomePage() {
                               </div>
                             </div>
 
+                            {/* Promo Code Block */}
+                            <div className="space-y-2 border-t border-neutral-800 pt-4">
+                              <div className="flex justify-between items-center">
+                                <label className="text-xs text-amber-500 uppercase tracking-wider font-bold flex items-center gap-1.5">
+                                  <Tag size={13} /> Promo Code
+                                </label>
+                                {appliedPromo && (
+                                  <span className="text-xs text-emerald-400 font-semibold bg-emerald-950/50 border border-emerald-900/50 px-2 py-0.5 rounded">
+                                    {appliedPromo.discountPercent}% OFF Applied
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex gap-2">
+                                <input
+                                  type="text"
+                                  placeholder="Enter promo code"
+                                  value={promoCodeInput}
+                                  onChange={e => {
+                                    setPromoCodeInput(e.target.value.toUpperCase());
+                                    if (promoError) setPromoError('');
+                                  }}
+                                  disabled={!!appliedPromo}
+                                  className="flex-1 bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 placeholder:text-neutral-600 focus:border-amber-500 uppercase tracking-wider outline-none disabled:opacity-60"
+                                />
+                                {appliedPromo ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setAppliedPromo(null);
+                                      setPromoCodeInput('');
+                                      setPromoError('');
+                                    }}
+                                    className="px-3 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-lg text-xs font-semibold transition-colors"
+                                  >
+                                    Remove
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={handleApplyPromo}
+                                    disabled={!promoCodeInput.trim()}
+                                    className="px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white rounded-lg text-xs font-bold transition-colors"
+                                  >
+                                    Apply
+                                  </button>
+                                )}
+                              </div>
+                              {promoError && (
+                                <p className="text-[11px] text-rose-400 font-medium flex items-center gap-1">
+                                  <XCircle size={12} /> {promoError}
+                                </p>
+                              )}
+                              {appliedPromo && (
+                                <p className="text-[11px] text-emerald-400 font-medium flex items-center gap-1">
+                                  <CheckCircle size={12} /> Promo code &ldquo;{appliedPromo.code}&rdquo; applied successfully!
+                                </p>
+                              )}
+                            </div>
+
                             {/* Payment Block */}
                             <div className="space-y-3 border-t border-neutral-800 pt-4">
                               <div className="flex justify-between items-center">
@@ -1573,11 +1632,29 @@ export function HomePage() {
                                 </div>
                               </div>
 
+                              {!isDownPaymentWaived && resForm.paymentMethod === 'gcash' && (
+                                <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-3 flex flex-col items-center gap-2">
+                                  <p className="text-xs text-neutral-400 font-medium text-center">
+                                    Scan to pay down payment of <span className="text-amber-400 font-bold">₱{downPayment}.00</span> via GCash
+                                  </p>
+                                  <div className="bg-white p-2 rounded-xl shadow-lg border border-neutral-200">
+                                    <img 
+                                      src="https://olywhyaozjlkjrnsdydg.supabase.co/storage/v1/object/public/oneshot-assets/GCASH%20QR%20OPTIMIZED.jpg" 
+                                      alt="One Shot GCash QR Code" 
+                                      className="w-48 h-48 sm:w-56 sm:h-56 object-contain rounded-lg" 
+                                    />
+                                  </div>
+                                  <p className="text-[10px] text-neutral-500 text-center">
+                                    After sending payment, enter the Reference Number or upload receipt below.
+                                  </p>
+                                </div>
+                              )}
+
                               {!isDownPaymentWaived ? (
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                   <div>
                                     <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Ref No.</label>
-                                    <input type="text" value={resForm.paymentRef} onChange={e => setResForm(f => ({ ...f, paymentRef: e.target.value.replace(/\D/g, '').slice(0, 13) }))} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:border-amber-500 font-mono tracking-widest mt-1.5 outline-none" />
+                                    <input type="text" value={resForm.paymentRef} onChange={e => setResForm(f => ({ ...f, paymentRef: e.target.value.replace(/\D/g, '').slice(0, 13) }))} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:border-amber-500 font-mono tracking-widest mt-1.5 outline-none" placeholder="e.g. 1002345678901" />
                                   </div>
                                   <div>
                                     <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Receipt Image</label>
@@ -1599,7 +1676,16 @@ export function HomePage() {
 
                             <div className="mt-auto pt-4 space-y-4">
                               <div className="bg-neutral-950 rounded-xl p-4 border border-neutral-800/80 text-xs space-y-1.5">
-                                <div className="flex justify-between"><span className="text-neutral-400">Total Rate ({resForm.duration}h)</span><span className="text-white font-semibold">₱{totalAmount}.00</span></div>
+                                <div className="flex justify-between"><span className="text-neutral-400">Total Rate ({resForm.duration}h)</span><span className="text-white font-semibold">₱{baseAmount}.00</span></div>
+                                {appliedPromo && (
+                                  <div className="flex justify-between text-emerald-400">
+                                    <span>Promo Discount ({appliedPromo.code} - {appliedPromo.discountPercent}%)</span>
+                                    <span>-₱{discountAmount}.00</span>
+                                  </div>
+                                )}
+                                {appliedPromo && (
+                                  <div className="flex justify-between font-semibold"><span className="text-neutral-300">Discounted Total</span><span className="text-white">₱{totalAmount}.00</span></div>
+                                )}
                                 <div className="flex justify-between font-bold text-amber-400">
                                   <span>{isDownPaymentWaived ? 'Down Payment (Waived for Trusted User)' : `Down Payment (${rates?.downPaymentPercent || 25}%)`}</span>
                                   <span>₱{isDownPaymentWaived ? 0 : downPayment}.00</span>
