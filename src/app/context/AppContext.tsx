@@ -341,6 +341,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
             const rawLimited = p.is_limited_uses ?? p.islimiteduses ?? p.isLimitedUses;
             const isLimitedUses = rawLimited !== undefined ? (rawLimited === 1 || rawLimited === true || rawLimited === 'true') : false;
 
+            const usedInReservations = (resData || []).filter((r: any) => r.promoCode && r.promoCode.trim().toUpperCase() === (p.code || '').trim().toUpperCase()).length;
+            const currentUsage = Math.max(Number(p.usage_count ?? p.usagecount ?? p.usageCount ?? 0), usedInReservations);
+
             return {
               ...p,
               id: p.id,
@@ -350,7 +353,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
               isActive,
               isLimitedUses,
               maxUsage: Number(p.max_usage ?? p.maxusage ?? p.maxUsage ?? 100),
-              usageCount: Number(p.usage_count ?? p.usagecount ?? p.usageCount ?? 0),
+              usageCount: currentUsage,
               startDate: (p.start_date || p.startdate || p.startDate) ? new Date(p.start_date || p.startdate || p.startDate) : undefined,
               expiresAt: (p.expires_at || p.expiresat || p.expiresAt) ? new Date(p.expires_at || p.expiresat || p.expiresAt) : undefined,
               createdAt: (p.created_at || p.createdat || p.createdAt) ? new Date(p.created_at || p.createdat || p.createdAt) : new Date()
@@ -488,6 +491,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
     supabase.from('reservations').insert([supabasePayload]).then(({ error }) => {
       if (error) console.error("Supabase insert error:", error);
     });
+
+    // 🟢 Increment promo code redemption usage count
+    if (newRes.promoCode) {
+      const pCode = newRes.promoCode.trim().toUpperCase();
+      const targetPromo = promoCodes.find(p => p.code.trim().toUpperCase() === pCode);
+      if (targetPromo) {
+        const nextCount = (targetPromo.usageCount || 0) + 1;
+        setPromoCodes(prev => prev.map(p => p.id === targetPromo.id ? { ...p, usageCount: nextCount } : p));
+        supabase
+          .from('promo_codes')
+          .update({ usage_count: nextCount })
+          .eq('id', targetPromo.id)
+          .then(({ error }) => {
+            if (error) {
+              // fallback if column is named usageCount
+              supabase.from('promo_codes').update({ usageCount: nextCount }).eq('id', targetPromo.id);
+            }
+          });
+      }
+    }
     
     return id;
   };
