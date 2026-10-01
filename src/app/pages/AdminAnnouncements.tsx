@@ -50,14 +50,27 @@ export function AdminAnnouncements() {
     return now.toISOString().slice(0, 16);
   };
   
+  const safeFormat = (val: any, fmt: string, fallback = '—') => {
+    if (!val) return fallback;
+    const d = new Date(val);
+    return isNaN(d.getTime()) ? fallback : format(d, fmt);
+  };
+
   const openEdit = (a: Announcement) => {
     setEditingId(a.id);
-    const sDate = (a as any).startDate; 
+    const sDate = (a as any).startDate || (a as any).startdate; 
+    const expDate = a.expiresAt || (a as any).expiresat;
+    const safeIso = (v: any) => {
+      if (!v) return '';
+      const d = new Date(v);
+      return isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 16);
+    };
     setForm({ 
-      title: a.title, content: a.content, type: a.type, 
-      isActive: a.isActive, 
-      hasExpiry: !!a.expiresAt, expiresAt: a.expiresAt ? new Date(a.expiresAt).toISOString().slice(0,16) : '',
-      startDate: sDate ? new Date(sDate).toISOString().slice(0,16) : ''
+      title: a.title, content: a.content, type: a.type || 'info', 
+      isActive: a.isActive ?? true, 
+      hasExpiry: !!expDate, 
+      expiresAt: safeIso(expDate),
+      startDate: safeIso(sDate)
     });
     setShowForm(true);
   };
@@ -111,8 +124,17 @@ export function AdminAnnouncements() {
   };
 
   // 🟢 Categorize & Sort Announcements
-  const sortedAnnouncements = [...announcements].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  const checkIsExpired = (a: Announcement) => a.expiresAt && new Date() > new Date(a.expiresAt);
+  const sortedAnnouncements = [...announcements].sort((a, b) => {
+    const tA = new Date(a.createdAt || (a as any).createdat || 0).getTime() || 0;
+    const tB = new Date(b.createdAt || (b as any).createdat || 0).getTime() || 0;
+    return tB - tA;
+  });
+  const checkIsExpired = (a: Announcement) => {
+    const exp = a.expiresAt || (a as any).expiresat;
+    if (!exp) return false;
+    const d = new Date(exp);
+    return !isNaN(d.getTime()) && new Date() > d;
+  };
   
   const activeList = sortedAnnouncements.filter(a => !checkIsExpired(a));
   const historyList = sortedAnnouncements.filter(a => checkIsExpired(a));
@@ -222,11 +244,14 @@ export function AdminAnnouncements() {
             )}
           </div>
         ) : displayedAnnouncements.map(a => {
-          const cfg = TYPE_CONFIG[a.type];
+          const cfg = TYPE_CONFIG[a.type] || TYPE_CONFIG.info;
           const Icon = cfg.icon;
           const isExpired = checkIsExpired(a);
-          const isScheduled = (a as any).startDate && new Date((a as any).startDate) > new Date();
+          const sDate = (a as any).startDate || (a as any).startdate;
+          const isScheduled = sDate && !isNaN(new Date(sDate).getTime()) && new Date(sDate) > new Date();
           const isLive = a.isActive && !isExpired && !isScheduled;
+          const cDate = a.createdAt || (a as any).createdat;
+          const eDate = a.expiresAt || (a as any).expiresat;
 
           return (
             <div key={a.id} className={`bg-neutral-950 border rounded-xl p-5 transition-colors ${isLive ? cfg.border : 'border-neutral-800 opacity-75'}`}>
@@ -256,18 +281,18 @@ export function AdminAnnouncements() {
                   <div className="flex flex-wrap items-center gap-4 mt-3 text-[10px] text-neutral-500">
                     <div className="flex items-center gap-1.5">
                       <Clock size={12} className="text-neutral-600" />
-                      <span>Posted {format(new Date(a.createdAt), 'MMM d, yyyy')}</span>
+                      <span>Posted {safeFormat(cDate, 'MMM d, yyyy')}</span>
                     </div>
-                    {(a as any).startDate && (
+                    {sDate && (
                       <div className="flex items-center gap-1.5">
                         <div className="w-1 h-1 bg-neutral-700 rounded-full" />
-                        <span className="text-blue-400/80">Starts {format(new Date((a as any).startDate), 'MMM d, yyyy h:mm a')}</span>
+                        <span className="text-blue-400/80">Starts {safeFormat(sDate, 'MMM d, yyyy h:mm a')}</span>
                       </div>
                     )}
-                    {a.expiresAt && (
+                    {eDate && (
                       <div className="flex items-center gap-1.5">
                         <div className="w-1 h-1 bg-neutral-700 rounded-full" />
-                        <span className="text-rose-400/80">Expires {format(new Date(a.expiresAt), 'MMM d, yyyy h:mm a')}</span>
+                        <span className="text-rose-400/80">Expires {safeFormat(eDate, 'MMM d, yyyy h:mm a')}</span>
                       </div>
                     )}
                   </div>

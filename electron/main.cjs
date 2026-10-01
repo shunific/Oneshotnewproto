@@ -48,9 +48,9 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
-    kiosk: true,
-    fullscreen: true,
-    alwaysOnTop: true,
+    kiosk: false,
+    fullscreen: false,
+    alwaysOnTop: false,
     autoHideMenuBar: true,
     icon: path.join(__dirname, 'icon.ico'),
     webPreferences: {
@@ -59,6 +59,8 @@ function createWindow() {
       devTools: false
     }
   });
+
+  mainWindow.maximize();
 
   if (!app.isPackaged) {
     mainWindow.loadURL('http://localhost:5173');
@@ -83,6 +85,10 @@ function createWindow() {
 
   mainWindow.on('blur', () => {
     globalShortcut.unregisterAll();
+    // 🟢 Automatically minimize when user clicks away from the app
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isMinimized()) {
+      mainWindow.minimize();
+    }
   });
 
   mainWindow.on('closed', () => {

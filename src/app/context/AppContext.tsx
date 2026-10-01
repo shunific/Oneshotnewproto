@@ -348,9 +348,49 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       if (resErr) throw new Error("Supabase is unreachable.");
 
-      if (annData) setAnnouncements(annData as Announcement[]);
+      if (annData) {
+        setAnnouncements((annData as any[]).map(a => {
+          const rawActive = a.is_active ?? a.isactive ?? a.isActive;
+          const isActive = rawActive !== undefined ? (rawActive === 1 || rawActive === true || rawActive === 'true') : true;
+          return {
+            id: a.id,
+            title: a.title,
+            content: a.content,
+            type: a.type || 'info',
+            isActive,
+            expiresAt: a.expires_at || a.expiresat || a.expiresAt || null,
+            createdAt: a.created_at || a.createdat || a.createdAt || new Date().toISOString(),
+            startDate: a.start_date || a.startdate || a.startDate || null
+          };
+        }) as Announcement[]);
+      }
       if (feedData) setFeedback((feedData as any[]).map(f => ({ ...f, tags: typeof f.tags === 'string' ? JSON.parse(f.tags || '[]') : (f.tags || []) })) as Feedback[]);
-      if (promoData) setPromoCodes((promoData as any[]).map(r => ({ id: r.id, code: r.code, discountPercent: r.discount_percent, description: r.description, isActive: !!r.is_active, isLimitedUses: !!r.is_limited_uses, maxUsage: r.max_usage, usageCount: r.usage_count, startDate: r.start_date, expiresAt: r.expires_at })) as PromoCode[]);
+      if (promoData) {
+        const countFromRes = (code: string) => {
+          if (!resData || !code) return 0;
+          return (resData as any[]).filter(r => {
+            const pCode = (r.promoCode || r.promocode || r.promo_code || '').trim().toUpperCase();
+            return pCode === code.trim().toUpperCase();
+          }).length;
+        };
+
+        setPromoCodes((promoData as any[]).map(r => {
+          const resCount = countFromRes(r.code);
+          const effectiveUsage = Math.max(r.usage_count ?? r.usageCount ?? 0, resCount);
+          return {
+            id: r.id,
+            code: r.code,
+            discountPercent: r.discount_percent ?? r.discountPercent ?? 0,
+            description: r.description,
+            isActive: r.is_active === 1 || r.is_active === true || r.isActive === true || r.isActive === 1,
+            isLimitedUses: r.is_limited_uses === 1 || r.is_limited_uses === true || r.isLimitedUses === true,
+            maxUsage: r.max_usage ?? r.maxUsage ?? 0,
+            usageCount: effectiveUsage,
+            startDate: r.start_date || r.startDate || null,
+            expiresAt: r.expires_at || r.expiresAt || null
+          };
+        }) as PromoCode[]);
+      }
       if (closedDatesData) setClosedDates((closedDatesData as any[]).map(r => ({ id: r.id, date: r.closed_date, type: r.type || 'specific', dayOfWeek: r.day_of_week, reason: r.reason, isFullDay: !!r.is_full_day, openTime: r.open_time, closeTime: r.close_time })) as ClosedDate[]);
       if (eventsData) setEvents((eventsData as any[]).map(e => ({ ...e, slotsFull: !!e.slotsFull, allowReservations: e.allowReservations !== false, caterWalkIns: e.caterWalkIns !== false, walkInTableCount: e.walkInTableCount ?? 10, attachments: e.attachments ? [e.attachments] : [] })) as Event[]);
       
@@ -367,7 +407,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       if (resData) {
         const mappedRes = (resData as any[]).map(r => ({
-          id: r.id, customerName: r.customerName || r.customer_name, contactNumber: r.contactNumber || r.contact_number, email: r.email, date: new Date(r.date), timeSlot: r.timeSlot || r.time_slot, durationHours: r.durationHours || r.duration_hours, partySize: r.partySize || r.party_size, tableId: r.tableId || r.table_id, status: r.status, totalAmount: r.totalAmount || r.total_amount, downPaymentAmount: r.downPaymentAmount || r.down_payment_amount, downPaymentPaid: !!r.downPaymentPaid || !!r.down_payment_paid, balancePaid: !!r.balancePaid || !!r.balance_paid, createdAt: new Date(r.createdAt || r.created_at), cancellationReason: r.cancellationReason || r.cancellation_reason, refundStatus: r.refundStatus || r.refund_status, refundMethod: r.refundMethod || r.refund_method, refundNotes: r.refundNotes || r.refund_notes, paymentRef: r.paymentRef || r.payment_ref, receiptImg: r.receiptImg || r.receipt_img_url
+          id: r.id, customerName: r.customerName || r.customer_name, contactNumber: r.contactNumber || r.contact_number, email: r.email, date: new Date(r.date), timeSlot: r.timeSlot || r.time_slot, durationHours: r.durationHours || r.duration_hours, partySize: r.partySize || r.party_size, tableId: r.tableId || r.table_id, status: r.status, totalAmount: r.totalAmount || r.total_amount, downPaymentAmount: r.downPaymentAmount || r.down_payment_amount, downPaymentPaid: !!r.downPaymentPaid || !!r.down_payment_paid, balancePaid: !!r.balancePaid || !!r.balance_paid, createdAt: new Date(r.createdAt || r.created_at), cancellationReason: r.cancellationReason || r.cancellation_reason, refundStatus: r.refundStatus || r.refund_status, refundMethod: r.refundMethod || r.refund_method, refundNotes: r.refundNotes || r.refund_notes, paymentRef: r.paymentRef || r.payment_ref, receiptImg: r.receiptImg || r.receipt_img_url, promoCode: r.promoCode || r.promocode || r.promo_code || null, discountAmount: r.discountAmount || r.discountamount || r.discount_amount || 0
         }));
         setReservations(mappedRes);
 

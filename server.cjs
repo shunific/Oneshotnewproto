@@ -536,15 +536,26 @@ app.post('/api/cache-reservations', (req, res) => {
   db.serialize(() => {
     db.run('BEGIN TRANSACTION');
     const stmt = db.prepare(`
-      INSERT OR REPLACE INTO reservations (id, customerName, contactNumber, email, date, timeSlot, durationHours, partySize, tableId, status, totalAmount, downPaymentAmount, downPaymentPaid, balancePaid, paymentRef, receiptImg, cancellationReason, refundStatus, refundMethod, refundNotes, createdAt) 
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT OR REPLACE INTO reservations (id, customerName, contactNumber, email, date, timeSlot, durationHours, partySize, tableId, status, totalAmount, downPaymentAmount, downPaymentPaid, balancePaid, paymentRef, receiptImg, cancellationReason, refundStatus, refundMethod, refundNotes, createdAt, promoCode, discountAmount) 
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     reservations.forEach(r => {
-      stmt.run([r.id, r.customerName, r.contactNumber, r.email||null, typeof r.date === 'string' ? r.date : new Date(r.date).toISOString(), r.timeSlot, r.durationHours, r.partySize, r.tableId||null, r.status, r.totalAmount, r.downPaymentAmount, r.downPaymentPaid?1:0, r.balancePaid?1:0, r.paymentRef||null, r.receiptImg||null, r.cancellationReason||null, r.refundStatus||null, r.refundMethod||null, r.refundNotes||null, typeof r.createdAt === 'string' ? r.createdAt : new Date(r.createdAt).toISOString()]);
+      stmt.run([r.id, r.customerName, r.contactNumber, r.email||null, typeof r.date === 'string' ? r.date : new Date(r.date).toISOString(), r.timeSlot, r.durationHours, r.partySize, r.tableId||null, r.status, r.totalAmount, r.downPaymentAmount, r.downPaymentPaid?1:0, r.balancePaid?1:0, r.paymentRef||null, r.receiptImg||null, r.cancellationReason||null, r.refundStatus||null, r.refundMethod||null, r.refundNotes||null, typeof r.createdAt === 'string' ? r.createdAt : new Date(r.createdAt).toISOString(), r.promoCode||null, r.discountAmount||0]);
     });
     stmt.finalize();
     db.run('COMMIT', (err) => {
       if (err) return res.status(500).json({ error: err.message });
+      
+      // 🟢 Recalculate local promo_codes usage count from cached reservations
+      db.run(`
+        UPDATE promo_codes 
+        SET usage_count = (
+          SELECT COUNT(*) FROM reservations 
+          WHERE UPPER(TRIM(reservations.promoCode)) = UPPER(TRIM(promo_codes.code))
+        )
+        WHERE code IN (SELECT DISTINCT promoCode FROM reservations WHERE promoCode IS NOT NULL)
+      `);
+      
       res.json({ message: "Successfully cached cloud reservations to local SQLite." });
     });
   });
