@@ -1986,28 +1986,82 @@ export function HomePage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-10">
                   {(() => {
                     const currentDay = new Date().getDay();
-                    const isWeekend = currentDay === 0 || currentDay === 5 || currentDay === 6;
-                    const isHappyHourActive = isWeekend ? rates?.isWeekendHappyHourActive : rates?.isWeekdayHappyHourActive;
-                    const happyHourRate = isWeekend ? rates?.weekendHappyHourRate : rates?.weekdayHappyHourRate;
-                    const happyHourStart = isWeekend ? rates?.weekendHappyHourStart : rates?.weekdayHappyHourStart;
-                    const happyHourEnd = isWeekend ? rates?.weekendHappyHourEnd : rates?.weekdayHappyHourEnd;
-                    const dayTypeLabel = isWeekend ? 'Weekends (Fri-Sun)' : 'Weekdays (Mon-Thu)';
+                    const isWeekendToday = currentDay === 0 || currentDay === 5 || currentDay === 6;
+                    
+                    const isWeekdayActive = Boolean(rates?.isWeekdayHappyHourActive);
+                    const isWeekendActive = Boolean(rates?.isWeekendHappyHourActive);
+                    const hasAnyHappyHour = isWeekdayActive || isWeekendActive;
+                    const todayIsHappyHourActive = isWeekendToday ? isWeekendActive : isWeekdayActive;
 
-                    return [
+                    const weekdayRate = rates?.weekdayHappyHourRate || 120;
+                    const weekdayStart = fmt12(rates?.weekdayHappyHourStart || '12:00');
+                    const weekdayEnd = fmt12(rates?.weekdayHappyHourEnd || '15:00');
+
+                    const weekendRate = rates?.weekendHappyHourRate || 150;
+                    const weekendStart = fmt12(rates?.weekendHappyHourStart || '12:00');
+                    const weekendEnd = fmt12(rates?.weekendHappyHourEnd || '15:00');
+
+                    const displayRate = todayIsHappyHourActive
+                      ? (isWeekendToday ? weekendRate : weekdayRate)
+                      : (isWeekdayActive ? weekdayRate : weekendRate);
+
+                    let happyDesc = '';
+                    let scheduleFeatures: string[] = [];
+
+                    if (isWeekdayActive && isWeekendActive) {
+                      if (weekdayRate === weekendRate && weekdayStart === weekendStart && weekdayEnd === weekendEnd) {
+                        happyDesc = `Daily promo rate available every day from ${weekdayStart} to ${weekdayEnd}. Walk-in only.`;
+                        scheduleFeatures = [
+                          `Daily Promo: ${weekdayStart} – ${weekdayEnd}`,
+                          'Walk-in ONLY • First-Come First-Served',
+                          'Discounted table fee during promo window',
+                          'Cue sticks & ball sets included'
+                        ];
+                      } else {
+                        happyDesc = `Special discounted walk-in rate with both weekday and weekend windows active.`;
+                        scheduleFeatures = [
+                          `Mon–Thu: ₱${weekdayRate}/hr (${weekdayStart} – ${weekdayEnd})`,
+                          `Fri–Sun: ₱${weekendRate}/hr (${weekendStart} – ${weekendEnd})`,
+                          'Walk-in ONLY • No reservations',
+                          'Subject to table availability'
+                        ];
+                      }
+                    } else if (isWeekdayActive) {
+                      happyDesc = `Discounted walk-in rate available Mon–Thu from ${weekdayStart} to ${weekdayEnd}.`;
+                      scheduleFeatures = [
+                        `Mon–Thu Promo: ${weekdayStart} – ${weekdayEnd}`,
+                        'Fri–Sun: Regular Rates Apply',
+                        'Walk-in ONLY • No reservations',
+                        'Subject to table availability'
+                      ];
+                    } else if (isWeekendActive) {
+                      happyDesc = `Weekend promo walk-in rate available Fri–Sun from ${weekendStart} to ${weekendEnd}.`;
+                      scheduleFeatures = [
+                        `Fri–Sun Promo: ${weekendStart} – ${weekendEnd}`,
+                        'Mon–Thu: Regular Rates Apply',
+                        'Walk-in ONLY • No reservations',
+                        'Subject to table availability'
+                      ];
+                    }
+
+                    const cards = [
                       { name: 'Standard Play', rate: `₱${effectiveHourly}`, unit: '/ hour', desc: 'Walk-in regular play on any available table.', features: ['First-Come First-Served', 'Any available table', 'Cue sticks included', 'Timer monitored'], badge: null, color: 'neutral' },
                       { name: 'Reserved Table', rate: `₱${effectiveHourly}`, unit: '/ hour', desc: 'Book a specific time slot and table in advance.', features: ['Guaranteed table slot', `${rates?.downPaymentPercent ?? 25}% down payment`, 'Priority seating', 'Advance booking'], badge: 'Popular', color: 'emerald' },
-                      { 
-                        name: 'Happy Hour', 
-                        rate: `₱${happyHourRate || 200}`, 
-                        unit: '/ hour', 
-                        desc: `Discounted walk-in rate today (${dayTypeLabel}) from ${fmt12(happyHourStart || '18:00')}–${fmt12(happyHourEnd || '19:00')}.`, 
-                        features: ['Valid today only', 'Walk-in ONLY - No reservations', 'Discounted standard rate', 'Subject to availability'], 
-                        badge: 'Limited', 
-                        color: 'amber' 
-                      },
-                    ]
-                    .filter(card => card.name !== 'Happy Hour' || isHappyHourActive)
-                    .map(({ name, rate, unit, desc, features, badge, color }) => (
+                    ];
+
+                    if (hasAnyHappyHour) {
+                      cards.push({
+                        name: 'Happy Hour',
+                        rate: `₱${displayRate}`,
+                        unit: '/ hour',
+                        desc: happyDesc,
+                        features: scheduleFeatures,
+                        badge: todayIsHappyHourActive ? 'Active Today' : 'Promo',
+                        color: 'amber'
+                      });
+                    }
+
+                    return cards.map(({ name, rate, unit, desc, features, badge, color }) => (
                       <div key={name} className={`relative bg-neutral-900 border rounded-2xl p-6 flex flex-col ${color === 'emerald' ? 'border-emerald-600/50 shadow-lg shadow-emerald-950/50' : color === 'amber' ? 'border-amber-600/30' : 'border-neutral-800'}`}>
                         {badge && <span className={`absolute -top-3 left-1/2 -translate-x-1/2 text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full ${color === 'emerald' ? 'bg-emerald-600 text-white' : color === 'amber' ? 'bg-amber-600 text-white' : 'bg-neutral-700 text-neutral-400'}`}>{badge}</span>}
                         <p className={`text-xs uppercase tracking-widest font-semibold mb-2 ${color === 'emerald' ? 'text-emerald-400' : color === 'amber' ? 'text-amber-400' : 'text-neutral-500'}`}>{name}</p>

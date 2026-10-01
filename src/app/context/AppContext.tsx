@@ -335,28 +335,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
         if (promoData && promoData.length > 0) {
           setPromoCodes(promoData.map((p: any) => {
-            const rawActive = p.is_active ?? p.isactive ?? p.isActive;
-            const isActive = rawActive !== undefined ? (rawActive === 1 || rawActive === true || rawActive === 'true') : true;
-
-            const rawLimited = p.is_limited_uses ?? p.islimiteduses ?? p.isLimitedUses;
-            const isLimitedUses = rawLimited !== undefined ? (rawLimited === 1 || rawLimited === true || rawLimited === 'true') : false;
-
             const usedInReservations = (resData || []).filter((r: any) => r.promoCode && r.promoCode.trim().toUpperCase() === (p.code || '').trim().toUpperCase()).length;
-            const currentUsage = Math.max(Number(p.usage_count ?? p.usagecount ?? p.usageCount ?? 0), usedInReservations);
-
+            const currentUsage = Math.max(Number(p.usagecount ?? p.usage_count ?? p.usageCount ?? 0), usedInReservations);
             return {
               ...p,
               id: p.id,
-              code: (p.code || '').trim(),
-              discountPercent: Number(p.discount_percent ?? p.discountpercent ?? p.discountPercent ?? 0),
+              code: p.code,
+              discountPercent: Number(p.discountpercent ?? p.discount_percent ?? p.discountPercent ?? 0),
               description: p.description || '',
-              isActive,
-              isLimitedUses,
-              maxUsage: Number(p.max_usage ?? p.maxusage ?? p.maxUsage ?? 100),
+              isActive: p.isactive !== undefined ? (p.isactive === 1 || p.isactive === true || p.isactive === 'true') : (p.isActive === 1 || p.isActive === true || p.isActive === 'true'),
+              maxUsage: Number(p.maxusage ?? p.max_usage ?? p.maxUsage ?? 100),
               usageCount: currentUsage,
-              startDate: (p.start_date || p.startdate || p.startDate) ? new Date(p.start_date || p.startdate || p.startDate) : undefined,
-              expiresAt: (p.expires_at || p.expiresat || p.expiresAt) ? new Date(p.expires_at || p.expiresat || p.expiresAt) : undefined,
-              createdAt: (p.created_at || p.createdat || p.createdAt) ? new Date(p.created_at || p.createdat || p.createdAt) : new Date()
+              startDate: p.startdate || p.start_date || p.startDate ? new Date(p.startdate || p.start_date || p.startDate) : undefined,
+              expiresAt: p.expiresat || p.expires_at || p.expiresAt ? new Date(p.expiresat || p.expires_at || p.expiresAt) : undefined,
+              createdAt: p.createdat || p.created_at || p.createdAt ? new Date(p.createdat || p.created_at || p.createdAt) : new Date()
             };
           }) as PromoCode[]);
         }
@@ -396,12 +388,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
         if (settingsData && settingsData.length > 0) {
           const settingsObj = settingsData.reduce((acc: any, curr: any) => { 
-            const key = curr.keyname || curr.key_name || curr.keyName;
+            const rawKey = curr.keyname || curr.key_name || curr.keyName;
+            if (!rawKey) return acc;
             let val = curr.settingvalue !== undefined ? curr.settingvalue : (curr.setting_value !== undefined ? curr.setting_value : (curr.content_value !== undefined ? curr.content_value : curr.settingValue));
-            if (val === 'true' || val === true) val = true;
-            else if (val === 'false' || val === false) val = false;
+            if (val === 'true' || val === true || val === '1' || val === 1) val = true;
+            else if (val === 'false' || val === false || val === '0' || val === 0) val = false;
             else if (val !== null && val !== undefined && !isNaN(val) && String(val).trim() !== '' && !String(val).includes(':')) val = Number(val);
-            if (key) acc[key] = val; 
+            
+            acc[rawKey] = val;
+            const camelKey = rawKey.replace(/_([a-z])/g, (_: string, letter: string) => letter.toUpperCase());
+            acc[camelKey] = val;
+
+            const lower = rawKey.toLowerCase();
+            if (lower === 'isweekdayhappyhouractive') acc.isWeekdayHappyHourActive = Boolean(val);
+            if (lower === 'weekdayhappyhourrate') acc.weekdayHappyHourRate = Number(val) || 0;
+            if (lower === 'weekdayhappyhourstart') acc.weekdayHappyHourStart = String(val);
+            if (lower === 'weekdayhappyhourend') acc.weekdayHappyHourEnd = String(val);
+            if (lower === 'isweekendhappyhouractive') acc.isWeekendHappyHourActive = Boolean(val);
+            if (lower === 'weekendhappyhourrate') acc.weekendHappyHourRate = Number(val) || 0;
+            if (lower === 'weekendhappyhourstart') acc.weekendHappyHourStart = String(val);
+            if (lower === 'weekendhappyhourend') acc.weekendHappyHourEnd = String(val);
+
             return acc; 
           }, {});
           
@@ -416,6 +423,45 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     };
     fetchSupabaseData();
+
+    // 🟢 Realtime sync for system_settings (reflects local machine changes instantly)
+    const channelName = `settings_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const settingsChannel = supabase.channel(channelName);
+
+    settingsChannel
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'system_settings' }, (payload: any) => {
+        if (payload.new) {
+          const row = payload.new;
+          const rawKey = row.key_name || row.keyname || row.keyName;
+          if (!rawKey) return;
+          let val = row.setting_value !== undefined ? row.setting_value : row.settingvalue;
+          if (val === 'true' || val === true || val === '1' || val === 1) val = true;
+          else if (val === 'false' || val === false || val === '0' || val === 0) val = false;
+          else if (val !== null && val !== undefined && !isNaN(val) && String(val).trim() !== '' && !String(val).includes(':')) val = Number(val);
+
+          const updates: Record<string, any> = { [rawKey]: val };
+          const camelKey = rawKey.replace(/_([a-z])/g, (_: string, letter: string) => letter.toUpperCase());
+          updates[camelKey] = val;
+
+          const lower = rawKey.toLowerCase();
+          if (lower === 'isweekdayhappyhouractive') updates.isWeekdayHappyHourActive = Boolean(val);
+          if (lower === 'weekdayhappyhourrate') updates.weekdayHappyHourRate = Number(val) || 0;
+          if (lower === 'weekdayhappyhourstart') updates.weekdayHappyHourStart = String(val);
+          if (lower === 'weekdayhappyhourend') updates.weekdayHappyHourEnd = String(val);
+          if (lower === 'isweekendhappyhouractive') updates.isWeekendHappyHourActive = Boolean(val);
+          if (lower === 'weekendhappyhourrate') updates.weekendHappyHourRate = Number(val) || 0;
+          if (lower === 'weekendhappyhourstart') updates.weekendHappyHourStart = String(val);
+          if (lower === 'weekendhappyhourend') updates.weekendHappyHourEnd = String(val);
+
+          setRates(prev => ({ ...prev, ...updates }));
+          setReservationTerms(prev => ({ ...prev, ...updates }));
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(settingsChannel);
+    };
   }, []);
 
   useEffect(() => {
@@ -528,15 +574,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const applyPromoCode = (code: string) => {
     const now = new Date();
-    const cleanCode = (code || '').trim().toUpperCase();
-    if (!cleanCode) return null;
     return promoCodes.find(p => {
-      const pCode = (p.code || '').trim().toUpperCase();
-      if (pCode !== cleanCode) return false;
-      if (!p.isActive) return false;
+      if (p.code.toUpperCase() !== code.toUpperCase() || !p.isActive) return false;
       if (p.startDate && new Date(p.startDate) > now) return false; 
       if (p.expiresAt && new Date(p.expiresAt) < now) return false; 
-      if (p.isLimitedUses && p.usageCount >= p.maxUsage) return false; 
+      if (p.isLimitedUses !== false && p.usageCount >= p.maxUsage) return false; 
       return true;
     }) || null;
   };
