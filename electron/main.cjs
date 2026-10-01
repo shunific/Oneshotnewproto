@@ -1,6 +1,12 @@
 const { app, BrowserWindow, globalShortcut, dialog } = require('electron');
 const path = require('path');
 const { fork } = require('child_process'); // 🟢 FIXED: Using standard child_process for native SQLite compatibility
+
+// 🟢 Prevent Windows DWM & Chromium from unloading GPU buffers/textures or flashing white on Alt-Tab
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
+
 let serverProcess;
 
 let mainWindow;
@@ -52,15 +58,22 @@ function createWindow() {
     fullscreen: false,
     alwaysOnTop: false,
     autoHideMenuBar: true,
+    backgroundColor: '#0a0a0a',
+    show: false,
     icon: path.join(__dirname, 'icon.ico'),
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
-      devTools: false
+      devTools: false,
+      backgroundThrottling: false
     }
   });
 
   mainWindow.maximize();
+
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.show();
+  });
 
   if (!app.isPackaged) {
     mainWindow.loadURL('http://localhost:5173');
@@ -85,10 +98,6 @@ function createWindow() {
 
   mainWindow.on('blur', () => {
     globalShortcut.unregisterAll();
-    // 🟢 Automatically minimize when user clicks away from the app
-    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isMinimized()) {
-      mainWindow.minimize();
-    }
   });
 
   mainWindow.on('closed', () => {
