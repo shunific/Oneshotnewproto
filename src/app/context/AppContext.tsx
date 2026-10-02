@@ -335,20 +335,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
         if (promoData && promoData.length > 0) {
           setPromoCodes(promoData.map((p: any) => {
-            const usedInReservations = (resData || []).filter((r: any) => r.promoCode && r.promoCode.trim().toUpperCase() === (p.code || '').trim().toUpperCase()).length;
-            const currentUsage = Math.max(Number(p.usagecount ?? p.usage_count ?? p.usageCount ?? 0), usedInReservations);
+            const codeUpper = (p.code || '').trim().toUpperCase();
+            const usedInReservations = (resData || []).filter((r: any) => r.promoCode && r.promoCode.trim().toUpperCase() === codeUpper).length;
+            const currentUsage = Math.max(Number(p.usage_count ?? p.usagecount ?? p.usageCount ?? 0), usedInReservations);
+            const rawActive = p.is_active ?? p.isActive ?? p.isactive;
+            const isPromoActive = rawActive === 1 || rawActive === true || rawActive === 'true' || rawActive === undefined;
+            const rawLimited = p.is_limited_uses ?? p.isLimitedUses ?? p.islimiteduses;
+            const isLimited = rawLimited === 1 || rawLimited === true || rawLimited === 'true';
+
             return {
               ...p,
               id: p.id,
-              code: p.code,
-              discountPercent: Number(p.discountpercent ?? p.discount_percent ?? p.discountPercent ?? 0),
+              code: codeUpper,
+              discountPercent: Number(p.discount_percent ?? p.discountpercent ?? p.discountPercent ?? 0),
               description: p.description || '',
-              isActive: p.isactive !== undefined ? (p.isactive === 1 || p.isactive === true || p.isactive === 'true') : (p.isActive === 1 || p.isActive === true || p.isActive === 'true'),
-              maxUsage: Number(p.maxusage ?? p.max_usage ?? p.maxUsage ?? 100),
+              isActive: isPromoActive,
+              isLimitedUses: isLimited,
+              maxUsage: Number(p.max_usage ?? p.maxusage ?? p.maxUsage ?? 100),
               usageCount: currentUsage,
-              startDate: p.startdate || p.start_date || p.startDate ? new Date(p.startdate || p.start_date || p.startDate) : undefined,
-              expiresAt: p.expiresat || p.expires_at || p.expiresAt ? new Date(p.expiresat || p.expires_at || p.expiresAt) : undefined,
-              createdAt: p.createdat || p.created_at || p.createdAt ? new Date(p.createdat || p.created_at || p.createdAt) : new Date()
+              startDate: p.start_date || p.startdate || p.startDate ? new Date(p.start_date || p.startdate || p.startDate) : undefined,
+              expiresAt: p.expires_at || p.expiresat || p.expiresAt ? new Date(p.expires_at || p.expiresat || p.expiresAt) : undefined,
+              createdAt: p.created_at || p.createdat || p.createdAt ? new Date(p.created_at || p.createdat || p.createdAt) : new Date()
             };
           }) as PromoCode[]);
         }
@@ -613,12 +620,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const applyPromoCode = (code: string) => {
-    const now = new Date();
+    const cleanCode = (code || '').trim().toUpperCase();
+    const now = new Date().getTime();
     return promoCodes.find(p => {
-      if (p.code.toUpperCase() !== code.toUpperCase() || !p.isActive) return false;
-      if (p.startDate && new Date(p.startDate) > now) return false; 
-      if (p.expiresAt && new Date(p.expiresAt) < now) return false; 
-      if (p.isLimitedUses !== false && p.usageCount >= p.maxUsage) return false; 
+      if (!p.code || p.code.trim().toUpperCase() !== cleanCode) return false;
+      if (!p.isActive) return false;
+      if (p.startDate && new Date(p.startDate).getTime() > now + 86400000) return false; 
+      if (p.expiresAt && new Date(p.expiresAt).getTime() < now) return false; 
+      if (p.isLimitedUses && p.usageCount >= p.maxUsage) return false; 
       return true;
     }) || null;
   };

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
-import { supabase } from '../utils/supabase';
+import { supabase, publicSupabase } from '../utils/supabase';
 import { 
   addMinutes, format, isToday, isBefore, startOfDay, isSameDay, differenceInDays, differenceInMinutes 
 } from 'date-fns';
@@ -414,16 +414,19 @@ export function HomePage() {
   }, [currentUser]);
 
   const handleOAuthLogin = async (provider: 'google' | 'facebook' | 'apple') => {
-    if (provider === 'facebook') {
-      setToastMsg({
-        title: "Facebook Login In Maintenance",
-        desc: "Facebook login is currently undergoing maintenance. Please use Google or Email to sign in securely.",
-        type: "error"
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({ 
+        provider, 
+        options: { 
+          redirectTo: window.location.origin 
+        } 
       });
-      return;
+      if (error) {
+        setToastMsg({ title: `${provider.toUpperCase()} Login`, desc: error.message, type: 'error' });
+      }
+    } catch (err: any) {
+      setToastMsg({ title: `${provider.toUpperCase()} Error`, desc: err.message || 'Login failed', type: 'error' });
     }
-    const { error } = await supabase.auth.signInWithOAuth({ provider, options: { redirectTo: window.location.origin } });
-    if (error) setToastMsg({ title: `${provider} Login Error`, desc: error.message, type: 'error' });
   };
 
   const handleLoginSubmit = async () => {
@@ -712,10 +715,10 @@ export function HomePage() {
         try {
           const fileExt = receiptFile.name.split('.').pop();
           const fileName = `receipt_${Date.now()}_${Math.floor(Math.random() * 1000)}.${fileExt}`;
-          const { error: uploadError } = await supabase.storage.from('oneshot-assets').upload(fileName, receiptFile);
+          const { error: uploadError } = await publicSupabase.storage.from('oneshot-assets').upload(fileName, receiptFile);
           if (!uploadError) {
-            const { data: publicUrlData } = supabase.storage.from('oneshot-assets').getPublicUrl(fileName);
-            finalReceiptUrl = publicUrlData.publicUrl;
+            const { data: publicUrlData } = publicSupabase.storage.from('oneshot-assets').getPublicUrl(fileName);
+            finalReceiptUrl = publicUrlData?.publicUrl || null;
           }
         } catch (uploadErr) {
           console.warn("Storage upload note:", uploadErr);
@@ -726,10 +729,14 @@ export function HomePage() {
       const [hours, minutes] = resForm.timeSlot.split(':').map(Number);
       reservationDate.setHours(hours, minutes, 0, 0);
 
+      const bookingEmail = (resForm.email && resForm.email.trim()) 
+        ? resForm.email.trim() 
+        : (currentUser?.email ? currentUser.email.trim() : undefined);
+
       const newId = await addReservation({
         customerName: resForm.name,
         contactNumber: resForm.phone,
-        email: resForm.email,
+        email: bookingEmail,
         date: reservationDate,
         timeSlot: resForm.timeSlot,
         durationHours: resForm.duration,
@@ -767,7 +774,10 @@ export function HomePage() {
     setReceiptPreview(null);
     setReceiptFile(null);
     setClosureAlert(null); // Reset closure alert
-    if (currentUser) setResTab('track');
+    if (currentUser) {
+      setTrackedReservations(null);
+      setResTab('track');
+    }
   };
 
   const handleCancelBooking = async (id: string, dateString: string, timeSlot: string) => {
@@ -1296,9 +1306,7 @@ export function HomePage() {
                   </button>
                   <button onClick={() => {
                     setResTab('track');
-                    if (currentUser) {
-                      setTrackedReservations(reservations.filter((r: any) => r.email?.toLowerCase() === currentUser.email?.toLowerCase()).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
-                    }
+                    setTrackedReservations(null);
                   }} className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition-all ${resTab === 'track' ? 'bg-neutral-800 text-neutral-200' : 'text-neutral-500 hover:text-neutral-300'}`}>
                     {currentUser ? <BookOpen size={14} /> : <Search size={14} />} 
                     {currentUser ? 'My Bookings' : 'Track Booking'}
