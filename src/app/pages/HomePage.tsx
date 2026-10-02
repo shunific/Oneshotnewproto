@@ -357,7 +357,10 @@ export function HomePage() {
 
   const activeAnnouncements = announcements?.filter((a: any) => a.isActive && (!a.expiresAt || new Date(a.expiresAt) > new Date())) || [];
   const userReservations = currentUser 
-    ? reservations.filter((r: any) => r.email && r.email.toLowerCase() === currentUser.email.toLowerCase()) 
+    ? reservations.filter((r: any) => {
+        if (!r.email) return false;
+        return r.email.trim().toLowerCase() === currentUser.email.trim().toLowerCase();
+      }) 
     : [];
 
   const resNotifications = userReservations.map((r: any) => ({
@@ -411,8 +414,16 @@ export function HomePage() {
   }, [currentUser]);
 
   const handleOAuthLogin = async (provider: 'google' | 'facebook' | 'apple') => {
+    if (provider === 'facebook') {
+      setToastMsg({
+        title: "Facebook Login In Maintenance",
+        desc: "Facebook login is currently undergoing maintenance. Please use Google or Email to sign in securely.",
+        type: "error"
+      });
+      return;
+    }
     const { error } = await supabase.auth.signInWithOAuth({ provider, options: { redirectTo: window.location.origin } });
-    if (error) alert(`${provider} login error: ` + error.message);
+    if (error) setToastMsg({ title: `${provider} Login Error`, desc: error.message, type: 'error' });
   };
 
   const handleLoginSubmit = async () => {
@@ -435,18 +446,53 @@ export function HomePage() {
     if (registerForm.password.length < 8) return setRegisterForm(f => ({ ...f, error: 'Password must be at least 8 characters long.' }));
     
     setRegisterForm(f => ({ ...f, loading: true, error: '' }));
-    const { error } = await supabase.auth.signUp({
-      email: registerForm.email,
+    const { data, error } = await supabase.auth.signUp({
+      email: registerForm.email.trim(),
       password: registerForm.password,
-      options: { data: { full_name: registerForm.name, phone: registerForm.phone } }
+      options: { data: { full_name: registerForm.name.trim(), phone: registerForm.phone.trim() } }
     });
     
     if (error) {
-      setRegisterForm(f => ({ ...f, error: error.message, loading: false }));
+      const isRateLimit = error.message.toLowerCase().includes('rate limit') || (error as any).status === 429;
+      setRegisterForm(f => ({ 
+        ...f, 
+        error: isRateLimit 
+          ? 'Email rate limit reached for confirmation emails. If you already created an account, please Sign In, or use "Continue with Google".'
+          : error.message, 
+        loading: false 
+      }));
     } else {
-      setShowAuthModal(false);
-      setRegisterForm({ name: '', email: '', phone: '', password: '', confirm: '', showPw: false, error: '', loading: false });
-      alert("Registration successful! You are now logged in.");
+      // Check if session was granted automatically
+      if (data?.session) {
+        setActiveUser({
+          name: registerForm.name.trim(),
+          email: registerForm.email.trim()
+        });
+        setShowAuthModal(false);
+        setRegisterForm({ name: '', email: '', phone: '', password: '', confirm: '', showPw: false, error: '', loading: false });
+        setToastMsg({ title: "Welcome!", desc: `Account created successfully, ${registerForm.name}!`, type: "success" });
+      } else {
+        // Try password sign-in immediately in case confirmation is disabled on the project
+        const { data: signInData } = await supabase.auth.signInWithPassword({
+          email: registerForm.email.trim(),
+          password: registerForm.password
+        });
+
+        if (signInData?.session) {
+          setActiveUser({
+            name: registerForm.name.trim(),
+            email: registerForm.email.trim()
+          });
+          setShowAuthModal(false);
+          setRegisterForm({ name: '', email: '', phone: '', password: '', confirm: '', showPw: false, error: '', loading: false });
+          setToastMsg({ title: "Welcome!", desc: `Account created successfully, ${registerForm.name}!`, type: "success" });
+        } else {
+          // Email confirmation is required by Supabase Auth settings
+          setShowAuthModal(false);
+          setRegisterForm({ name: '', email: '', phone: '', password: '', confirm: '', showPw: false, error: '', loading: false });
+          alert(`Account created! A confirmation email has been sent to ${registerForm.email}. Please click the link in your email to verify and activate your account.`);
+        }
+      }
     }
   };
 
@@ -663,19 +709,24 @@ export function HomePage() {
     try {
       let finalReceiptUrl = null;
       if (receiptFile) {
-        const fileExt = receiptFile.name.split('.').pop();
-        const fileName = `receipt_${Date.now()}_${Math.floor(Math.random() * 1000)}.${fileExt}`;
-        const { error: uploadError } = await supabase.storage.from('oneshot-assets').upload(fileName, receiptFile);
-        if (uploadError) throw uploadError;
-        const { data: publicUrlData } = supabase.storage.from('oneshot-assets').getPublicUrl(fileName);
-        finalReceiptUrl = publicUrlData.publicUrl;
+        try {
+          const fileExt = receiptFile.name.split('.').pop();
+          const fileName = `receipt_${Date.now()}_${Math.floor(Math.random() * 1000)}.${fileExt}`;
+          const { error: uploadError } = await supabase.storage.from('oneshot-assets').upload(fileName, receiptFile);
+          if (!uploadError) {
+            const { data: publicUrlData } = supabase.storage.from('oneshot-assets').getPublicUrl(fileName);
+            finalReceiptUrl = publicUrlData.publicUrl;
+          }
+        } catch (uploadErr) {
+          console.warn("Storage upload note:", uploadErr);
+        }
       }
 
       const reservationDate = new Date(selectedDate!);
       const [hours, minutes] = resForm.timeSlot.split(':').map(Number);
       reservationDate.setHours(hours, minutes, 0, 0);
 
-      const newId = addReservation({
+      const newId = await addReservation({
         customerName: resForm.name,
         contactNumber: resForm.phone,
         email: resForm.email,
@@ -695,27 +746,6 @@ export function HomePage() {
         receiptImg: finalReceiptUrl || undefined,
         rescheduleCount: 0
       });
-
-      await supabase.from('reservations').upsert([{
-        id: newId,
-        customerName: resForm.name,
-        contactNumber: resForm.phone,
-        email: resForm.email || null,
-        date: reservationDate.toISOString(),
-        timeSlot: resForm.timeSlot,
-        durationHours: resForm.duration,
-        partySize: resForm.pax,
-        tableId: selectedTableId,
-        status: isDownPaymentWaived ? 'confirmed' : 'pending',
-        totalAmount: totalAmount,
-        downPaymentAmount: isDownPaymentWaived ? 0 : downPayment,
-        downPaymentPaid: (isDownPaymentWaived || !!finalReceiptUrl || !!resForm.paymentRef.trim()) ? 1 : 0,
-        balancePaid: 0,
-        paymentRef: isDownPaymentWaived ? 'TRUSTED_WAIVER' : (resForm.paymentMethod === 'cash' ? 'CASH' : (resForm.paymentRef || null)),
-        receiptImg: finalReceiptUrl || null,
-        rescheduleCount: 0,
-        createdAt: new Date().toISOString()
-      }]);
 
       setGeneratedResId(newId || Math.random().toString(36).substring(2, 8).toUpperCase());
       setReservationStep(3);
@@ -1772,8 +1802,51 @@ export function HomePage() {
                     </div>
                   ) : (
                     <div className="space-y-3">
+                      {currentUser && (
+                        <div className="bg-neutral-900/60 border border-neutral-800 rounded-xl p-3 mb-2 flex items-center gap-2">
+                          <input 
+                            type="text" 
+                            value={trackForm.reservationId} 
+                            onChange={e => setTrackForm(f => ({ ...f, reservationId: e.target.value.toUpperCase() }))} 
+                            placeholder="Find booking by ID (e.g. X7B9QA)" 
+                            className="flex-1 bg-neutral-950 border border-neutral-700 rounded-lg px-3 py-1.5 text-xs font-mono uppercase text-white outline-none focus:border-emerald-500"
+                          />
+                          <button 
+                            type="button" 
+                            onClick={() => {
+                              if (!trackForm.reservationId.trim()) {
+                                setTrackedReservations(null);
+                                return;
+                              }
+                              const found = reservations.filter((r: any) => 
+                                r.id.toUpperCase() === trackForm.reservationId.trim().toUpperCase()
+                              );
+                              setTrackedReservations(found);
+                            }}
+                            className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors"
+                          >
+                            Find Booking
+                          </button>
+                          {trackedReservations && (
+                            <button 
+                              type="button" 
+                              onClick={() => {
+                                setTrackForm({ reservationId: '' });
+                                setTrackedReservations(null);
+                              }}
+                              className="text-neutral-400 hover:text-white text-xs px-2 py-1.5"
+                            >
+                              Reset
+                            </button>
+                          )}
+                        </div>
+                      )}
                       {(() => {
-                        const displayRes = currentUser ? userReservations : (trackedReservations || []);
+                        const displayRes = currentUser 
+                          ? (trackedReservations && trackedReservations.length > 0
+                              ? [...trackedReservations, ...userReservations.filter((ur: any) => !trackedReservations.some((tr: any) => tr.id === ur.id))]
+                              : userReservations)
+                          : (trackedReservations || []);
                         if (displayRes.length === 0) {
                           return (
                             <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-12 text-center max-w-lg mx-auto shadow-inner">

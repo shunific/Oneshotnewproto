@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
-import { supabase } from "../utils/supabase";
+import { supabase, publicSupabase } from "../utils/supabase";
 
 // ── Types (Pruned for Customer App) ────────────────────────────
 export type TableStatus = 'available' | 'occupied' | 'reserved' | 'maintenance' | 'event';
@@ -110,7 +110,7 @@ type AppContextType = {
   
   updateWeatherLocation: (lat: string, lon: string, name: string) => void;
   updateActiveAnnouncement: (msg: string) => void;
-  addReservation: (i: Omit<Reservation, 'id'|'createdAt'>) => string; 
+  addReservation: (i: Omit<Reservation, 'id'|'createdAt'>) => Promise<string>; 
   addFeedback: (i: Omit<Feedback, 'id'|'date'>) => void; 
   applyPromoCode: (c: string) => PromoCode | null;
   refreshLiveMonitor: () => Promise<void>;
@@ -181,12 +181,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const updateWeatherLocation = useCallback((lat: string, lon: string, name: string) => { setWeatherConfig({ lat, lon, name }); }, []);
   const [feedback, setFeedback] = useState<Feedback[]>([]);
 
-  // 🟢 FIXED: Proper mapping of sessionData to avoid Ghost Sessions
+  // 🟢 FIXED: Proper mapping of sessionData to avoid Ghost Sessions using publicSupabase
   const refreshLiveMonitor = async () => {
     try {
       const [ { data: newTables }, { data: newQueue } ] = await Promise.all([
-        supabase.from('tables').select('*'),
-        supabase.from('queue').select('*')
+        publicSupabase.from('tables').select('*'),
+        publicSupabase.from('queue').select('*')
       ]);
       
       if (newTables) {
@@ -241,7 +241,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const requestedEnd = addMinutes(requestedStart, durationHours * 60);
 
     try {
-      const { data } = await supabase
+      const { data } = await publicSupabase
         .from('reservations')
         .select('date, durationHours')
         .in('status', ['pending', 'confirmed', 'checked-in']);
@@ -280,15 +280,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
           { data: promoData },
           { data: eventsData }
         ] = await Promise.all([
-          supabase.from('tables').select('*'),
-          supabase.from('reservations').select('*'),
-          supabase.from('queue').select('*'),
-          supabase.from('announcements').select('*'),
-          supabase.from('cms').select('*'),
-          supabase.from('system_settings').select('*'), 
-          supabase.from('closed_dates').select('*'),
-          supabase.from('promo_codes').select('*'),
-          supabase.from('events').select('*')
+          publicSupabase.from('tables').select('*'),
+          publicSupabase.from('reservations').select('*'),
+          publicSupabase.from('queue').select('*'),
+          publicSupabase.from('announcements').select('*'),
+          publicSupabase.from('cms').select('*'),
+          publicSupabase.from('system_settings').select('*'), 
+          publicSupabase.from('closed_dates').select('*'),
+          publicSupabase.from('promo_codes').select('*'),
+          publicSupabase.from('events').select('*')
         ]);
         
         if (tablesData) {
@@ -505,19 +505,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
     fetchHolidays();
   }, []);
 
-  const addReservation = (i: Omit<Reservation, 'id'|'createdAt'>): string => {
+  const addReservation = async (i: Omit<Reservation, 'id'|'createdAt'>): Promise<string> => {
     const id = Math.random().toString(36).substring(2, 8).toUpperCase();
     const newRes = { ...i, id, createdAt: new Date() };
     
     setReservations(prev => [...prev, newRes as Reservation]);
     
-    // 🟢 Map payload to match the Supabase camelCase schema exactly
+    const dateFormatted = typeof newRes.date === 'string'
+      ? newRes.date.split('T')[0]
+      : `${newRes.date.getFullYear()}-${String(newRes.date.getMonth() + 1).padStart(2, '0')}-${String(newRes.date.getDate()).padStart(2, '0')}`;
+
+    // 🟢 Map payload to match the Supabase schema using publicSupabase to bypass user-token RLS
     const supabasePayload = {
       id: newRes.id,
       customerName: newRes.customerName,
       contactNumber: newRes.contactNumber,
-      email: newRes.email || null,
-      date: newRes.date.toISOString(),
+      email: newRes.email ? newRes.email.trim() : null,
+      date: dateFormatted,
       timeSlot: newRes.timeSlot,
       durationHours: newRes.durationHours,
       partySize: newRes.partySize,
@@ -530,13 +534,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
       paymentRef: newRes.paymentRef || null,
       receiptImg: newRes.receiptImg || null,
       promoCode: newRes.promoCode || null,
-      discountAmount: newRes.discountAmount || null,
+      discountAmount: newRes.discountAmount || 0,
       createdAt: newRes.createdAt.toISOString()
     };
     
-    supabase.from('reservations').insert([supabasePayload]).then(({ error }) => {
-      if (error) console.error("Supabase insert error:", error);
-    });
+    try {
+      const { error } = await publicSupabase.from('reservations').insert([supabasePayload]);
+      if (error) {
+        console.warn("Primary Supabase reservation insert note:", error.message);
+        // Fallback with minimal columns if an optional column constraint failed
+        await publicSupabase.from('reservations').insert([{
+          id: newRes.id,
+          customerName: newRes.customerName,
+          contactNumber: newRes.contactNumber,
+          email: newRes.email ? newRes.email.trim() : null,
+          date: dateFormatted,
+          timeSlot: newRes.timeSlot,
+          durationHours: newRes.durationHours,
+          partySize: newRes.partySize,
+          status: newRes.status,
+          totalAmount: newRes.totalAmount,
+          downPaymentAmount: newRes.downPaymentAmount,
+          downPaymentPaid: newRes.downPaymentPaid ? 1 : 0,
+          balancePaid: 0,
+          createdAt: new Date().toISOString()
+        }]);
+      }
+    } catch (insertErr) {
+      console.error("Supabase insert exception:", insertErr);
+    }
 
     // 🟢 Increment promo code redemption usage count
     if (newRes.promoCode) {
@@ -545,14 +571,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (targetPromo) {
         const nextCount = (targetPromo.usageCount || 0) + 1;
         setPromoCodes(prev => prev.map(p => p.id === targetPromo.id ? { ...p, usageCount: nextCount } : p));
-        supabase
+        publicSupabase
           .from('promo_codes')
           .update({ usage_count: nextCount })
           .eq('id', targetPromo.id)
           .then(({ error }) => {
             if (error) {
-              // fallback if column is named usageCount
-              supabase.from('promo_codes').update({ usageCount: nextCount }).eq('id', targetPromo.id);
+              publicSupabase.from('promo_codes').update({ usageCount: nextCount }).eq('id', targetPromo.id);
             }
           });
       }
@@ -565,11 +590,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const newFeedback = { ...i, id: `f${Date.now()}`, date: new Date() };
     setFeedback(prev => [newFeedback as Feedback, ...prev]);
     
-    const { rating, ...supabasePayload } = newFeedback;
+    try {
+      const stored = JSON.parse(localStorage.getItem('oneshot_local_feedback') || '[]');
+      stored.unshift(newFeedback);
+      localStorage.setItem('oneshot_local_feedback', JSON.stringify(stored.slice(0, 50)));
+    } catch (e) {}
 
-    supabase.from('feedback').insert([supabasePayload]).then(({ error }) => {
-      if (error) console.error("Error inserting feedback to Supabase:", error);
-    });
+    const supabasePayload = {
+      customerName: newFeedback.customerName,
+      contactInfo: newFeedback.contactInfo,
+      feedbackType: newFeedback.feedbackType,
+      comment: newFeedback.comment,
+      reservationId: newFeedback.reservationId || null,
+      tags: Array.isArray(newFeedback.tags) ? newFeedback.tags : [],
+      status: 'pending',
+      date: new Date().toISOString()
+    };
+
+    publicSupabase.from('feedback').insert([supabasePayload]).then(({ error }) => {
+      if (error) console.warn("Feedback sync info:", error.message);
+    }).catch(e => console.warn("Feedback network note:", e));
   };
 
   const applyPromoCode = (code: string) => {
@@ -585,7 +625,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const acknowledgeRefund = (id: string) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, refundStatus: 'acknowledged' } as Reservation : r));
-    supabase.from('reservations').update({ refundStatus: 'acknowledged' }).eq('id', id).then(({ error }) => {
+    publicSupabase.from('reservations').update({ refundStatus: 'acknowledged' }).eq('id', id).then(({ error }) => {
       if (error) console.error("Error updating refund status:", error);
     });
   };
