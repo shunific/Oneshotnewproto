@@ -561,7 +561,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const toTable = prev.find(t => t.id === toTableId);
       if (!fromTable || !toTable || !fromTable.session) return prev;
 
-      const sessionToMove = { ...fromTable.session };
+      const sessionToMove = { 
+        ...fromTable.session,
+        tableId: toTable.id,
+        tableName: toTable.name
+      };
 
       const newTables = prev.map(t => {
         if (t.id === fromTableId) return { ...t, status: 'available' as TableStatus, session: undefined };
@@ -570,10 +574,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
 
       syncToDB(`/api/tables/${fromTableId}`, 'PUT', { status: 'available', session: null }, `Freed for migration`).then(runCloudBackup).catch(()=>{});
-      supabase.from('tables').update({ status: 'available', sessionData: null, isActive: 1 }).eq('id', fromTableId).then();
+      supabase.from('tables').update({ status: 'available', sessionData: null, sessiondata: null, isActive: 1 }).eq('id', fromTableId).then();
 
       syncToDB(`/api/tables/${toTableId}`, 'PUT', { status: 'occupied', session: sessionToMove }, `Occupied from migration`).then(runCloudBackup).catch(()=>{});
-      supabase.from('tables').update({ status: 'occupied', sessionData: JSON.stringify(sessionToMove), isActive: 1 }).eq('id', toTableId).then();
+      supabase.from('tables').update({ status: 'occupied', sessionData: JSON.stringify(sessionToMove), sessiondata: JSON.stringify(sessionToMove), isActive: 1 }).eq('id', toTableId).then();
 
       addActivity('admin_action', `Migrated session (${sessionToMove.customerName}) from ${fromTable.name} to ${toTable.name}`);
       return newTables;
@@ -960,7 +964,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const cancelReservation = (id: string, reason: string) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, status: 'cancelled', cancellationReason: reason } : r));
     syncToDB(`/api/reservations/${id}`, 'PUT', { status: 'cancelled', cancellationReason: reason }, `Reservation cancelled`).then(runCloudBackup).catch(()=>{});
-    supabase.from('reservations').update({ status: 'cancelled', cancellationReason: reason }).eq('id', id).then();
+    supabase.from('reservations').update({ 
+      status: 'cancelled', 
+      cancellation_reason: reason,
+      cancellationreason: reason
+    }).eq('id', id).then(({ error }) => {
+      if (error) console.error("Supabase cancel error:", error);
+    });
     addActivity('reservation_cancelled', `Reservation ${id} was cancelled. Reason: ${reason}`); 
   };
 
@@ -1003,7 +1013,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (u.partySize) dbUpdates.partySize = u.partySize;
     if (u.status) dbUpdates.status = u.status;
     if (u.tableId !== undefined) dbUpdates.tableId = u.tableId; 
-    if (u.cancellationReason !== undefined) dbUpdates.cancellationReason = u.cancellationReason;
+    if (u.cancellationReason !== undefined) {
+      dbUpdates.cancellation_reason = u.cancellationReason;
+      dbUpdates.cancellationreason = u.cancellationReason;
+    }
     if (u.downPaymentPaid !== undefined) dbUpdates.downPaymentPaid = u.downPaymentPaid ? 1 : 0;
     if (u.balancePaid !== undefined) dbUpdates.balancePaid = u.balancePaid ? 1 : 0;
     

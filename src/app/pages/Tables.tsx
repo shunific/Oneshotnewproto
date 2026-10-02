@@ -472,27 +472,30 @@ export function Tables() {
     if (typeof window !== 'undefined') {
       const assignCustomer = sessionStorage.getItem('assignCustomer');
       const assignTableId = sessionStorage.getItem('assignTableId');
-      if (assignCustomer && assignTableId) {
+      if (assignCustomer) {
         const customer = JSON.parse(assignCustomer);
-        setAssigningTableId(assignTableId);
-        setSelectedCustomer(customer as any);
-        setCustomerName(customer.name);
-        setPaymentOption('payNow');
-        
-        if (customer.kind === 'reservation') {
-          const mins = (customer as any).durationHours * 60;
-          setDurationMinutes(mins);
-          setAmountPaid(((mins / 60) * effectiveHourly).toFixed(2));
-        } else {
-          setDurationMinutes(60);
-          setAmountPaid(((60 / 60) * effectiveHourly).toFixed(2));
+        const targetTableId = assignTableId || tables.find((t: any) => t.status === 'available' && t.isActive)?.id;
+        if (targetTableId) {
+          setAssigningTableId(targetTableId);
+          setSelectedCustomer(customer as any);
+          setCustomerName(customer.name);
+          setPaymentOption('payNow');
+          
+          if (customer.kind === 'reservation') {
+            const mins = (customer as any).durationHours * 60;
+            setDurationMinutes(mins);
+            setAmountPaid(((mins / 60) * effectiveHourly).toFixed(2));
+          } else {
+            setDurationMinutes(60);
+            setAmountPaid(((60 / 60) * effectiveHourly).toFixed(2));
+          }
+          
+          sessionStorage.removeItem('assignCustomer');
+          sessionStorage.removeItem('assignTableId');
         }
-        
-        sessionStorage.removeItem('assignCustomer');
-        sessionStorage.removeItem('assignTableId');
       }
     }
-  }, [effectiveHourly]);
+  }, [effectiveHourly, tables]);
 
   const handleAssign = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1000,21 +1003,19 @@ export function Tables() {
             <div>
               <div className="flex items-center justify-between mb-3">
                 <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold flex items-center gap-1.5"><ShoppingCart size={11} /> Available Menu</p>
-                {isAdmin && (
-                  <div className="flex items-center gap-2">
-                    {isEditingMenu && (
-                      <button onClick={() => setShowArchivedMenu(!showArchivedMenu)} className={`p-1.5 rounded transition-colors ${showArchivedMenu ? 'bg-neutral-700 text-white' : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-400'}`} title="View Archive History">
-                        <History size={12} />
-                      </button>
-                    )}
-                    <button 
-                      onClick={() => { setIsEditingMenu(!isEditingMenu); setEditingItem(null); setShowArchivedMenu(false); setNewItemForm({ name: '', category: 'Drinks', price: 0, stock: 0 }); }} 
-                      className={`text-[10px] font-bold px-2 py-1 rounded transition-colors ${isEditingMenu ? 'bg-amber-600 hover:bg-amber-500 text-white' : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-400'}`}
-                    >
-                      {isEditingMenu ? 'Done Editing' : 'Edit Menu'}
+                <div className="flex items-center gap-2">
+                  {isEditingMenu && (
+                    <button onClick={() => setShowArchivedMenu(!showArchivedMenu)} className={`p-1.5 rounded transition-colors ${showArchivedMenu ? 'bg-neutral-700 text-white' : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-400'}`} title="View Archive History">
+                      <History size={12} />
                     </button>
-                  </div>
-                )}
+                  )}
+                  <button 
+                    onClick={() => { setIsEditingMenu(!isEditingMenu); setEditingItem(null); setShowArchivedMenu(false); setNewItemForm({ name: '', category: 'Drinks', price: 0, stock: 0 }); }} 
+                    className={`text-[10px] font-bold px-2 py-1 rounded transition-colors ${isEditingMenu ? 'bg-amber-600 hover:bg-amber-500 text-white' : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-400'}`}
+                  >
+                    {isEditingMenu ? 'Done Editing' : 'Edit Menu'}
+                  </button>
+                </div>
               </div>
 
               {isEditingMenu ? (

@@ -383,7 +383,22 @@ export function Queue() {
                   </div>
                   <div className="flex items-center gap-2 flex-none">
                     <button
-                      onClick={() => navigate('/staff/tables')}
+                      onClick={() => {
+                        const targetTable = (r.tableId && tables.find((t: any) => t.id === r.tableId && t.status === 'available' && t.isActive)) 
+                          ? r.tableId 
+                          : availableTables[0]?.id;
+                        sessionStorage.setItem('assignCustomer', JSON.stringify({
+                          kind: 'reservation',
+                          id: r.id,
+                          name: r.customerName,
+                          partySize: r.partySize,
+                          contact: r.contactNumber,
+                          durationHours: r.durationHours,
+                          timeSlot: r.timeSlot
+                        }));
+                        if (targetTable) sessionStorage.setItem('assignTableId', targetTable);
+                        navigate('/staff/tables');
+                      }}
                       className="flex items-center gap-1.5 px-3 py-2 bg-sky-600/20 hover:bg-sky-600/30 text-sky-400 text-xs font-semibold rounded-lg border border-sky-700/30 transition-colors"
                     >
                       Assign Table
@@ -541,7 +556,19 @@ export function Queue() {
                     <p className="text-xs text-neutral-500 truncate">{item.partySize} pax · {item.contactNumber}</p>
                   </div>
                   <button
-                    onClick={() => navigate('/staff/tables')}
+                    onClick={() => {
+                      const targetTable = availableTables[0]?.id;
+                      sessionStorage.setItem('assignCustomer', JSON.stringify({
+                        kind: 'queue',
+                        id: item.id,
+                        name: item.customerName,
+                        partySize: item.partySize,
+                        contact: item.contactNumber,
+                        notes: item.notes
+                      }));
+                      if (targetTable) sessionStorage.setItem('assignTableId', targetTable);
+                      navigate('/staff/tables');
+                    }}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 text-xs font-semibold rounded-lg border border-blue-700/30 transition-colors flex-none"
                   >
                     Assign Table
