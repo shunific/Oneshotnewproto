@@ -8,18 +8,19 @@ const ROLES: { value: StaffUser['role']; label: string; color: string; icon: Rea
 ];
 
 type FormState = {
-  username: string; password: string; fullName: string;
+  username: string; password: string; confirmPassword: string; fullName: string;
   role: StaffUser['role']; phone: string; isAdmin: boolean;
 };
 
-const blankForm: FormState = { username: '', password: '', fullName: '', role: 'manager', phone: '', isAdmin: false };
+const blankForm: FormState = { username: '', password: '', confirmPassword: '', fullName: '', role: 'manager', phone: '', isAdmin: false };
 
 export function AdminUsers() {
   const { staffUsers, activities, addStaffUser, updateStaffUser, resetStaffUserPassword, hashPassword, staffProfile } = useAppContext() as any;
   
   const [showForm, setShowForm]     = useState(false);
   const [form, setForm]             = useState<FormState>(blankForm);
-  const [showPw, setShowPw]         = useState(false);
+  const [showPw, setShowPw]                 = useState(false);
+  const [showConfirmPw, setShowConfirmPw]   = useState(false);
   const [resetMsg, setResetMsg]     = useState<string | null>(null);
   
   const [viewTab, setViewTab]       = useState<'active' | 'archived'>('active');
@@ -43,12 +44,12 @@ export function AdminUsers() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const openAdd = () => { setForm(blankForm); setShowPw(false); setShowForm(true); };
+  const openAdd = () => { setForm(blankForm); setShowPw(false); setShowConfirmPw(false); setShowForm(true); };
 
  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!form.username || !form.fullName || !form.password) {
+    if (!form.username || !form.fullName || !form.password || !form.confirmPassword) {
       alert("Please fill all required fields.");
       return;
     }
@@ -60,6 +61,11 @@ export function AdminUsers() {
 
     if (form.password.length < 8) {
       alert("Password must be at least 8 characters long.");
+      return;
+    }
+
+    if (form.password !== form.confirmPassword) {
+      alert("Passwords do not match. Please retype the password to confirm.");
       return;
     }
     
@@ -451,28 +457,42 @@ export function AdminUsers() {
               </div>
               
               <div>
-                <label className="text-xs text-neutral-400 mb-1.5 block font-medium">Password *</label>
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="text-xs text-neutral-400 block font-medium">Confirm Password *</label>
+                  {form.confirmPassword && (
+                    <span className={`text-[10px] font-bold ${form.password === form.confirmPassword ? "text-emerald-400" : "text-rose-400"}`}>
+                      {form.password === form.confirmPassword ? "✓ Passwords match" : "✗ Passwords do not match"}
+                    </span>
+                  )}
+                </div>
                 <div className="relative">
                   <input
-                    type={showPw ? 'text' : 'password'}
+                    type={showConfirmPw ? 'text' : 'password'}
+                    minLength={8}
                     maxLength={50}
-                    value={form.password}
-                    onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
+                    value={form.confirmPassword}
+                    onChange={e => setForm(f => ({ ...f, confirmPassword: e.target.value }))}
                     required
-                    className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 pr-10 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-amber-600/50 transition-colors"
-                    placeholder="Set starting password (max 50 chars)"
+                    className={`w-full bg-neutral-900 border rounded-xl px-3 pr-10 py-2.5 text-sm text-neutral-200 focus:outline-none transition-colors ${
+                      form.confirmPassword
+                        ? form.password === form.confirmPassword
+                          ? "border-emerald-500/50 focus:border-emerald-500"
+                          : "border-rose-500/50 focus:border-rose-500"
+                        : "border-neutral-800 focus:border-amber-600/50"
+                    }`}
+                    placeholder="Retype password to confirm"
                   />
                   <button
                     type="button"
                     tabIndex={-1}
-                    onClick={() => setShowPw(v => !v)}
+                    onClick={() => setShowConfirmPw(v => !v)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300"
                   >
-                    {showPw ? <EyeOff size={14} /> : <Eye size={14} />}
+                    {showConfirmPw ? <EyeOff size={14} /> : <Eye size={14} />}
                   </button>
                 </div>
                 <div className="flex justify-end mt-1">
-                  <span className="text-[10px] text-neutral-500 font-mono">{form.password.length}/50</span>
+                  <span className="text-[10px] text-neutral-500 font-mono">{form.confirmPassword.length}/50</span>
                 </div>
               </div>
 
