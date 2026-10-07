@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { useAppContext, HOURLY_RATE, DOWN_PAYMENT_RATE } from '../context/AppContext';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
+import { ReservationStatusBadge } from '../components/ReservationStatusBadge';
 
 import logoImg from 'figma:asset/40eb82831843e17a3c48a360fd80f0aaaa58ddc8.png';
 import heroImg1 from 'figma:asset/15fb8dcab89448c8f2ad20fb9946631b1c246968.png';
@@ -136,8 +137,8 @@ export function HomePage() {
   const [dynamicWaitTime, setDynamicWaitTime] = useState<string>('Calculating...');
 
   useEffect(() => {
-    const activeTables = (tables || []).filter((t: any) => t.status === 'occupied' && t.session);
-    const freeTables = (tables || []).filter((t: any) => t.status === 'available').length;
+    const activeTables = (tables || []).filter((t: any) => (t.isActive === true || t.isActive === 1 || t.isactive === 1 || t.isactive === true) && t.status === 'occupied' && t.session);
+    const freeTables = (tables || []).filter((t: any) => (t.isActive === true || t.isActive === 1 || t.isactive === 1 || t.isactive === true) && t.status === 'available').length;
     const waitingCount = (queue || []).filter((q: any) => q.status === 'waiting').length;
 
     if (freeTables > waitingCount) {
@@ -1129,17 +1130,24 @@ export function HomePage() {
 
               <div className="bg-neutral-900 border-y border-neutral-800">
                 <div className="max-w-4xl mx-auto grid grid-cols-2 md:grid-cols-4 divide-x divide-neutral-800">
-                  {[
-                    { value: String(tables?.length || 0), label: 'Billiard Tables', color: 'text-emerald-400' },
-                    { value: `₱${effectiveHourly}`, label: 'Per Hour', color: 'text-amber-400' },
-                    { value: getOpenHoursDisplay(), label: 'Hours Open Daily', color: 'text-sky-400' },
-                    { value: 'A+', label: 'Facility Grade', color: 'text-rose-400' },
-                  ].map(({ value, label, color }) => (
-                    <div key={label} className="p-6 text-center">
-                      <p className={`text-3xl font-black ${color} mb-1`}>{value}</p>
-                      <p className="text-xs text-neutral-500 font-medium uppercase tracking-wider">{label}</p>
-                    </div>
-                  ))}
+                  {(() => {
+                    const openAvailableTableCount = (tables || []).filter((t: any) => {
+                      const isTableActive = t.isActive === true || t.isActive === 1 || t.isactive === 1 || t.isactive === true;
+                      return isTableActive && t.status === 'available';
+                    }).length;
+
+                    return [
+                      { value: String(openAvailableTableCount), label: 'Available Tables', color: 'text-emerald-400' },
+                      { value: `₱${effectiveHourly}`, label: 'Per Hour', color: 'text-amber-400' },
+                      { value: getOpenHoursDisplay(), label: 'Hours Open Daily', color: 'text-sky-400' },
+                      { value: 'A+', label: 'Facility Grade', color: 'text-rose-400' },
+                    ].map(({ value, label, color }) => (
+                      <div key={label} className="p-6 text-center">
+                        <p className={`text-3xl font-black ${color} mb-1`}>{value}</p>
+                        <p className="text-xs text-neutral-500 font-medium uppercase tracking-wider">{label}</p>
+                      </div>
+                    ));
+                  })()}
                 </div>
               </div>
 
@@ -1881,15 +1889,7 @@ export function HomePage() {
                                 <div>
                                   <div className="flex items-center gap-2 mb-1">
                                     <span className="text-xs font-black text-white font-mono">{r.id}</span>
-                                    <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-wider border ${
-                                      r.status === 'pending-reschedule' 
-                                        ? 'bg-violet-900/40 text-violet-400 border-violet-700/50' 
-                                        : r.status === 'pending-refund'
-                                        ? 'bg-rose-900/40 text-rose-400 border-rose-700/50'
-                                        : 'bg-neutral-800 text-emerald-400 border-neutral-700'
-                                    }`}>
-                                      {r.status === 'pending-reschedule' ? 'PENDING RESCHEDULE' : r.status === 'pending-refund' ? 'PENDING REFUND' : r.status}
-                                    </span>
+                                    <ReservationStatusBadge status={r.status} />
                                   </div>
                                   <p className="text-sm font-semibold text-neutral-200">{format(new Date(r.date), 'MMM d, yyyy')} · {r.timeSlot} ({r.durationHours}h)</p>
                                   <p className="text-xs text-neutral-500">
@@ -2247,7 +2247,13 @@ export function HomePage() {
                 </div>
 
                 <div className="border-y border-dashed border-neutral-300 py-3 space-y-1.5 text-[11px]">
-                  <div className="flex justify-between"><span>Booking ID:</span><span className="font-bold">{viewingReceipt.id}</span></div>
+                  <div className="flex justify-between items-center">
+                    <span>Booking ID:</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-bold">{viewingReceipt.id}</span>
+                      <ReservationStatusBadge status={viewingReceipt.status} />
+                    </div>
+                  </div>
                   <div className="flex justify-between"><span>Customer:</span><span>{viewingReceipt.customerName}</span></div>
                   <div className="flex justify-between"><span>Date:</span><span>{format(new Date(viewingReceipt.date), 'MM/dd/yyyy')}</span></div>
                   <div className="flex justify-between"><span>Time Slot:</span><span>{viewingReceipt.timeSlot} ({viewingReceipt.durationHours}h)</span></div>

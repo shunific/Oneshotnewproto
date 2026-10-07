@@ -294,11 +294,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
         ]);
         
         if (tablesData) {
-          setTables(tablesData.map((t: any) => ({
-            ...t,
-            session: t.sessionData ? (typeof t.sessionData === 'string' ? JSON.parse(t.sessionData) : t.sessionData) : undefined,
-            isActive: t.isActive === 1 || t.isActive === true
-          })) as Table[]);
+          setTables(tablesData.map((t: any) => {
+            const rawActive = t.isActive ?? t.is_active ?? t.isactive;
+            const isTableActive = rawActive === 1 || rawActive === true || rawActive === 'true' || (rawActive === undefined ? true : false);
+            return {
+              ...t,
+              session: t.sessionData ? (typeof t.sessionData === 'string' ? JSON.parse(t.sessionData) : t.sessionData) : undefined,
+              isActive: isTableActive
+            };
+          }) as Table[]);
         }
         if (resData) setReservations(resData as Reservation[]);
         if (queueData) {
