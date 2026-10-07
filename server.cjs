@@ -428,7 +428,37 @@ app.get('/api/events', (req, res) => {
   });
 });
 
-app.get('/api/feedback', (req, res) => {
+app.get('/api/feedback', async (req, res) => {
+  try {
+    const { data: cloudFeedback, error: cloudErr } = await supabase.from('feedback').select('*');
+    if (!cloudErr && Array.isArray(cloudFeedback) && cloudFeedback.length > 0) {
+      db.serialize(() => {
+        const stmt = db.prepare(`
+          INSERT OR REPLACE INTO feedback (id, customerName, contactInfo, feedbackType, comment, reservationId, tags, date, status, notes)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        cloudFeedback.forEach(f => {
+          const tagsStr = Array.isArray(f.tags) ? JSON.stringify(f.tags) : (typeof f.tags === 'string' ? f.tags : '[]');
+          stmt.run([
+            f.id,
+            f.customerName || f.customer_name || 'Guest',
+            f.contactInfo || f.contact_info || '',
+            f.feedbackType || f.feedback_type || 'suggestion',
+            f.comment || '',
+            f.reservationId || f.reservation_id || null,
+            tagsStr,
+            f.date || new Date().toISOString(),
+            f.status || 'pending',
+            f.notes || null
+          ]);
+        });
+        stmt.finalize();
+      });
+    }
+  } catch (syncEx) {
+    // Non-blocking fallback to SQLite
+  }
+
   db.all(`SELECT * FROM feedback ORDER BY date DESC`, [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json(rows.map(f => ({ ...f, tags: safeParseJSON(f.tags, []) })));

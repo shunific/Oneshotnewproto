@@ -278,7 +278,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           { data: settingsData }, 
           { data: closedDatesData },
           { data: promoData },
-          { data: eventsData }
+          { data: eventsData },
+          { data: feedbackData }
         ] = await Promise.all([
           publicSupabase.from('tables').select('*'),
           publicSupabase.from('reservations').select('*'),
@@ -288,7 +289,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           publicSupabase.from('system_settings').select('*'), 
           publicSupabase.from('closed_dates').select('*'),
           publicSupabase.from('promo_codes').select('*'),
-          publicSupabase.from('events').select('*')
+          publicSupabase.from('events').select('*'),
+          publicSupabase.from('feedback').select('*')
         ]);
         
         if (tablesData) {
@@ -421,6 +423,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
           
           setRates(prev => ({ ...prev, ...settingsObj }));
           setReservationTerms(prev => ({ ...prev, ...settingsObj }));
+        }
+
+        if (feedbackData && feedbackData.length > 0) {
+          setFeedback(feedbackData.map((f: any) => ({
+            id: f.id,
+            customerName: f.customerName || f.customer_name || 'Guest',
+            contactInfo: f.contactInfo || f.contact_info || '',
+            rating: Number(f.rating || 0),
+            feedbackType: f.feedbackType || f.feedback_type || 'suggestion',
+            comment: f.comment || '',
+            date: f.date ? new Date(f.date) : new Date(),
+            reservationId: f.reservationId || f.reservation_id,
+            tags: Array.isArray(f.tags) ? f.tags : (typeof f.tags === 'string' ? JSON.parse(f.tags || '[]') : [])
+          })) as Feedback[]);
         }
 
       } catch (err) {
@@ -604,9 +620,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } catch (e) {}
 
     const supabasePayload = {
+      id: newFeedback.id,
       customerName: newFeedback.customerName,
-      contactInfo: newFeedback.contactInfo,
-      feedbackType: newFeedback.feedbackType,
+      contactInfo: newFeedback.contactInfo || '',
+      feedbackType: newFeedback.feedbackType || 'suggestion',
       comment: newFeedback.comment,
       reservationId: newFeedback.reservationId || null,
       tags: Array.isArray(newFeedback.tags) ? newFeedback.tags : [],
@@ -614,9 +631,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
       date: new Date().toISOString()
     };
 
+    // 1. Sync to Cloud Supabase
     publicSupabase.from('feedback').insert([supabasePayload]).then(({ error }) => {
-      if (error) console.warn("Feedback sync info:", error.message);
+      if (error) console.warn("Feedback cloud sync info:", error.message);
     }).catch(e => console.warn("Feedback network note:", e));
+
+    // 2. Direct sync to local POS / machine edge server if available
+    try {
+      fetch('/api/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(supabasePayload)
+      }).catch(() => {});
+    } catch (e) {}
   };
 
   const applyPromoCode = (code: string) => {
