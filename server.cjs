@@ -42,6 +42,20 @@ const safeParseJSON = (str, fallback = null) => {
   }
 };
 
+// 🟢 SAFE DATE SANITIZER: Handles comma-separated dates, ranges, and ISO dates for PostgreSQL
+const sanitizeDate = (val) => {
+  if (!val) return null;
+  const str = String(val).trim();
+  if (!str) return null;
+  // If comma-separated dates (e.g. "2026-10-12,2026-10-13"), take the first date
+  const first = str.includes(',') ? str.split(',')[0].trim() : str;
+  const clean = first.split(' ')[0].trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) return clean;
+  const parsed = new Date(clean);
+  if (!isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
+  return null;
+};
+
 const sqlite3 = sqlite3Pkg.verbose();
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -656,7 +670,7 @@ if (error) {
         customerName: r.customerName || r.customer_name || 'Guest',
         contactNumber: r.contactNumber || r.contact_number || '',
         email: r.email || null,
-        date: r.date || r.reservation_date,
+        date: sanitizeDate(r.date || r.reservation_date),
         timeSlot: r.timeSlot || r.time_slot || '',
         durationHours: r.durationHours || r.duration_hours || 1,
         partySize: r.partySize || r.party_size || 1,
@@ -692,7 +706,7 @@ if (error) {
       syncTable('events', 'events', r => ({ 
         id: r.id, 
         title: r.title, 
-        date: r.date || null, 
+        date: sanitizeDate(r.date), 
         type: r.type, 
         description: r.description || '', 
         duration: r.duration || 'Whole Day', 
@@ -719,7 +733,7 @@ if (error) {
         expiresat: r.expiresAt || null, 
         createdat: r.createdAt || new Date().toISOString() 
       }), 'id'),
-      syncTable('closed_dates', 'closed_dates', r => ({ id: r.id, closed_date: r.closed_date || null, type: r.type, day_of_week: r.day_of_week, reason: r.reason, is_full_day: !!r.is_full_day, open_time: r.open_time, close_time: r.close_time }), 'id'),
+      syncTable('closed_dates', 'closed_dates', r => ({ id: r.id, closed_date: sanitizeDate(r.closed_date), type: r.type, day_of_week: r.day_of_week, reason: r.reason, is_full_day: !!r.is_full_day, open_time: r.open_time, close_time: r.close_time }), 'id'),
       syncTable('inventory', 'inventory', r => ({ 
         id: r.id, 
         name: r.name, 
