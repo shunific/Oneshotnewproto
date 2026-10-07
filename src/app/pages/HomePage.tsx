@@ -11,7 +11,7 @@ import {
   Calendar, CheckCircle, ArrowRight, Users, ChevronDown,
   Info, Shield, Award, Mail, Tag, BookOpen,
   Sparkles, Upload, Search, ExternalLink, AlertTriangle, XCircle, Bell, RefreshCw, Lock,
-  Table2, LogOut, FileText, QrCode
+  Table2, LogOut, FileText, QrCode, Sun, Moon
 } from 'lucide-react';
 import { useAppContext, HOURLY_RATE, DOWN_PAYMENT_RATE } from '../context/AppContext';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
@@ -218,6 +218,25 @@ export function HomePage() {
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [viewingReceipt, setViewingReceipt] = useState<any | null>(null);
+
+  // 🟢 Theme mode state (persisted)
+  const [isLightMode, setIsLightMode] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('oneshot_customer_theme') === 'light';
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleLightMode = () => {
+    setIsLightMode(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem('oneshot_customer_theme', next ? 'light' : 'dark');
+      } catch {}
+      return next;
+    });
+  };
 
   const [heroSlideIdx, setHeroSlideIdx] = useState(0);
   const [heroSlideDir, setHeroSlideDir] = useState<1 | -1>(1);
@@ -962,7 +981,7 @@ export function HomePage() {
   ];
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col">
+    <div className={`min-h-screen flex flex-col transition-colors duration-300 ${isLightMode ? 'theme-light bg-slate-50 text-slate-900' : 'bg-neutral-950 text-neutral-100'}`}>
 
       {/* ── Top Header ── */}
       <header className="fixed top-0 left-0 right-0 z-50 h-[72px] bg-neutral-950/95 backdrop-blur-md border-b border-neutral-800/60 flex items-center overflow-visible">
@@ -983,6 +1002,15 @@ export function HomePage() {
         <div className="flex-1" />
 
         <div className="flex items-center gap-4 pr-5 flex-shrink-0 relative">
+
+          {/* Quick Header Theme Toggle */}
+          <button
+            onClick={toggleLightMode}
+            title={isLightMode ? "Switch to Dark Mode" : "Switch to Light Mode"}
+            className="p-2 text-neutral-400 hover:text-white transition-colors rounded-full hover:bg-neutral-800 flex items-center justify-center"
+          >
+            {isLightMode ? <Moon size={19} className="text-emerald-600" /> : <Sun size={19} className="text-amber-400" />}
+          </button>
           
           {/* Notifications */}
           <div className="relative">
@@ -2680,6 +2708,29 @@ export function HomePage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* 🟢 FLOATING LIGHT/DARK MODE TOGGLE BUTTON */}
+      <motion.button
+        type="button"
+        initial={{ scale: 0, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        whileHover={{ scale: 1.05 }}
+        whileTap={{ scale: 0.95 }}
+        onClick={toggleLightMode}
+        title={isLightMode ? "Switch to Dark Mode" : "Switch to Light Mode"}
+        className={`fixed bottom-6 right-6 z-40 flex items-center gap-2.5 px-4 py-3 rounded-full font-bold text-xs shadow-2xl transition-all duration-300 backdrop-blur-md border cursor-pointer ${
+          isLightMode
+            ? 'bg-white/95 text-slate-800 border-slate-200 shadow-slate-400/40 hover:bg-white ring-1 ring-slate-200'
+            : 'bg-neutral-900/90 text-neutral-100 border-neutral-700/80 shadow-black/80 hover:bg-neutral-800 ring-1 ring-neutral-700/50'
+        }`}
+      >
+        <span className="flex items-center justify-center w-6 h-6 rounded-full bg-emerald-500/15 text-emerald-500 shrink-0">
+          {isLightMode ? <Moon size={15} className="text-emerald-600" /> : <Sun size={15} className="text-amber-400" />}
+        </span>
+        <span className="font-semibold tracking-wide">
+          {isLightMode ? 'Dark Mode' : 'Light Mode'}
+        </span>
+      </motion.button>
     </div>
   );
 }
