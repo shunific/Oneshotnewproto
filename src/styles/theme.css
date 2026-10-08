@@ -311,7 +311,7 @@
 }
 
 /* 🟢 Typography & Readability (Non-Hero) */
-.theme-light h1:not(.hero-banner *),
+.theme-light h1:not(.hero-banner *):not(.hero-title-text),
 .theme-light h2:not(.hero-banner *),
 .theme-light h3:not(.hero-banner *),
 .theme-light h4:not(.hero-banner *),
@@ -319,32 +319,27 @@
   color: #0f172a !important;
 }
 
-.theme-light :not(.hero-banner) > .text-white,
-.theme-light :not(.hero-banner) .text-white:not(.bg-emerald-600 *):not(.bg-emerald-500 *):not(.bg-amber-600 *):not(.bg-amber-500 *):not(.bg-rose-600 *):not(.bg-rose-500 *):not(.bg-violet-600 *):not(.bg-sky-600 *) {
+.theme-light main:not(.hero-banner) .text-neutral-100:not(.hero-banner *):not(.bg-emerald-600 *):not(.bg-emerald-500 *):not(.bg-amber-600 *):not(.bg-rose-600 *) {
   color: #0f172a !important;
 }
 
-.theme-light .text-neutral-100:not(.hero-banner *):not(.bg-emerald-600 *):not(.bg-emerald-500 *):not(.bg-amber-600 *):not(.bg-rose-600 *) {
-  color: #0f172a !important;
-}
-
-.theme-light .text-neutral-200:not(.hero-banner *):not(.bg-emerald-600 *):not(.bg-emerald-500 *):not(.bg-amber-600 *):not(.bg-rose-600 *) {
+.theme-light main:not(.hero-banner) .text-neutral-200:not(.hero-banner *):not(.bg-emerald-600 *):not(.bg-emerald-500 *):not(.bg-amber-600 *):not(.bg-rose-600 *) {
   color: #1e293b !important;
 }
 
-.theme-light .text-neutral-300:not(.hero-banner *) {
+.theme-light main:not(.hero-banner) .text-neutral-300:not(.hero-banner *) {
   color: #334155 !important;
 }
 
-.theme-light .text-neutral-400:not(.hero-banner *) {
+.theme-light main:not(.hero-banner) .text-neutral-400:not(.hero-banner *) {
   color: #475569 !important;
 }
 
-.theme-light .text-neutral-500:not(.hero-banner *) {
+.theme-light main:not(.hero-banner) .text-neutral-500:not(.hero-banner *) {
   color: #64748b !important;
 }
 
-.theme-light .text-neutral-600:not(.hero-banner *) {
+.theme-light main:not(.hero-banner) .text-neutral-600:not(.hero-banner *) {
   color: #475569 !important;
 }
 
@@ -518,5 +513,75 @@
 .theme-light .shadow-xl {
   box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.07), 0 8px 10px -6px rgba(0, 0, 0, 0.03) !important;
 }
+
+/* 🟢 Disabled Buttons in Light Mode: Never pitch black! */
+.theme-light button:disabled,
+.theme-light button[disabled],
+.theme-light button.disabled\:bg-neutral-800:disabled,
+.theme-light .disabled\:bg-neutral-800:disabled,
+.theme-light .disabled\:bg-slate-200:disabled {
+  background-color: #f1f5f9 !important;
+  color: #94a3b8 !important;
+  border: 1px solid #cbd5e1 !important;
+  box-shadow: none !important;
+  cursor: not-allowed !important;
+}
+
+.theme-light button:disabled *,
+.theme-light button[disabled] * {
+  color: #94a3b8 !important;
+}
+
+/* 🟢 HERO BANNER ABSOLUTE CONTRAST SHIELD */
+.theme-light .hero-banner h1,
+.theme-light .hero-banner .hero-title-text,
+.theme-light .hero-title-text {
+  color: #ffffff !important;
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.85) !important;
+}
+.theme-light .hero-banner p.text-emerald-300 {
+  color: #6ee7b7 !important;
+}
+.theme-light .hero-banner p.text-emerald-400 {
+  color: #34d399 !important;
+}
+.theme-light .hero-banner p.text-neutral-400 {
+  color: #e2e8f0 !important;
+}
+
+/* 🟢 RESERVATION POLICIES & TERMS IN LIGHT MODE */
+.theme-light .reservation-policy-card {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+}
+.theme-light .reservation-policy-card h3 {
+  color: #0f172a !important;
+}
+.theme-light .policy-redemption-banner {
+  background-color: #ecfdf5 !important;
+  border-color: #a7f3d0 !important;
+}
+.theme-light .policy-banner-title {
+  color: #065f46 !important;
+}
+.theme-light .policy-banner-desc {
+  color: #334155 !important;
+}
+.theme-light .policy-banner-highlight {
+  color: #0f172a !important;
+  font-weight: 700 !important;
+}
+.theme-light .policy-rule-row {
+  border-color: #e2e8f0 !important;
+}
+.theme-light .policy-rule-label {
+  color: #475569 !important;
+  font-weight: 600 !important;
+}
+.theme-light .policy-rule-value {
+  color: #0f172a !important;
+  font-weight: 700 !important;
+}
+
 
 

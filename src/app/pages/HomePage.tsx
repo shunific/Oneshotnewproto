@@ -1143,10 +1143,10 @@ export function HomePage() {
 
                 <div className="absolute inset-0 flex flex-col items-center justify-end pb-6 px-6 text-center z-10 pointer-events-none">
                   <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15, duration: 0.5 }} className="flex flex-col items-center pointer-events-auto">
-                    <p className="text-emerald-400 text-xs uppercase tracking-[0.3em] font-semibold mb-3">{cms.heroTitle}</p>
-                    <h1 className="text-5xl md:text-6xl font-black text-white mb-2 tracking-tight">{cms.heroTitle}</h1>
-                    <p className="text-emerald-300 text-xl font-light mb-5">{cms.heroSubtitle}</p>
-                    <p className="text-neutral-400 text-sm max-w-md mx-auto mb-7 leading-relaxed">{cms.heroDescription}</p>
+                    <p className="text-emerald-400 text-xs uppercase tracking-[0.3em] font-semibold mb-3" style={{ color: '#34d399' }}>{cms.heroTitle}</p>
+                    <h1 className="text-5xl md:text-6xl font-black mb-2 tracking-tight hero-title-text" style={{ color: '#ffffff', textShadow: '0 2px 14px rgba(0,0,0,0.85)' }}>{cms.heroTitle}</h1>
+                    <p className="text-emerald-300 text-xl font-light mb-5" style={{ color: '#6ee7b7', textShadow: '0 2px 8px rgba(0,0,0,0.6)' }}>{cms.heroSubtitle}</p>
+                    <p className="text-neutral-400 text-sm max-w-md mx-auto mb-7 leading-relaxed" style={{ color: '#e2e8f0', textShadow: '0 1px 6px rgba(0,0,0,0.7)' }}>{cms.heroDescription}</p>
                     
                     <div className="flex flex-wrap justify-center gap-3 mb-6">
                       <button onClick={() => handleNavClick('reservations')} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-3 rounded-full text-sm font-semibold transition-all shadow-lg shadow-emerald-900/40">
@@ -1323,7 +1323,7 @@ export function HomePage() {
                       <label className="block text-xs text-neutral-400 mb-1.5">Message <span className="text-rose-500">*</span></label>
                       <textarea value={feedbackForm.message} onChange={e => setFeedbackForm(f => ({ ...f, message: e.target.value }))} placeholder="Please provide details..." rows={4} required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500 resize-none outline-none" />
                     </div>
-                    <button type="submit" disabled={!feedbackForm.name || !feedbackForm.contact || !feedbackForm.type || (feedbackForm.type === 'other' && !feedbackForm.customType) || !feedbackForm.message} className="w-full bg-sky-600 hover:bg-sky-500 disabled:bg-neutral-800 text-white py-3 rounded-xl text-sm font-semibold">Submit Feedback</button>
+                    <button type="submit" disabled={!feedbackForm.name || !feedbackForm.contact || !feedbackForm.type || (feedbackForm.type === 'other' && !feedbackForm.customType) || !feedbackForm.message} className="w-full bg-sky-600 hover:bg-sky-500 disabled:bg-slate-200 disabled:text-slate-400 disabled:border disabled:border-slate-300 disabled:cursor-not-allowed dark:disabled:bg-neutral-800 dark:disabled:text-neutral-500 text-white py-3 rounded-xl text-sm font-semibold transition-colors shadow-sm">Submit Feedback</button>
                   </form>
                 )}
               </div>
@@ -1681,7 +1681,7 @@ export function HomePage() {
                                     type="button"
                                     onClick={handleApplyPromo}
                                     disabled={!promoCodeInput.trim()}
-                                    className="px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white rounded-lg text-xs font-bold transition-colors"
+                                    className="px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:bg-slate-200 disabled:text-slate-400 disabled:border disabled:border-slate-300 disabled:cursor-not-allowed dark:disabled:bg-neutral-800 dark:disabled:text-neutral-500 text-white rounded-lg text-xs font-bold transition-colors"
                                   >
                                     Apply
                                   </button>
@@ -1773,7 +1773,7 @@ export function HomePage() {
                               <button
                                 type="submit"
                                 disabled={!resForm.name || !resForm.phone || !resForm.timeSlot || timeValidation !== 'valid' || isVerifying || confirmingPayment}
-                                className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white py-3.5 rounded-xl font-bold text-sm shadow-lg shadow-emerald-900/30 transition-all flex items-center justify-center gap-2"
+                                className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-200 disabled:text-slate-400 disabled:border disabled:border-slate-300 disabled:cursor-not-allowed dark:disabled:bg-neutral-800 dark:disabled:text-neutral-500 text-white py-3.5 rounded-xl font-bold text-sm shadow-lg shadow-emerald-900/30 transition-all flex items-center justify-center gap-2"
                               >
                                 {(isVerifying || confirmingPayment) ? <><RefreshCw size={14} className="animate-spin" /> Processing...</> : <>Confirm & Reserve <CheckCircle size={16} /></>}
                               </button>
@@ -2188,26 +2188,37 @@ export function HomePage() {
                   })()}
                 </div>
 
-                <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 max-w-4xl mx-auto">
-                  <h3 className="text-white font-semibold mb-4">Reservation Policies & Terms</h3>
-                  <div className="flex gap-3 bg-emerald-950/40 border border-emerald-700/30 rounded-xl p-4 mb-5">
-                    <div className="flex-shrink-0 w-7 h-7 rounded-full bg-emerald-600/20 flex items-center justify-center mt-0.5"><Info size={13} className="text-emerald-400" /></div>
+                <div className={`border rounded-2xl p-6 max-w-4xl mx-auto shadow-sm transition-colors ${isLightMode ? 'bg-white border-slate-200 shadow-slate-100' : 'bg-neutral-900 border-neutral-800'}`}>
+                  <h3 className={`font-bold mb-4 text-base ${isLightMode ? 'text-slate-900' : 'text-white'}`}>Reservation Policies & Terms</h3>
+                  <div className={`flex gap-3 border rounded-xl p-4 mb-5 transition-colors ${isLightMode ? 'bg-emerald-50/90 border-emerald-200' : 'bg-emerald-950/40 border-emerald-700/30'}`}>
+                    <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center mt-0.5 ${isLightMode ? 'bg-emerald-100 text-emerald-700' : 'bg-emerald-600/20 text-emerald-400'}`}>
+                      <Info size={15} />
+                    </div>
                     <div>
-                      <p className="text-emerald-300 text-xs font-semibold mb-1">Reservation Redemption Policy</p>
-                      <p className="text-neutral-400 text-xs leading-relaxed">After completing your reservation and {rates?.downPaymentPercent ?? 25}% down payment, the <span className="text-white font-medium">remaining balance must be settled before or after your game</span> — payable via <span className="text-white font-medium">Cash or GCash</span>.</p>
+                      <p className={`text-xs font-bold mb-1 ${isLightMode ? 'text-emerald-800' : 'text-emerald-300'}`}>Reservation Redemption Policy</p>
+                      <p className={`text-xs leading-relaxed ${isLightMode ? 'text-slate-700' : 'text-neutral-400'}`}>
+                        After completing your reservation and {rates?.downPaymentPercent ?? 25}% down payment, the <span className={`font-bold ${isLightMode ? 'text-slate-900' : 'text-white font-medium'}`}>remaining balance must be settled before or after your game</span> — payable via <span className={`font-bold ${isLightMode ? 'text-slate-900' : 'text-white font-medium'}`}>Cash or GCash</span>.
+                      </p>
                     </div>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                    {[
-                      { label: 'Reservation Rule', value: `Requires at least ${reservationTerms.advanceBookingHours || 1} hour(s) advance notice.` },
-                      { label: 'Online Booking Hours', value: bookingHoursDisplay },
-                      { label: 'Minimum Booking', value: `${reservationTerms.minHours || 1} hour(s)` },
-                      { label: 'Maximum Booking', value: 'Depending on closing cut-off' },
-                      { label: 'Grace Period', value: '15 minutes' },
-                      { label: 'Cancellation Policy', value: reservationTerms.cancellationPolicy },
-                    ].map(({ label, value }) => (
-                      <div key={label} className="flex justify-between py-2 border-b border-neutral-800/60"><span className="text-neutral-500">{label}</span><span className="text-neutral-200 font-medium text-right ml-2">{value}</span></div>
-                    ))}
+                    {(() => {
+                      const advanceHours = typeof reservationTerms?.advanceBookingHours === 'number' ? reservationTerms.advanceBookingHours : parseInt(String(reservationTerms?.advanceBookingHours)) || 1;
+                      const minHoursVal = typeof reservationTerms?.minHours === 'number' ? reservationTerms.minHours : parseInt(String(reservationTerms?.minHours)) || 1;
+                      return [
+                        { label: 'Reservation Rule', value: `Requires at least ${advanceHours} hour(s) advance notice.` },
+                        { label: 'Online Booking Hours', value: bookingHoursDisplay },
+                        { label: 'Minimum Booking', value: `${minHoursVal} hour(s)` },
+                        { label: 'Maximum Booking', value: 'Depending on closing cut-off' },
+                        { label: 'Grace Period', value: '15 minutes' },
+                        { label: 'Cancellation Policy', value: reservationTerms?.cancellationPolicy || 'Booking Policy' },
+                      ].map(({ label, value }) => (
+                        <div key={label} className={`flex justify-between py-2.5 border-b ${isLightMode ? 'border-slate-200 text-slate-800' : 'border-neutral-800/60'}`}>
+                          <span className={`text-xs ${isLightMode ? 'text-slate-600 font-semibold' : 'text-neutral-500'}`}>{label}</span>
+                          <span className={`text-xs font-bold text-right ml-2 ${isLightMode ? 'text-slate-900' : 'text-neutral-200 font-medium'}`}>{value}</span>
+                        </div>
+                      ));
+                    })()}
                   </div>
                 </div>
               </div>
