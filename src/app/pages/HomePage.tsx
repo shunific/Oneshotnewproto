@@ -2175,13 +2175,53 @@ export function HomePage() {
                     }
 
                     return cards.map(({ name, rate, unit, desc, features, badge, color }) => (
-                      <div key={name} className={`relative bg-neutral-900 border rounded-2xl p-6 flex flex-col ${color === 'emerald' ? 'border-emerald-600/50 shadow-lg shadow-emerald-950/50' : color === 'amber' ? 'border-amber-600/30' : 'border-neutral-800'}`}>
-                        {badge && <span className={`absolute -top-3 left-1/2 -translate-x-1/2 text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full ${color === 'emerald' ? 'bg-emerald-600 text-white' : color === 'amber' ? 'bg-amber-600 text-white' : 'bg-neutral-700 text-neutral-400'}`}>{badge}</span>}
-                        <p className={`text-xs uppercase tracking-widest font-semibold mb-2 ${color === 'emerald' ? 'text-emerald-400' : color === 'amber' ? 'text-amber-400' : 'text-neutral-500'}`}>{name}</p>
-                        <div className="flex items-end gap-1 mb-3"><span className={`text-4xl font-black ${color === 'emerald' ? 'text-emerald-400' : color === 'amber' ? 'text-amber-400' : 'text-white'}`}>{rate}</span><span className="text-neutral-500 text-sm mb-1">{unit}</span></div>
-                        <p className="text-neutral-500 text-xs mb-5 leading-relaxed">{desc}</p>
+                      <div key={name} className={`relative border rounded-2xl p-6 flex flex-col transition-all ${
+                        isLightMode ? 'bg-white shadow-sm' : 'bg-neutral-900'
+                      } ${
+                        color === 'emerald' 
+                          ? (isLightMode ? 'border-emerald-500/60 shadow-emerald-500/10' : 'border-emerald-600/50 shadow-lg shadow-emerald-950/50') 
+                          : color === 'amber' 
+                          ? (isLightMode ? 'border-amber-500/50 shadow-amber-500/10' : 'border-amber-600/30') 
+                          : (isLightMode ? 'border-slate-200' : 'border-neutral-800')
+                      }`}>
+                        {badge && (
+                          <span className={`absolute -top-3 left-1/2 -translate-x-1/2 text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full text-white shadow-sm ${
+                            color === 'emerald' ? 'bg-emerald-600' : color === 'amber' ? 'bg-amber-600' : 'bg-slate-700'
+                          }`}>
+                            {badge}
+                          </span>
+                        )}
+                        <p className={`text-xs uppercase tracking-widest font-bold mb-2 ${
+                          color === 'emerald' 
+                            ? (isLightMode ? 'text-emerald-700' : 'text-emerald-400') 
+                            : color === 'amber' 
+                            ? (isLightMode ? 'text-amber-700' : 'text-amber-400') 
+                            : (isLightMode ? 'text-slate-600' : 'text-neutral-500')
+                        }`}>{name}</p>
+                        <div className="flex items-end gap-1 mb-3">
+                          <span className={`text-4xl font-black ${
+                            color === 'emerald' 
+                              ? (isLightMode ? 'text-emerald-600' : 'text-emerald-400') 
+                              : color === 'amber' 
+                              ? (isLightMode ? 'text-amber-600' : 'text-amber-400') 
+                              : (isLightMode ? 'text-slate-900' : 'text-white')
+                          }`}>{rate}</span>
+                          <span className={`text-sm mb-1 font-semibold ${isLightMode ? 'text-slate-500' : 'text-neutral-500'}`}>{unit}</span>
+                        </div>
+                        <p className={`text-xs mb-5 leading-relaxed ${isLightMode ? 'text-slate-600' : 'text-neutral-500'}`}>{desc}</p>
                         <ul className="space-y-2 flex-1">
-                          {features.map(f => <li key={f} className="flex items-center gap-2 text-xs text-neutral-400"><CheckCircle size={12} className={color === 'emerald' ? 'text-emerald-500' : color === 'amber' ? 'text-amber-500' : 'text-neutral-600'} />{f}</li>)}
+                          {features.map(f => (
+                            <li key={f} className={`flex items-center gap-2 text-xs ${isLightMode ? 'text-slate-700 font-medium' : 'text-neutral-400'}`}>
+                              <CheckCircle size={13} className={
+                                color === 'emerald' 
+                                  ? (isLightMode ? 'text-emerald-600' : 'text-emerald-500') 
+                                  : color === 'amber' 
+                                  ? (isLightMode ? 'text-amber-600' : 'text-amber-500') 
+                                  : (isLightMode ? 'text-slate-500' : 'text-neutral-500')
+                              } />
+                              {f}
+                            </li>
+                          ))}
                         </ul>
                       </div>
                     ));
