@@ -179,3 +179,443 @@
     line-height: 1.5;
   }
 }
+
+/* ═════════════════════════════════════════════════════════════════
+   ☀️ CUSTOMER PORTAL LIGHT MODE OVERRIDES
+   ═════════════════════════════════════════════════════════════════ */
+.theme-light {
+  color-scheme: light;
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+/* Base Surfaces & Backgrounds */
+.theme-light.bg-neutral-950,
+.theme-light .bg-neutral-950:not(.hero-banner) {
+  background-color: #f8fafc !important;
+}
+
+.theme-light .bg-neutral-900 {
+  background-color: #ffffff !important;
+}
+
+.theme-light .bg-neutral-900\/95,
+.theme-light .bg-neutral-900\/90,
+.theme-light .bg-neutral-900\/80,
+.theme-light .bg-neutral-900\/60,
+.theme-light .bg-neutral-900\/50,
+.theme-light .bg-neutral-900\/40,
+.theme-light .bg-neutral-900\/30 {
+  background-color: rgba(255, 255, 255, 0.95) !important;
+}
+
+.theme-light .bg-neutral-950\/95,
+.theme-light .bg-neutral-950\/90,
+.theme-light .bg-neutral-950\/80,
+.theme-light .bg-neutral-950\/70,
+.theme-light .bg-neutral-950\/50,
+.theme-light .bg-neutral-950\/40,
+.theme-light .bg-neutral-950\/30 {
+  background-color: rgba(255, 255, 255, 0.95) !important;
+}
+
+.theme-light .bg-neutral-800 {
+  background-color: #f1f5f9 !important;
+}
+
+.theme-light .bg-neutral-800\/80,
+.theme-light .bg-neutral-800\/60,
+.theme-light .bg-neutral-800\/50,
+.theme-light .bg-neutral-800\/30 {
+  background-color: #e2e8f0 !important;
+}
+
+/* 🟢 HERO BANNER: Must maintain deep cinematic contrast & luminous white/emerald text */
+.theme-light .hero-banner {
+  background-color: #0a0a0a !important;
+}
+.theme-light .hero-banner h1,
+.theme-light .hero-banner .text-white {
+  color: #ffffff !important;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.8) !important;
+}
+.theme-light .hero-banner .text-emerald-300 {
+  color: #6ee7b7 !important;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6) !important;
+}
+.theme-light .hero-banner .text-emerald-400 {
+  color: #34d399 !important;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6) !important;
+}
+.theme-light .hero-banner .text-neutral-400 {
+  color: #e2e8f0 !important;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.7) !important;
+}
+.theme-light .hero-banner .bg-neutral-900\/80 {
+  background-color: rgba(15, 23, 42, 0.75) !important;
+  color: #ffffff !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+}
+.theme-light .hero-banner .bg-neutral-900\/80 span,
+.theme-light .hero-banner .bg-neutral-900\/80 svg {
+  color: #ffffff !important;
+}
+
+/* 🟢 Brand Logo in Fixed Navbar: Always crisp white text on emerald background */
+.theme-light nav.fixed .brand-logo-btn,
+.theme-light nav.fixed button.bg-emerald-700,
+.theme-light nav.fixed button.bg-emerald-700 *,
+.theme-light nav.fixed button.bg-emerald-700 p,
+.theme-light .brand-logo-btn * {
+  color: #ffffff !important;
+}
+.theme-light nav.fixed button.bg-emerald-700 p.text-emerald-200,
+.theme-light .brand-logo-btn p.text-emerald-200 {
+  color: #a7f3d0 !important;
+}
+
+/* 🟢 Primary Action Buttons: Always retain crisp white text & white icons */
+.theme-light .bg-emerald-600,
+.theme-light .bg-emerald-500,
+.theme-light .bg-emerald-700,
+.theme-light .bg-amber-600,
+.theme-light .bg-amber-500,
+.theme-light .bg-rose-600,
+.theme-light .bg-rose-500,
+.theme-light .bg-sky-600,
+.theme-light .bg-violet-600 {
+  color: #ffffff !important;
+}
+.theme-light .bg-emerald-600 *,
+.theme-light .bg-emerald-500 *,
+.theme-light .bg-emerald-700 *,
+.theme-light .bg-amber-600 *,
+.theme-light .bg-amber-500 *,
+.theme-light .bg-rose-600 *,
+.theme-light .bg-rose-500 *,
+.theme-light .bg-sky-600 *,
+.theme-light .bg-violet-600 * {
+  color: #ffffff !important;
+}
+
+/* 🟢 Fixed Top Header & Navigation Bar in Light Mode */
+.theme-light header.fixed {
+  background-color: rgba(255, 255, 255, 0.98) !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04) !important;
+}
+
+.theme-light nav.fixed {
+  background-color: rgba(255, 255, 255, 0.98) !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+  box-shadow: 0 2px 4px -1px rgba(0, 0, 0, 0.03) !important;
+}
+
+.theme-light nav.fixed button:not(.bg-emerald-700):not(.brand-logo-btn) {
+  color: #475569 !important;
+  font-weight: 600 !important;
+}
+
+.theme-light nav.fixed button:not(.bg-emerald-700):not(.brand-logo-btn):hover {
+  color: #0f172a !important;
+}
+
+.theme-light nav.fixed button.text-emerald-400 {
+  color: #059669 !important;
+  font-weight: 700 !important;
+}
+
+/* 🟢 Typography & Readability (Non-Hero) */
+.theme-light h1:not(.hero-banner *):not(.hero-title-text),
+.theme-light h2:not(.hero-banner *),
+.theme-light h3:not(.hero-banner *),
+.theme-light h4:not(.hero-banner *),
+.theme-light h5:not(.hero-banner *) {
+  color: #0f172a !important;
+}
+
+.theme-light main:not(.hero-banner) .text-neutral-100:not(.hero-banner *):not(.bg-emerald-600 *):not(.bg-emerald-500 *):not(.bg-amber-600 *):not(.bg-rose-600 *) {
+  color: #0f172a !important;
+}
+
+.theme-light main:not(.hero-banner) .text-neutral-200:not(.hero-banner *):not(.bg-emerald-600 *):not(.bg-emerald-500 *):not(.bg-amber-600 *):not(.bg-rose-600 *) {
+  color: #1e293b !important;
+}
+
+.theme-light main:not(.hero-banner) .text-neutral-300:not(.hero-banner *) {
+  color: #334155 !important;
+}
+
+.theme-light main:not(.hero-banner) .text-neutral-400:not(.hero-banner *) {
+  color: #475569 !important;
+}
+
+.theme-light main:not(.hero-banner) .text-neutral-500:not(.hero-banner *) {
+  color: #64748b !important;
+}
+
+.theme-light main:not(.hero-banner) .text-neutral-600:not(.hero-banner *) {
+  color: #475569 !important;
+}
+
+/* Accent Colors */
+.theme-light .text-emerald-400:not(.hero-banner *) {
+  color: #059669 !important;
+}
+
+.theme-light .text-emerald-300:not(.hero-banner *) {
+  color: #047857 !important;
+}
+
+.theme-light .text-amber-400 {
+  color: #d97706 !important;
+}
+
+.theme-light .text-rose-400 {
+  color: #e11d48 !important;
+}
+
+.theme-light .text-sky-400 {
+  color: #0284c7 !important;
+}
+
+/* 🟢 ICON VISIBILITY & CONTRAST (Never dark/muddy in light mode) */
+.theme-light svg.text-neutral-400,
+.theme-light svg.text-neutral-500,
+.theme-light svg.text-neutral-600 {
+  color: #475569 !important;
+  stroke: #475569 !important;
+}
+
+.theme-light svg.text-emerald-400,
+.theme-light svg.text-emerald-500 {
+  color: #059669 !important;
+  stroke: #059669 !important;
+}
+
+.theme-light svg.text-sky-400,
+.theme-light svg.text-sky-500 {
+  color: #0284c7 !important;
+  stroke: #0284c7 !important;
+}
+
+.theme-light svg.text-amber-400,
+.theme-light svg.text-amber-500 {
+  color: #d97706 !important;
+  stroke: #d97706 !important;
+}
+
+.theme-light svg.text-rose-400,
+.theme-light svg.text-rose-500 {
+  color: #dc2626 !important;
+  stroke: #dc2626 !important;
+}
+
+.theme-light svg.text-violet-400,
+.theme-light svg.text-violet-500 {
+  color: #7c3aed !important;
+  stroke: #7c3aed !important;
+}
+
+/* 🟢 Smart Queue Neural Network Card */
+.theme-light .from-emerald-950\/60 {
+  background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%) !important;
+  border-color: #a7f3d0 !important;
+  box-shadow: 0 4px 6px -1px rgba(16, 185, 129, 0.08) !important;
+}
+
+.theme-light .from-emerald-950\/60 h4 {
+  color: #065f46 !important;
+}
+
+.theme-light .from-emerald-950\/60 p {
+  color: #334155 !important;
+}
+
+.theme-light .from-emerald-950\/60 .bg-emerald-950\/80 {
+  background-color: #ffffff !important;
+  border-color: #a7f3d0 !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05) !important;
+}
+
+.theme-light .from-emerald-950\/60 .bg-neutral-950\/80 {
+  background-color: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05) !important;
+}
+
+.theme-light .from-emerald-950\/60 .bg-neutral-950\/80 span.text-white {
+  color: #0f172a !important;
+}
+
+/* 🟢 Icons & Contact circular pills: High contrast, no dark muddy blobs */
+.theme-light .bg-emerald-950\/50,
+.theme-light .bg-emerald-950\/60,
+.theme-light .bg-emerald-900\/50 {
+  background-color: #d1fae5 !important;
+  border-color: #6ee7b7 !important;
+}
+
+.theme-light .bg-emerald-950\/50 svg,
+.theme-light .bg-emerald-950\/60 svg,
+.theme-light .bg-emerald-900\/50 svg {
+  color: #047857 !important;
+}
+
+/* 🟢 Borders & Dividers */
+.theme-light .border-neutral-900,
+.theme-light .border-neutral-800,
+.theme-light .border-neutral-800\/80,
+.theme-light .border-neutral-800\/60,
+.theme-light .border-neutral-800\/50,
+.theme-light .border-neutral-800\/40,
+.theme-light .border-neutral-800\/30 {
+  border-color: #e2e8f0 !important;
+}
+
+.theme-light .border-neutral-700,
+.theme-light .border-neutral-700\/80,
+.theme-light .border-neutral-700\/50,
+.theme-light .border-neutral-700\/40 {
+  border-color: #cbd5e1 !important;
+}
+
+.theme-light .divide-neutral-800 > :not([hidden]) ~ :not([hidden]),
+.theme-light .divide-neutral-800\/60 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #e2e8f0 !important;
+}
+
+/* 🟢 Form Inputs & Selects */
+.theme-light input:not([type="checkbox"]):not([type="radio"]),
+.theme-light textarea,
+.theme-light select {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+
+.theme-light input::placeholder,
+.theme-light textarea::placeholder {
+  color: #94a3b8 !important;
+}
+
+.theme-light input:focus,
+.theme-light textarea:focus,
+.theme-light select:focus {
+  border-color: #10b981 !important;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.15) !important;
+}
+
+/* 🟢 Hover States */
+.theme-light .hover\:bg-neutral-800:hover {
+  background-color: #f1f5f9 !important;
+}
+
+.theme-light .hover\:bg-neutral-700:hover {
+  background-color: #e2e8f0 !important;
+}
+
+.theme-light .hover\:text-white:hover {
+  color: #020617 !important;
+}
+
+.theme-light .hover\:text-neutral-200:hover {
+  color: #0f172a !important;
+}
+
+/* 🟢 Modals & Cards */
+.theme-light .shadow-2xl,
+.theme-light .shadow-xl {
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.07), 0 8px 10px -6px rgba(0, 0, 0, 0.03) !important;
+}
+
+/* 🟢 Action & Form Buttons explicitly in Light Mode */
+.theme-light button.bg-sky-600:not(:disabled),
+.theme-light button.bg-sky-600:not(:disabled) * {
+  background-color: #0284c7 !important;
+  color: #ffffff !important;
+}
+
+.theme-light button.bg-amber-600:not(:disabled),
+.theme-light button.bg-amber-600:not(:disabled) * {
+  background-color: #d97706 !important;
+  color: #ffffff !important;
+}
+
+.theme-light button.bg-emerald-600:not(:disabled),
+.theme-light button.bg-emerald-600:not(:disabled) * {
+  background-color: #059669 !important;
+  color: #ffffff !important;
+}
+
+/* 🟢 Disabled Buttons in Light Mode: Never pitch black! */
+.theme-light button:disabled,
+.theme-light button[disabled],
+.theme-light button.disabled\:bg-neutral-800:disabled,
+.theme-light .disabled\:bg-neutral-800:disabled,
+.theme-light .disabled\:bg-slate-200:disabled {
+  background-color: #e2e8f0 !important;
+  color: #94a3b8 !important;
+  border: 1px solid #cbd5e1 !important;
+  box-shadow: none !important;
+  cursor: not-allowed !important;
+}
+
+.theme-light button:disabled *,
+.theme-light button[disabled] * {
+  color: #94a3b8 !important;
+}
+
+/* 🟢 HERO BANNER ABSOLUTE CONTRAST SHIELD */
+.theme-light .hero-banner h1,
+.theme-light .hero-banner .hero-title-text,
+.theme-light .hero-title-text {
+  color: #ffffff !important;
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.85) !important;
+}
+.theme-light .hero-banner p.text-emerald-300 {
+  color: #6ee7b7 !important;
+}
+.theme-light .hero-banner p.text-emerald-400 {
+  color: #34d399 !important;
+}
+.theme-light .hero-banner p.text-neutral-400 {
+  color: #e2e8f0 !important;
+}
+
+/* 🟢 RESERVATION POLICIES & TERMS IN LIGHT MODE */
+.theme-light .reservation-policy-card {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+}
+.theme-light .reservation-policy-card h3 {
+  color: #0f172a !important;
+}
+.theme-light .policy-redemption-banner {
+  background-color: #ecfdf5 !important;
+  border-color: #a7f3d0 !important;
+}
+.theme-light .policy-banner-title {
+  color: #065f46 !important;
+}
+.theme-light .policy-banner-desc {
+  color: #334155 !important;
+}
+.theme-light .policy-banner-highlight {
+  color: #0f172a !important;
+  font-weight: 700 !important;
+}
+.theme-light .policy-rule-row {
+  border-color: #e2e8f0 !important;
+}
+.theme-light .policy-rule-label {
+  color: #475569 !important;
+  font-weight: 600 !important;
+}
+.theme-light .policy-rule-value {
+  color: #0f172a !important;
+  font-weight: 700 !important;
+}
+
+
+

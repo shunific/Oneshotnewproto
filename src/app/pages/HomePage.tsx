@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
-import { supabase } from '../utils/supabase';
+import { supabase, publicSupabase } from '../utils/supabase';
 import { 
   addMinutes, format, isToday, isBefore, startOfDay, isSameDay, differenceInDays, differenceInMinutes 
 } from 'date-fns';
@@ -11,10 +11,11 @@ import {
   Calendar, CheckCircle, ArrowRight, Users, ChevronDown,
   Info, Shield, Award, Mail, Tag, BookOpen,
   Sparkles, Upload, Search, ExternalLink, AlertTriangle, XCircle, Bell, RefreshCw, Lock,
-  Table2, LogOut, FileText, QrCode
+  Table2, LogOut, FileText, QrCode, Sun, Moon
 } from 'lucide-react';
 import { useAppContext, HOURLY_RATE, DOWN_PAYMENT_RATE } from '../context/AppContext';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
+import { ReservationStatusBadge } from '../components/ReservationStatusBadge';
 
 import logoImg from 'figma:asset/40eb82831843e17a3c48a360fd80f0aaaa58ddc8.png';
 import heroImg1 from 'figma:asset/15fb8dcab89448c8f2ad20fb9946631b1c246968.png';
@@ -136,8 +137,8 @@ export function HomePage() {
   const [dynamicWaitTime, setDynamicWaitTime] = useState<string>('Calculating...');
 
   useEffect(() => {
-    const activeTables = (tables || []).filter((t: any) => t.status === 'occupied' && t.session);
-    const freeTables = (tables || []).filter((t: any) => t.status === 'available').length;
+    const activeTables = (tables || []).filter((t: any) => (t.isActive === true || t.isActive === 1 || t.isactive === 1 || t.isactive === true) && t.status === 'occupied' && t.session);
+    const freeTables = (tables || []).filter((t: any) => (t.isActive === true || t.isActive === 1 || t.isactive === 1 || t.isactive === true) && t.status === 'available').length;
     const waitingCount = (queue || []).filter((q: any) => q.status === 'waiting').length;
 
     if (freeTables > waitingCount) {
@@ -217,6 +218,25 @@ export function HomePage() {
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [viewingReceipt, setViewingReceipt] = useState<any | null>(null);
+
+  // 🟢 Theme mode state (persisted)
+  const [isLightMode, setIsLightMode] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('oneshot_customer_theme') === 'light';
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleLightMode = () => {
+    setIsLightMode(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem('oneshot_customer_theme', next ? 'light' : 'dark');
+      } catch {}
+      return next;
+    });
+  };
 
   const [heroSlideIdx, setHeroSlideIdx] = useState(0);
   const [heroSlideDir, setHeroSlideDir] = useState<1 | -1>(1);
@@ -357,7 +377,10 @@ export function HomePage() {
 
   const activeAnnouncements = announcements?.filter((a: any) => a.isActive && (!a.expiresAt || new Date(a.expiresAt) > new Date())) || [];
   const userReservations = currentUser 
-    ? reservations.filter((r: any) => r.email && r.email.toLowerCase() === currentUser.email.toLowerCase()) 
+    ? reservations.filter((r: any) => {
+        if (!r.email) return false;
+        return r.email.trim().toLowerCase() === currentUser.email.trim().toLowerCase();
+      }) 
     : [];
 
   const resNotifications = userReservations.map((r: any) => ({
@@ -411,8 +434,19 @@ export function HomePage() {
   }, [currentUser]);
 
   const handleOAuthLogin = async (provider: 'google' | 'facebook' | 'apple') => {
-    const { error } = await supabase.auth.signInWithOAuth({ provider, options: { redirectTo: window.location.origin } });
-    if (error) alert(`${provider} login error: ` + error.message);
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({ 
+        provider, 
+        options: { 
+          redirectTo: window.location.origin 
+        } 
+      });
+      if (error) {
+        setToastMsg({ title: `${provider.toUpperCase()} Login`, desc: error.message, type: 'error' });
+      }
+    } catch (err: any) {
+      setToastMsg({ title: `${provider.toUpperCase()} Error`, desc: err.message || 'Login failed', type: 'error' });
+    }
   };
 
   const handleLoginSubmit = async () => {
@@ -435,18 +469,53 @@ export function HomePage() {
     if (registerForm.password.length < 8) return setRegisterForm(f => ({ ...f, error: 'Password must be at least 8 characters long.' }));
     
     setRegisterForm(f => ({ ...f, loading: true, error: '' }));
-    const { error } = await supabase.auth.signUp({
-      email: registerForm.email,
+    const { data, error } = await supabase.auth.signUp({
+      email: registerForm.email.trim(),
       password: registerForm.password,
-      options: { data: { full_name: registerForm.name, phone: registerForm.phone } }
+      options: { data: { full_name: registerForm.name.trim(), phone: registerForm.phone.trim() } }
     });
     
     if (error) {
-      setRegisterForm(f => ({ ...f, error: error.message, loading: false }));
+      const isRateLimit = error.message.toLowerCase().includes('rate limit') || (error as any).status === 429;
+      setRegisterForm(f => ({ 
+        ...f, 
+        error: isRateLimit 
+          ? 'Email rate limit reached for confirmation emails. If you already created an account, please Sign In, or use "Continue with Google".'
+          : error.message, 
+        loading: false 
+      }));
     } else {
-      setShowAuthModal(false);
-      setRegisterForm({ name: '', email: '', phone: '', password: '', confirm: '', showPw: false, error: '', loading: false });
-      alert("Registration successful! You are now logged in.");
+      // Check if session was granted automatically
+      if (data?.session) {
+        setActiveUser({
+          name: registerForm.name.trim(),
+          email: registerForm.email.trim()
+        });
+        setShowAuthModal(false);
+        setRegisterForm({ name: '', email: '', phone: '', password: '', confirm: '', showPw: false, error: '', loading: false });
+        setToastMsg({ title: "Welcome!", desc: `Account created successfully, ${registerForm.name}!`, type: "success" });
+      } else {
+        // Try password sign-in immediately in case confirmation is disabled on the project
+        const { data: signInData } = await supabase.auth.signInWithPassword({
+          email: registerForm.email.trim(),
+          password: registerForm.password
+        });
+
+        if (signInData?.session) {
+          setActiveUser({
+            name: registerForm.name.trim(),
+            email: registerForm.email.trim()
+          });
+          setShowAuthModal(false);
+          setRegisterForm({ name: '', email: '', phone: '', password: '', confirm: '', showPw: false, error: '', loading: false });
+          setToastMsg({ title: "Welcome!", desc: `Account created successfully, ${registerForm.name}!`, type: "success" });
+        } else {
+          // Email confirmation is required by Supabase Auth settings
+          setShowAuthModal(false);
+          setRegisterForm({ name: '', email: '', phone: '', password: '', confirm: '', showPw: false, error: '', loading: false });
+          alert(`Account created! A confirmation email has been sent to ${registerForm.email}. Please click the link in your email to verify and activate your account.`);
+        }
+      }
     }
   };
 
@@ -663,22 +732,31 @@ export function HomePage() {
     try {
       let finalReceiptUrl = null;
       if (receiptFile) {
-        const fileExt = receiptFile.name.split('.').pop();
-        const fileName = `receipt_${Date.now()}_${Math.floor(Math.random() * 1000)}.${fileExt}`;
-        const { error: uploadError } = await supabase.storage.from('oneshot-assets').upload(fileName, receiptFile);
-        if (uploadError) throw uploadError;
-        const { data: publicUrlData } = supabase.storage.from('oneshot-assets').getPublicUrl(fileName);
-        finalReceiptUrl = publicUrlData.publicUrl;
+        try {
+          const fileExt = receiptFile.name.split('.').pop();
+          const fileName = `receipt_${Date.now()}_${Math.floor(Math.random() * 1000)}.${fileExt}`;
+          const { error: uploadError } = await publicSupabase.storage.from('oneshot-assets').upload(fileName, receiptFile);
+          if (!uploadError) {
+            const { data: publicUrlData } = publicSupabase.storage.from('oneshot-assets').getPublicUrl(fileName);
+            finalReceiptUrl = publicUrlData?.publicUrl || null;
+          }
+        } catch (uploadErr) {
+          console.warn("Storage upload note:", uploadErr);
+        }
       }
 
       const reservationDate = new Date(selectedDate!);
       const [hours, minutes] = resForm.timeSlot.split(':').map(Number);
       reservationDate.setHours(hours, minutes, 0, 0);
 
-      const newId = addReservation({
+      const bookingEmail = (resForm.email && resForm.email.trim()) 
+        ? resForm.email.trim() 
+        : (currentUser?.email ? currentUser.email.trim() : undefined);
+
+      const newId = await addReservation({
         customerName: resForm.name,
         contactNumber: resForm.phone,
-        email: resForm.email,
+        email: bookingEmail,
         date: reservationDate,
         timeSlot: resForm.timeSlot,
         durationHours: resForm.duration,
@@ -695,27 +773,6 @@ export function HomePage() {
         receiptImg: finalReceiptUrl || undefined,
         rescheduleCount: 0
       });
-
-      await supabase.from('reservations').upsert([{
-        id: newId,
-        customerName: resForm.name,
-        contactNumber: resForm.phone,
-        email: resForm.email || null,
-        date: reservationDate.toISOString(),
-        timeSlot: resForm.timeSlot,
-        durationHours: resForm.duration,
-        partySize: resForm.pax,
-        tableId: selectedTableId,
-        status: isDownPaymentWaived ? 'confirmed' : 'pending',
-        totalAmount: totalAmount,
-        downPaymentAmount: isDownPaymentWaived ? 0 : downPayment,
-        downPaymentPaid: (isDownPaymentWaived || !!finalReceiptUrl || !!resForm.paymentRef.trim()) ? 1 : 0,
-        balancePaid: 0,
-        paymentRef: isDownPaymentWaived ? 'TRUSTED_WAIVER' : (resForm.paymentMethod === 'cash' ? 'CASH' : (resForm.paymentRef || null)),
-        receiptImg: finalReceiptUrl || null,
-        rescheduleCount: 0,
-        createdAt: new Date().toISOString()
-      }]);
 
       setGeneratedResId(newId || Math.random().toString(36).substring(2, 8).toUpperCase());
       setReservationStep(3);
@@ -737,7 +794,10 @@ export function HomePage() {
     setReceiptPreview(null);
     setReceiptFile(null);
     setClosureAlert(null); // Reset closure alert
-    if (currentUser) setResTab('track');
+    if (currentUser) {
+      setTrackedReservations(null);
+      setResTab('track');
+    }
   };
 
   const handleCancelBooking = async (id: string, dateString: string, timeSlot: string) => {
@@ -921,20 +981,20 @@ export function HomePage() {
   ];
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col">
+    <div className={`min-h-screen flex flex-col transition-colors duration-300 ${isLightMode ? 'theme-light bg-slate-50 text-slate-900' : 'bg-neutral-950 text-neutral-100'}`}>
 
       {/* ── Top Header ── */}
       <header className="fixed top-0 left-0 right-0 z-50 h-[72px] bg-neutral-950/95 backdrop-blur-md border-b border-neutral-800/60 flex items-center overflow-visible">
         <button
           onClick={() => handleNavClick('home')}
-          className="h-full flex items-center px-5 pr-12 bg-emerald-700 hover:bg-emerald-600 transition-colors flex-shrink-0 relative z-10 cursor-pointer text-left"
+          className="brand-logo-btn h-full flex items-center px-5 pr-12 bg-emerald-700 hover:bg-emerald-600 transition-colors flex-shrink-0 relative z-10 cursor-pointer text-left"
           style={{ clipPath: 'polygon(0 0, 100% 0, 82% 100%, 0 100%)', minWidth: 220 }}
         >
           <div className="flex items-center gap-2.5">
             <img src={logoImg} alt="One Shot Bar & Billiards" className="h-9 w-9 object-contain rounded-lg flex-shrink-0" />
             <div>
-              <p className="text-white text-[17px] font-black tracking-tight leading-tight">ONE SHOT</p>
-              <p className="text-emerald-200 text-[10px] uppercase tracking-[0.2em] font-semibold">Bar & Billiards</p>
+              <p className="text-white text-[17px] font-black tracking-tight leading-tight" style={{ color: '#ffffff' }}>ONE SHOT</p>
+              <p className="text-emerald-200 text-[10px] uppercase tracking-[0.2em] font-semibold" style={{ color: '#a7f3d0' }}>Bar & Billiards</p>
             </div>
           </div>
         </button>
@@ -942,6 +1002,15 @@ export function HomePage() {
         <div className="flex-1" />
 
         <div className="flex items-center gap-4 pr-5 flex-shrink-0 relative">
+
+          {/* Quick Header Theme Toggle */}
+          <button
+            onClick={toggleLightMode}
+            title={isLightMode ? "Switch to Dark Mode" : "Switch to Light Mode"}
+            className="p-2 text-neutral-400 hover:text-white transition-colors rounded-full hover:bg-neutral-800 flex items-center justify-center"
+          >
+            {isLightMode ? <Moon size={19} className="text-emerald-600" /> : <Sun size={19} className="text-amber-400" />}
+          </button>
           
           {/* Notifications */}
           <div className="relative">
@@ -1020,13 +1089,17 @@ export function HomePage() {
       </header>
 
       {/* ── Section Navigation ── */}
-      <nav className="fixed top-[72px] left-0 right-0 z-40 bg-neutral-900/95 backdrop-blur-sm border-b border-neutral-800/60 flex items-center justify-center gap-1 px-4 overflow-x-auto h-[54px] hide-scrollbar">
+      <nav className={`fixed top-[72px] left-0 right-0 z-40 backdrop-blur-sm border-b flex items-center justify-center gap-1 px-4 overflow-x-auto h-[54px] hide-scrollbar transition-colors ${
+        isLightMode ? 'bg-white/95 border-slate-200 shadow-xs' : 'bg-neutral-900/95 border-neutral-800/60'
+      }`}>
         {allNavSections.map(({ id, label }) => (
           <button
             key={id}
             onClick={() => handleNavClick(id)}
             className={`relative px-4 py-3 text-xs font-semibold whitespace-nowrap transition-all ${
-              activeSection === id ? 'text-emerald-400' : 'text-neutral-500 hover:text-neutral-300'
+              activeSection === id 
+                ? (isLightMode ? 'text-emerald-700 font-bold' : 'text-emerald-400 font-bold') 
+                : (isLightMode ? 'text-slate-600 hover:text-slate-950' : 'text-neutral-500 hover:text-neutral-300')
             }`}
           >
             {label}
@@ -1045,7 +1118,7 @@ export function HomePage() {
           {activeSection === 'home' && (
             <motion.div key="home" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }}>
               
-              <div className="relative h-[70vh] min-h-[500px] overflow-hidden group bg-neutral-950">
+              <div className="relative h-[70vh] min-h-[500px] overflow-hidden group bg-neutral-950 hero-banner">
                 <AnimatePresence mode="wait" custom={heroSlideDir}>
                   <motion.div
                     key={heroSlideIdx}
@@ -1070,10 +1143,10 @@ export function HomePage() {
 
                 <div className="absolute inset-0 flex flex-col items-center justify-end pb-6 px-6 text-center z-10 pointer-events-none">
                   <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15, duration: 0.5 }} className="flex flex-col items-center pointer-events-auto">
-                    <p className="text-emerald-400 text-xs uppercase tracking-[0.3em] font-semibold mb-3">{cms.heroTitle}</p>
-                    <h1 className="text-5xl md:text-6xl font-black text-white mb-2 tracking-tight">{cms.heroTitle}</h1>
-                    <p className="text-emerald-300 text-xl font-light mb-5">{cms.heroSubtitle}</p>
-                    <p className="text-neutral-400 text-sm max-w-md mx-auto mb-7 leading-relaxed">{cms.heroDescription}</p>
+                    <p className="text-emerald-400 text-xs uppercase tracking-[0.3em] font-semibold mb-3" style={{ color: '#34d399' }}>{cms.heroTitle}</p>
+                    <h1 className="text-5xl md:text-6xl font-black mb-2 tracking-tight hero-title-text" style={{ color: '#ffffff', textShadow: '0 2px 14px rgba(0,0,0,0.85)' }}>{cms.heroTitle}</h1>
+                    <p className="text-emerald-300 text-xl font-light mb-5" style={{ color: '#6ee7b7', textShadow: '0 2px 8px rgba(0,0,0,0.6)' }}>{cms.heroSubtitle}</p>
+                    <p className="text-neutral-400 text-sm max-w-md mx-auto mb-7 leading-relaxed" style={{ color: '#e2e8f0', textShadow: '0 1px 6px rgba(0,0,0,0.7)' }}>{cms.heroDescription}</p>
                     
                     <div className="flex flex-wrap justify-center gap-3 mb-6">
                       <button onClick={() => handleNavClick('reservations')} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-3 rounded-full text-sm font-semibold transition-all shadow-lg shadow-emerald-900/40">
@@ -1089,17 +1162,24 @@ export function HomePage() {
 
               <div className="bg-neutral-900 border-y border-neutral-800">
                 <div className="max-w-4xl mx-auto grid grid-cols-2 md:grid-cols-4 divide-x divide-neutral-800">
-                  {[
-                    { value: String(tables?.length || 0), label: 'Billiard Tables', color: 'text-emerald-400' },
-                    { value: `₱${effectiveHourly}`, label: 'Per Hour', color: 'text-amber-400' },
-                    { value: getOpenHoursDisplay(), label: 'Hours Open Daily', color: 'text-sky-400' },
-                    { value: 'A+', label: 'Facility Grade', color: 'text-rose-400' },
-                  ].map(({ value, label, color }) => (
-                    <div key={label} className="p-6 text-center">
-                      <p className={`text-3xl font-black ${color} mb-1`}>{value}</p>
-                      <p className="text-xs text-neutral-500 font-medium uppercase tracking-wider">{label}</p>
-                    </div>
-                  ))}
+                  {(() => {
+                    const openAvailableTableCount = (tables || []).filter((t: any) => {
+                      const isTableActive = t.isActive === true || t.isActive === 1 || t.isactive === 1 || t.isactive === true;
+                      return isTableActive && t.status === 'available';
+                    }).length;
+
+                    return [
+                      { value: String(openAvailableTableCount), label: 'Available Tables', color: 'text-emerald-400' },
+                      { value: `₱${effectiveHourly}`, label: 'Per Hour', color: 'text-amber-400' },
+                      { value: getOpenHoursDisplay(), label: 'Hours Open Daily', color: 'text-sky-400' },
+                      { value: 'A+', label: 'Facility Grade', color: 'text-rose-400' },
+                    ].map(({ value, label, color }) => (
+                      <div key={label} className="p-6 text-center">
+                        <p className={`text-3xl font-black ${color} mb-1`}>{value}</p>
+                        <p className={`text-xs font-bold uppercase tracking-wider ${isLightMode ? 'text-slate-600' : 'text-neutral-500 font-medium'}`}>{label}</p>
+                      </div>
+                    ));
+                  })()}
                 </div>
               </div>
 
@@ -1243,7 +1323,17 @@ export function HomePage() {
                       <label className="block text-xs text-neutral-400 mb-1.5">Message <span className="text-rose-500">*</span></label>
                       <textarea value={feedbackForm.message} onChange={e => setFeedbackForm(f => ({ ...f, message: e.target.value }))} placeholder="Please provide details..." rows={4} required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500 resize-none outline-none" />
                     </div>
-                    <button type="submit" disabled={!feedbackForm.name || !feedbackForm.contact || !feedbackForm.type || (feedbackForm.type === 'other' && !feedbackForm.customType) || !feedbackForm.message} className="w-full bg-sky-600 hover:bg-sky-500 disabled:bg-neutral-800 text-white py-3 rounded-xl text-sm font-semibold">Submit Feedback</button>
+                    <button
+                      type="submit"
+                      disabled={!feedbackForm.name || !feedbackForm.contact || !feedbackForm.type || (feedbackForm.type === 'other' && !feedbackForm.customType) || !feedbackForm.message}
+                      className={`w-full py-3 rounded-xl text-sm font-semibold transition-colors shadow-sm text-white ${
+                        isLightMode
+                          ? 'bg-sky-600 hover:bg-sky-500 disabled:bg-slate-200 disabled:text-slate-400 disabled:border disabled:border-slate-300'
+                          : 'bg-sky-600 hover:bg-sky-500 disabled:bg-neutral-800 disabled:text-neutral-500 disabled:border disabled:border-neutral-700'
+                      } disabled:cursor-not-allowed`}
+                    >
+                      Submit Feedback
+                    </button>
                   </form>
                 )}
               </div>
@@ -1266,9 +1356,7 @@ export function HomePage() {
                   </button>
                   <button onClick={() => {
                     setResTab('track');
-                    if (currentUser) {
-                      setTrackedReservations(reservations.filter((r: any) => r.email?.toLowerCase() === currentUser.email?.toLowerCase()).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
-                    }
+                    setTrackedReservations(null);
                   }} className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition-all ${resTab === 'track' ? 'bg-neutral-800 text-neutral-200' : 'text-neutral-500 hover:text-neutral-300'}`}>
                     {currentUser ? <BookOpen size={14} /> : <Search size={14} />} 
                     {currentUser ? 'My Bookings' : 'Track Booking'}
@@ -1519,7 +1607,7 @@ export function HomePage() {
                                 </div>
                                 <div className="col-span-1">
                                   <label className="block text-xs text-neutral-400 mb-1.5">Start Time *</label>
-                                  <input type="time" style={{ colorScheme: 'dark' }} value={resForm.timeSlot} onChange={e => setResForm(f => ({ ...f, timeSlot: e.target.value }))} className={`w-full bg-neutral-950 border rounded-xl px-3 py-2.5 text-sm text-neutral-100 text-center outline-none ${['closed', 'happyhour', 'full', 'table_conflict', 'active_conflict'].includes(timeValidation) ? 'border-rose-500/50 text-rose-200' : 'border-neutral-800 focus:border-emerald-500'}`} />
+                                  <input type="time" style={{ colorScheme: isLightMode ? 'light' : 'dark' }} value={resForm.timeSlot} onChange={e => setResForm(f => ({ ...f, timeSlot: e.target.value }))} className={`w-full bg-neutral-950 border rounded-xl px-3 py-2.5 text-sm text-neutral-100 text-center outline-none ${['closed', 'happyhour', 'full', 'table_conflict', 'active_conflict'].includes(timeValidation) ? 'border-rose-500/50 text-rose-200' : 'border-neutral-800 focus:border-emerald-500'}`} />
                                 </div>
                                 <div className="col-span-1">
                                   <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end flex-shrink-0">
@@ -1603,7 +1691,11 @@ export function HomePage() {
                                     type="button"
                                     onClick={handleApplyPromo}
                                     disabled={!promoCodeInput.trim()}
-                                    className="px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white rounded-lg text-xs font-bold transition-colors"
+                                    className={`px-4 py-2 text-white rounded-lg text-xs font-bold transition-colors ${
+                                      isLightMode
+                                        ? 'bg-amber-600 hover:bg-amber-500 disabled:bg-slate-200 disabled:text-slate-400 disabled:border disabled:border-slate-300'
+                                        : 'bg-amber-600 hover:bg-amber-500 disabled:bg-neutral-800 disabled:text-neutral-500 disabled:border disabled:border-neutral-700'
+                                    } disabled:cursor-not-allowed`}
                                   >
                                     Apply
                                   </button>
@@ -1695,7 +1787,11 @@ export function HomePage() {
                               <button
                                 type="submit"
                                 disabled={!resForm.name || !resForm.phone || !resForm.timeSlot || timeValidation !== 'valid' || isVerifying || confirmingPayment}
-                                className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white py-3.5 rounded-xl font-bold text-sm shadow-lg shadow-emerald-900/30 transition-all flex items-center justify-center gap-2"
+                                className={`w-full text-white py-3.5 rounded-xl font-bold text-sm shadow-lg transition-all flex items-center justify-center gap-2 ${
+                                  isLightMode
+                                    ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-500/20 disabled:bg-slate-200 disabled:text-slate-400 disabled:border disabled:border-slate-300'
+                                    : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-900/30 disabled:bg-neutral-800 disabled:text-neutral-500 disabled:border disabled:border-neutral-700'
+                                } disabled:cursor-not-allowed`}
                               >
                                 {(isVerifying || confirmingPayment) ? <><RefreshCw size={14} className="animate-spin" /> Processing...</> : <>Confirm & Reserve <CheckCircle size={16} /></>}
                               </button>
@@ -1772,8 +1868,51 @@ export function HomePage() {
                     </div>
                   ) : (
                     <div className="space-y-3">
+                      {currentUser && (
+                        <div className="bg-neutral-900/60 border border-neutral-800 rounded-xl p-3 mb-2 flex items-center gap-2">
+                          <input 
+                            type="text" 
+                            value={trackForm.reservationId} 
+                            onChange={e => setTrackForm(f => ({ ...f, reservationId: e.target.value.toUpperCase() }))} 
+                            placeholder="Find booking by ID (e.g. X7B9QA)" 
+                            className="flex-1 bg-neutral-950 border border-neutral-700 rounded-lg px-3 py-1.5 text-xs font-mono uppercase text-white outline-none focus:border-emerald-500"
+                          />
+                          <button 
+                            type="button" 
+                            onClick={() => {
+                              if (!trackForm.reservationId.trim()) {
+                                setTrackedReservations(null);
+                                return;
+                              }
+                              const found = reservations.filter((r: any) => 
+                                r.id.toUpperCase() === trackForm.reservationId.trim().toUpperCase()
+                              );
+                              setTrackedReservations(found);
+                            }}
+                            className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors"
+                          >
+                            Find Booking
+                          </button>
+                          {trackedReservations && (
+                            <button 
+                              type="button" 
+                              onClick={() => {
+                                setTrackForm({ reservationId: '' });
+                                setTrackedReservations(null);
+                              }}
+                              className="text-neutral-400 hover:text-white text-xs px-2 py-1.5"
+                            >
+                              Reset
+                            </button>
+                          )}
+                        </div>
+                      )}
                       {(() => {
-                        const displayRes = currentUser ? userReservations : (trackedReservations || []);
+                        const displayRes = currentUser 
+                          ? (trackedReservations && trackedReservations.length > 0
+                              ? [...trackedReservations, ...userReservations.filter((ur: any) => !trackedReservations.some((tr: any) => tr.id === ur.id))]
+                              : userReservations)
+                          : (trackedReservations || []);
                         if (displayRes.length === 0) {
                           return (
                             <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-12 text-center max-w-lg mx-auto shadow-inner">
@@ -1800,15 +1939,7 @@ export function HomePage() {
                                 <div>
                                   <div className="flex items-center gap-2 mb-1">
                                     <span className="text-xs font-black text-white font-mono">{r.id}</span>
-                                    <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-wider border ${
-                                      r.status === 'pending-reschedule' 
-                                        ? 'bg-violet-900/40 text-violet-400 border-violet-700/50' 
-                                        : r.status === 'pending-refund'
-                                        ? 'bg-rose-900/40 text-rose-400 border-rose-700/50'
-                                        : 'bg-neutral-800 text-emerald-400 border-neutral-700'
-                                    }`}>
-                                      {r.status === 'pending-reschedule' ? 'PENDING RESCHEDULE' : r.status === 'pending-refund' ? 'PENDING REFUND' : r.status}
-                                    </span>
+                                    <ReservationStatusBadge status={r.status} />
                                   </div>
                                   <p className="text-sm font-semibold text-neutral-200">{format(new Date(r.date), 'MMM d, yyyy')} · {r.timeSlot} ({r.durationHours}h)</p>
                                   <p className="text-xs text-neutral-500">
@@ -1986,61 +2117,166 @@ export function HomePage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-10">
                   {(() => {
                     const currentDay = new Date().getDay();
-                    const isWeekend = currentDay === 0 || currentDay === 5 || currentDay === 6;
-                    const isHappyHourActive = isWeekend ? rates?.isWeekendHappyHourActive : rates?.isWeekdayHappyHourActive;
-                    const happyHourRate = isWeekend ? rates?.weekendHappyHourRate : rates?.weekdayHappyHourRate;
-                    const happyHourStart = isWeekend ? rates?.weekendHappyHourStart : rates?.weekdayHappyHourStart;
-                    const happyHourEnd = isWeekend ? rates?.weekendHappyHourEnd : rates?.weekdayHappyHourEnd;
-                    const dayTypeLabel = isWeekend ? 'Weekends (Fri-Sun)' : 'Weekdays (Mon-Thu)';
+                    const isWeekendToday = currentDay === 0 || currentDay === 5 || currentDay === 6;
+                    
+                    const isWeekdayActive = Boolean(rates?.isWeekdayHappyHourActive);
+                    const isWeekendActive = Boolean(rates?.isWeekendHappyHourActive);
+                    const hasAnyHappyHour = isWeekdayActive || isWeekendActive;
+                    const todayIsHappyHourActive = isWeekendToday ? isWeekendActive : isWeekdayActive;
 
-                    return [
+                    const weekdayRate = rates?.weekdayHappyHourRate || 120;
+                    const weekdayStart = fmt12(rates?.weekdayHappyHourStart || '12:00');
+                    const weekdayEnd = fmt12(rates?.weekdayHappyHourEnd || '15:00');
+
+                    const weekendRate = rates?.weekendHappyHourRate || 150;
+                    const weekendStart = fmt12(rates?.weekendHappyHourStart || '12:00');
+                    const weekendEnd = fmt12(rates?.weekendHappyHourEnd || '15:00');
+
+                    const displayRate = todayIsHappyHourActive
+                      ? (isWeekendToday ? weekendRate : weekdayRate)
+                      : (isWeekdayActive ? weekdayRate : weekendRate);
+
+                    let happyDesc = '';
+                    let scheduleFeatures: string[] = [];
+
+                    if (isWeekdayActive && isWeekendActive) {
+                      if (weekdayRate === weekendRate && weekdayStart === weekendStart && weekdayEnd === weekendEnd) {
+                        happyDesc = `Daily promo rate available every day from ${weekdayStart} to ${weekdayEnd}. Walk-in only.`;
+                        scheduleFeatures = [
+                          `Daily Promo: ${weekdayStart} – ${weekdayEnd}`,
+                          'Walk-in ONLY • First-Come First-Served',
+                          'Discounted table fee during promo window',
+                          'Cue sticks & ball sets included'
+                        ];
+                      } else {
+                        happyDesc = `Special discounted walk-in rate with both weekday and weekend windows active.`;
+                        scheduleFeatures = [
+                          `Mon–Thu: ₱${weekdayRate}/hr (${weekdayStart} – ${weekdayEnd})`,
+                          `Fri–Sun: ₱${weekendRate}/hr (${weekendStart} – ${weekendEnd})`,
+                          'Walk-in ONLY • No reservations',
+                          'Subject to table availability'
+                        ];
+                      }
+                    } else if (isWeekdayActive) {
+                      happyDesc = `Discounted walk-in rate available Mon–Thu from ${weekdayStart} to ${weekdayEnd}.`;
+                      scheduleFeatures = [
+                        `Mon–Thu Promo: ${weekdayStart} – ${weekdayEnd}`,
+                        'Fri–Sun: Regular Rates Apply',
+                        'Walk-in ONLY • No reservations',
+                        'Subject to table availability'
+                      ];
+                    } else if (isWeekendActive) {
+                      happyDesc = `Weekend promo walk-in rate available Fri–Sun from ${weekendStart} to ${weekendEnd}.`;
+                      scheduleFeatures = [
+                        `Fri–Sun Promo: ${weekendStart} – ${weekendEnd}`,
+                        'Mon–Thu: Regular Rates Apply',
+                        'Walk-in ONLY • No reservations',
+                        'Subject to table availability'
+                      ];
+                    }
+
+                    const cards = [
                       { name: 'Standard Play', rate: `₱${effectiveHourly}`, unit: '/ hour', desc: 'Walk-in regular play on any available table.', features: ['First-Come First-Served', 'Any available table', 'Cue sticks included', 'Timer monitored'], badge: null, color: 'neutral' },
                       { name: 'Reserved Table', rate: `₱${effectiveHourly}`, unit: '/ hour', desc: 'Book a specific time slot and table in advance.', features: ['Guaranteed table slot', `${rates?.downPaymentPercent ?? 25}% down payment`, 'Priority seating', 'Advance booking'], badge: 'Popular', color: 'emerald' },
-                      { 
-                        name: 'Happy Hour', 
-                        rate: `₱${happyHourRate || 200}`, 
-                        unit: '/ hour', 
-                        desc: `Discounted walk-in rate today (${dayTypeLabel}) from ${fmt12(happyHourStart || '18:00')}–${fmt12(happyHourEnd || '19:00')}.`, 
-                        features: ['Valid today only', 'Walk-in ONLY - No reservations', 'Discounted standard rate', 'Subject to availability'], 
-                        badge: 'Limited', 
-                        color: 'amber' 
-                      },
-                    ]
-                    .filter(card => card.name !== 'Happy Hour' || isHappyHourActive)
-                    .map(({ name, rate, unit, desc, features, badge, color }) => (
-                      <div key={name} className={`relative bg-neutral-900 border rounded-2xl p-6 flex flex-col ${color === 'emerald' ? 'border-emerald-600/50 shadow-lg shadow-emerald-950/50' : color === 'amber' ? 'border-amber-600/30' : 'border-neutral-800'}`}>
-                        {badge && <span className={`absolute -top-3 left-1/2 -translate-x-1/2 text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full ${color === 'emerald' ? 'bg-emerald-600 text-white' : color === 'amber' ? 'bg-amber-600 text-white' : 'bg-neutral-700 text-neutral-400'}`}>{badge}</span>}
-                        <p className={`text-xs uppercase tracking-widest font-semibold mb-2 ${color === 'emerald' ? 'text-emerald-400' : color === 'amber' ? 'text-amber-400' : 'text-neutral-500'}`}>{name}</p>
-                        <div className="flex items-end gap-1 mb-3"><span className={`text-4xl font-black ${color === 'emerald' ? 'text-emerald-400' : color === 'amber' ? 'text-amber-400' : 'text-white'}`}>{rate}</span><span className="text-neutral-500 text-sm mb-1">{unit}</span></div>
-                        <p className="text-neutral-500 text-xs mb-5 leading-relaxed">{desc}</p>
+                    ];
+
+                    if (hasAnyHappyHour) {
+                      cards.push({
+                        name: 'Happy Hour',
+                        rate: `₱${displayRate}`,
+                        unit: '/ hour',
+                        desc: happyDesc,
+                        features: scheduleFeatures,
+                        badge: todayIsHappyHourActive ? 'Active Today' : 'Promo',
+                        color: 'amber'
+                      });
+                    }
+
+                    return cards.map(({ name, rate, unit, desc, features, badge, color }) => (
+                      <div key={name} className={`relative border rounded-2xl p-6 flex flex-col transition-all ${
+                        isLightMode ? 'bg-white shadow-sm' : 'bg-neutral-900'
+                      } ${
+                        color === 'emerald' 
+                          ? (isLightMode ? 'border-emerald-500/60 shadow-emerald-500/10' : 'border-emerald-600/50 shadow-lg shadow-emerald-950/50') 
+                          : color === 'amber' 
+                          ? (isLightMode ? 'border-amber-500/50 shadow-amber-500/10' : 'border-amber-600/30') 
+                          : (isLightMode ? 'border-slate-200' : 'border-neutral-800')
+                      }`}>
+                        {badge && (
+                          <span className={`absolute -top-3 left-1/2 -translate-x-1/2 text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full text-white shadow-sm ${
+                            color === 'emerald' ? 'bg-emerald-600' : color === 'amber' ? 'bg-amber-600' : 'bg-slate-700'
+                          }`}>
+                            {badge}
+                          </span>
+                        )}
+                        <p className={`text-xs uppercase tracking-widest font-bold mb-2 ${
+                          color === 'emerald' 
+                            ? (isLightMode ? 'text-emerald-700' : 'text-emerald-400') 
+                            : color === 'amber' 
+                            ? (isLightMode ? 'text-amber-700' : 'text-amber-400') 
+                            : (isLightMode ? 'text-slate-600' : 'text-neutral-500')
+                        }`}>{name}</p>
+                        <div className="flex items-end gap-1 mb-3">
+                          <span className={`text-4xl font-black ${
+                            color === 'emerald' 
+                              ? (isLightMode ? 'text-emerald-600' : 'text-emerald-400') 
+                              : color === 'amber' 
+                              ? (isLightMode ? 'text-amber-600' : 'text-amber-400') 
+                              : (isLightMode ? 'text-slate-900' : 'text-white')
+                          }`} style={{ color: isLightMode ? (color === 'emerald' ? '#059669' : color === 'amber' ? '#d97706' : '#0f172a') : undefined }}>{rate}</span>
+                          <span className={`text-sm mb-1 font-semibold ${isLightMode ? 'text-slate-500' : 'text-neutral-500'}`}>{unit}</span>
+                        </div>
+                        <p className={`text-xs mb-5 leading-relaxed ${isLightMode ? 'text-slate-600' : 'text-neutral-500'}`}>{desc}</p>
                         <ul className="space-y-2 flex-1">
-                          {features.map(f => <li key={f} className="flex items-center gap-2 text-xs text-neutral-400"><CheckCircle size={12} className={color === 'emerald' ? 'text-emerald-500' : color === 'amber' ? 'text-amber-500' : 'text-neutral-600'} />{f}</li>)}
+                          {features.map(f => (
+                            <li key={f} className={`flex items-center gap-2 text-xs ${isLightMode ? 'text-slate-700 font-medium' : 'text-neutral-400'}`}>
+                              <CheckCircle size={13} className={
+                                color === 'emerald' 
+                                   ? (isLightMode ? 'text-emerald-600' : 'text-emerald-500') 
+                                   : color === 'amber' 
+                                   ? (isLightMode ? 'text-amber-600' : 'text-amber-500') 
+                                   : (isLightMode ? 'text-slate-500' : 'text-neutral-500')
+                              } />
+                              {f}
+                            </li>
+                          ))}
                         </ul>
                       </div>
                     ));
                   })()}
                 </div>
 
-                <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 max-w-4xl mx-auto">
-                  <h3 className="text-white font-semibold mb-4">Reservation Policies & Terms</h3>
-                  <div className="flex gap-3 bg-emerald-950/40 border border-emerald-700/30 rounded-xl p-4 mb-5">
-                    <div className="flex-shrink-0 w-7 h-7 rounded-full bg-emerald-600/20 flex items-center justify-center mt-0.5"><Info size={13} className="text-emerald-400" /></div>
+                <div className={`border rounded-2xl p-6 max-w-4xl mx-auto shadow-sm transition-colors reservation-policy-card ${isLightMode ? 'bg-white border-slate-200 shadow-slate-100' : 'bg-neutral-900 border-neutral-800'}`}>
+                  <h3 className={`font-bold mb-4 text-base ${isLightMode ? 'text-slate-900' : 'text-white'}`}>Reservation Policies & Terms</h3>
+                  <div className={`flex gap-3 border rounded-xl p-4 mb-5 transition-colors policy-redemption-banner ${isLightMode ? 'bg-emerald-50/90 border-emerald-200' : 'bg-emerald-950/40 border-emerald-700/30'}`}>
+                    <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center mt-0.5 ${isLightMode ? 'bg-emerald-100 text-emerald-700' : 'bg-emerald-600/20 text-emerald-400'}`}>
+                      <Info size={15} />
+                    </div>
                     <div>
-                      <p className="text-emerald-300 text-xs font-semibold mb-1">Reservation Redemption Policy</p>
-                      <p className="text-neutral-400 text-xs leading-relaxed">After completing your reservation and {rates?.downPaymentPercent ?? 25}% down payment, the <span className="text-white font-medium">remaining balance must be settled before or after your game</span> — payable via <span className="text-white font-medium">Cash or GCash</span>.</p>
+                      <p className={`text-xs font-bold mb-1 policy-banner-title ${isLightMode ? 'text-emerald-800' : 'text-emerald-300'}`}>Reservation Redemption Policy</p>
+                      <p className={`text-xs leading-relaxed policy-banner-desc ${isLightMode ? 'text-slate-700' : 'text-neutral-400'}`}>
+                        After completing your reservation and {rates?.downPaymentPercent ?? 25}% down payment, the <span className={`font-bold policy-banner-highlight ${isLightMode ? 'text-slate-900' : 'text-white font-medium'}`}>remaining balance must be settled before or after your game</span> — payable via <span className={`font-bold policy-banner-highlight ${isLightMode ? 'text-slate-900' : 'text-white font-medium'}`}>Cash or GCash</span>.
+                      </p>
                     </div>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                    {[
-                      { label: 'Reservation Rule', value: `Requires at least ${reservationTerms.advanceBookingHours || 1} hour(s) advance notice.` },
-                      { label: 'Online Booking Hours', value: bookingHoursDisplay },
-                      { label: 'Minimum Booking', value: `${reservationTerms.minHours || 1} hour(s)` },
-                      { label: 'Maximum Booking', value: 'Depending on closing cut-off' },
-                      { label: 'Grace Period', value: '15 minutes' },
-                      { label: 'Cancellation Policy', value: reservationTerms.cancellationPolicy },
-                    ].map(({ label, value }) => (
-                      <div key={label} className="flex justify-between py-2 border-b border-neutral-800/60"><span className="text-neutral-500">{label}</span><span className="text-neutral-200 font-medium text-right ml-2">{value}</span></div>
-                    ))}
+                    {(() => {
+                      const advanceHours = typeof reservationTerms?.advanceBookingHours === 'number' ? reservationTerms.advanceBookingHours : parseInt(String(reservationTerms?.advanceBookingHours)) || 1;
+                      const minHoursVal = typeof reservationTerms?.minHours === 'number' ? reservationTerms.minHours : parseInt(String(reservationTerms?.minHours)) || 1;
+                      return [
+                        { label: 'Reservation Rule', value: `Requires at least ${advanceHours} hour(s) advance notice.` },
+                        { label: 'Online Booking Hours', value: bookingHoursDisplay },
+                        { label: 'Minimum Booking', value: `${minHoursVal} hour(s)` },
+                        { label: 'Maximum Booking', value: 'Depending on closing cut-off' },
+                        { label: 'Grace Period', value: '15 minutes' },
+                        { label: 'Cancellation Policy', value: reservationTerms?.cancellationPolicy || 'Booking Policy' },
+                      ].map(({ label, value }) => (
+                        <div key={label} className={`flex justify-between py-2.5 border-b policy-rule-row ${isLightMode ? 'border-slate-200 text-slate-800' : 'border-neutral-800/60'}`}>
+                          <span className={`text-xs policy-rule-label ${isLightMode ? 'text-slate-600 font-semibold' : 'text-neutral-500'}`}>{label}</span>
+                          <span className={`text-xs font-bold text-right ml-2 policy-rule-value ${isLightMode ? 'text-slate-900' : 'text-neutral-200 font-medium'}`}>{value}</span>
+                        </div>
+                      ));
+                    })()}
                   </div>
                 </div>
               </div>
@@ -2112,7 +2348,13 @@ export function HomePage() {
                 </div>
 
                 <div className="border-y border-dashed border-neutral-300 py-3 space-y-1.5 text-[11px]">
-                  <div className="flex justify-between"><span>Booking ID:</span><span className="font-bold">{viewingReceipt.id}</span></div>
+                  <div className="flex justify-between items-center">
+                    <span>Booking ID:</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-bold">{viewingReceipt.id}</span>
+                      <ReservationStatusBadge status={viewingReceipt.status} />
+                    </div>
+                  </div>
                   <div className="flex justify-between"><span>Customer:</span><span>{viewingReceipt.customerName}</span></div>
                   <div className="flex justify-between"><span>Date:</span><span>{format(new Date(viewingReceipt.date), 'MM/dd/yyyy')}</span></div>
                   <div className="flex justify-between"><span>Time Slot:</span><span>{viewingReceipt.timeSlot} ({viewingReceipt.durationHours}h)</span></div>
@@ -2288,7 +2530,7 @@ export function HomePage() {
                 
                 <div>
                   <label className="block text-xs text-neutral-400 mb-1.5">New Time Slot (Duration: {rescheduleData.reservation.durationHours}h) *</label>
-                  <input type="time" style={{ colorScheme: 'dark' }} required value={rescheduleData.timeSlot} onChange={e => setRescheduleData(prev => prev ? ({ ...prev, timeSlot: e.target.value }) : null)} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-sm text-neutral-100 focus:border-violet-500 outline-none text-center transition-colors" />
+                  <input type="time" style={{ colorScheme: isLightMode ? 'light' : 'dark' }} required value={rescheduleData.timeSlot} onChange={e => setRescheduleData(prev => prev ? ({ ...prev, timeSlot: e.target.value }) : null)} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-sm text-neutral-100 focus:border-violet-500 outline-none text-center transition-colors" />
                 </div>
                 
                 <div className="flex gap-2 pt-2">
@@ -2539,6 +2781,29 @@ export function HomePage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* 🟢 FLOATING LIGHT/DARK MODE TOGGLE BUTTON */}
+      <motion.button
+        type="button"
+        initial={{ scale: 0, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        whileHover={{ scale: 1.05 }}
+        whileTap={{ scale: 0.95 }}
+        onClick={toggleLightMode}
+        title={isLightMode ? "Switch to Dark Mode" : "Switch to Light Mode"}
+        className={`fixed bottom-6 right-6 z-40 flex items-center gap-2.5 px-4 py-3 rounded-full font-bold text-xs shadow-2xl transition-all duration-300 backdrop-blur-md border cursor-pointer ${
+          isLightMode
+            ? 'bg-white/95 text-slate-800 border-slate-200 shadow-slate-400/40 hover:bg-white ring-1 ring-slate-200'
+            : 'bg-neutral-900/90 text-neutral-100 border-neutral-700/80 shadow-black/80 hover:bg-neutral-800 ring-1 ring-neutral-700/50'
+        }`}
+      >
+        <span className="flex items-center justify-center w-6 h-6 rounded-full bg-emerald-500/15 text-emerald-500 shrink-0">
+          {isLightMode ? <Moon size={15} className="text-emerald-600" /> : <Sun size={15} className="text-amber-400" />}
+        </span>
+        <span className="font-semibold tracking-wide">
+          {isLightMode ? 'Dark Mode' : 'Light Mode'}
+        </span>
+      </motion.button>
     </div>
   );
 }

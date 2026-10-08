@@ -14,8 +14,23 @@
     "directories": {
       "output": "release/"
     },
+    "asar": true,
+    "asarUnpack": [
+      "server.cjs",
+      "node_modules/sqlite3/**/*"
+    ],
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "server.cjs",
+      "package.json"
+    ],
     "win": {
-      "target": "nsis"
+      "target": [
+        "nsis",
+        "zip"
+      ],
+      "icon": "electron/icon.ico"
     }
   },
   "dependencies": {
