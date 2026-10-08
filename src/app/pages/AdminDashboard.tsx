@@ -7,6 +7,7 @@ import {
   Wifi, WifiOff, Download, CheckCircle2, CheckCircle, AlertTriangle, X
 } from 'lucide-react';
 import { useNavigate } from 'react-router';
+import { PesoSign } from '../components/PesoSign';
 import { format, isToday, isTomorrow } from 'date-fns';
 
 export function AdminDashboard() {
@@ -332,7 +333,7 @@ export function AdminDashboard() {
               <p className="text-sm text-neutral-500">Full control over One Shot Bar & Billiards operations.</p>
             </div>
             <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 px-3 py-2 rounded-xl flex-shrink-0">
-              <DollarSign size={15} className="text-emerald-500" />
+              <PesoSign size={15} className="text-emerald-500" />
               <div>
                 <p className="text-xs font-black text-emerald-500">₱{totalRevenue.toLocaleString()}</p>
                 <p className="text-[10px] text-emerald-600/80 font-bold uppercase tracking-wider">Total Revenue</p>

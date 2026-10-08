@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { useAppContext } from './context/AppContext';
 import { LockScreen } from './components/LockScreen';
+import { PesoSign } from './components/PesoSign';
 import logoImg from 'figma:asset/40eb82831843e17a3c48a360fd80f0aaaa58ddc8.png';
 import { AnimatePresence, motion } from 'motion/react';
 
@@ -16,7 +17,7 @@ const navItems = [
   { to: '/admin/users',             icon: Users,           label: 'User Management' },
   { to: '/admin/tables',            icon: Table2,          label: 'Table Management' },
   { to: '/admin/events',            icon: CalendarX2,      label: 'Events & Calendar' },
-  { to: '/admin/policy-rates',      icon: DollarSign,      label: 'Policy & Rates' }, 
+  { to: '/admin/policy-rates',      icon: PesoSign,        label: 'Policy & Rates' }, 
   { to: '/admin/announcements',     icon: Megaphone,       label: 'Announcements' },
   { to: '/admin/analytics',         icon: BarChart3,       label: 'Analytics' },
   { to: '/admin/activity',          icon: Shield,          label: 'Activity Log' },

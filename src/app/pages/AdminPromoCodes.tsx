@@ -1,31 +1,58 @@
 // Full promo code management (Admin only — create, edit, toggle, delete)
 import { useState } from 'react';
 import { useAppContext, generateRandomPromoCode, PromoCode } from '../context/AppContext';
-import { Plus, X, Tag, Copy, ToggleLeft, ToggleRight, Trash2, Wand2, CheckCircle, RefreshCw } from 'lucide-react';
+import { Plus, X, Tag, Copy, ToggleLeft, ToggleRight, Trash2, Wand2, CheckCircle, RefreshCw, Edit2 } from 'lucide-react';
 import { format } from 'date-fns';
 
 export function AdminPromoCodes() {
-  const { promoCodes, addPromoCode, togglePromoCode, deletePromoCode } = useAppContext();
+  const { promoCodes, addPromoCode, updatePromoCode, togglePromoCode, deletePromoCode } = useAppContext();
+  const [editingPromoId, setEditingPromoId] = useState<string | null>(null);
 
   const [showForm, setShowForm] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [form, setForm] = useState({ code: '', discountPercent: 10, description: '', maxUsage: 100, isActive: true, hasExpiry: false, expiresAt: '' });
 
+  const handleOpenCreate = () => {
+    setEditingPromoId(null);
+    setForm({ code: '', discountPercent: 10, description: '', maxUsage: 100, isActive: true, hasExpiry: false, expiresAt: '' });
+    setShowForm(true);
+  };
+
+  const handleOpenEdit = (pc: PromoCode) => {
+    setEditingPromoId(pc.id);
+    setForm({
+      code: pc.code,
+      discountPercent: pc.discountPercent,
+      description: pc.description,
+      maxUsage: pc.maxUsage,
+      isActive: pc.isActive,
+      hasExpiry: !!pc.expiresAt,
+      expiresAt: pc.expiresAt ? format(new Date(pc.expiresAt), "yyyy-MM-dd'T'HH:mm") : ''
+    });
+    setShowForm(true);
+  };
+
   const handleGenerateCode = () => setForm(f => ({ ...f, code: generateRandomPromoCode() }));
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.code || !form.description) return;
-    addPromoCode({
+    const payload = {
       code: form.code.toUpperCase(),
       discountPercent: form.discountPercent,
       description: form.description,
       isActive: form.isActive,
       maxUsage: form.maxUsage,
       expiresAt: form.hasExpiry && form.expiresAt ? new Date(form.expiresAt) : undefined,
-    });
+    };
+    if (editingPromoId) {
+      updatePromoCode(editingPromoId, payload);
+    } else {
+      addPromoCode(payload);
+    }
     setShowForm(false);
+    setEditingPromoId(null);
     setForm({ code: '', discountPercent: 10, description: '', maxUsage: 100, isActive: true, hasExpiry: false, expiresAt: '' });
   };
 
@@ -63,7 +90,7 @@ export function AdminPromoCodes() {
 
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm text-neutral-400">{promoCodes.length} promo code{promoCodes.length !== 1 ? 's' : ''}</p>
-        <button onClick={() => setShowForm(true)}
+        <button onClick={handleOpenCreate}
           className="flex items-center gap-2 bg-violet-600 hover:bg-violet-500 text-white text-sm px-4 py-2.5 rounded-xl font-semibold transition-all shadow-lg shadow-violet-900/30">
           <Plus size={15} /> Generate Code
         </button>
@@ -111,6 +138,10 @@ export function AdminPromoCodes() {
                     className="p-2 rounded-lg text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 transition-colors">
                     {pc.isActive ? <ToggleRight size={18} className="text-emerald-400" /> : <ToggleLeft size={18} />}
                   </button>
+                  <button onClick={() => handleOpenEdit(pc)} title="Edit code"
+                    className="p-2 rounded-lg text-neutral-500 hover:text-blue-400 hover:bg-neutral-800 transition-colors">
+                    <Edit2 size={15} />
+                  </button>
                   {deleteConfirm === pc.id ? (
                     <div className="flex items-center gap-1">
                       <button onClick={() => { deletePromoCode(pc.id); setDeleteConfirm(null); }}
@@ -136,8 +167,8 @@ export function AdminPromoCodes() {
           <div className="bg-neutral-950 border border-amber-900/30 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto">
             <div className="px-6 py-4 border-b border-neutral-800 flex justify-between items-center sticky top-0 bg-neutral-950">
               <div>
-                <h2 className="text-base font-bold text-neutral-100">Generate Promo Code</h2>
-                <p className="text-xs text-neutral-500">Create a new discount code</p>
+                <h2 className="text-base font-bold text-neutral-100">{editingPromoId ? "Edit Promo Code" : "Generate Promo Code"}</h2>
+                <p className="text-xs text-neutral-500">{editingPromoId ? "Modify discount code details" : "Create a new discount code"}</p>
               </div>
               <button onClick={() => setShowForm(false)} className="p-2 text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 rounded-lg"><X size={16} /></button>
             </div>
@@ -207,7 +238,7 @@ export function AdminPromoCodes() {
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors">Cancel</button>
                 <button type="submit" className="flex-1 bg-violet-600 hover:bg-violet-500 text-white text-sm rounded-xl font-semibold py-2.5 flex items-center justify-center gap-2 shadow-lg shadow-violet-900/30">
-                  <RefreshCw size={14} /> Create Promo Code
+                  <RefreshCw size={14} /> {editingPromoId ? "Save Changes" : "Create Promo Code"}
                 </button>
               </div>
             </form>

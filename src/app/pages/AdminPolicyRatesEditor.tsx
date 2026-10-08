@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useAppContext } from '../context/AppContext';
+import { PesoSign } from '../components/PesoSign';
 import { 
   Save, Clock, DollarSign, AlertCircle, ShieldCheck, 
   FileText, ToggleLeft, ToggleRight, X,
@@ -399,7 +400,7 @@ export default function AdminPolicyRatesEditor() {
         <div className="space-y-8">
           <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6 shadow-sm">
             <h2 className="text-xl font-bold text-neutral-100 flex items-center gap-2 mb-6">
-              <DollarSign className="text-emerald-500" /> Base Rates & Store Hours
+              <PesoSign className="text-emerald-500" size={20} /> Base Rates & Store Hours
             </h2>
             <div className="grid grid-cols-2 gap-4 mb-6">
               <div>

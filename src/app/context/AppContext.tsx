@@ -1045,6 +1045,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const newPromo = { ...i, id, createdAt: new Date(), usageCount: 0 };
     setPromoCodes(prev => [...prev, newPromo]);
     syncToDB('/api/promo-codes', 'POST', newPromo, `Generated promo code`).then(runCloudBackup).catch(()=>{});
+
+    const supabasePayload: any = {
+      id,
+      code: i.code.trim().toUpperCase(),
+      discount_percent: i.discountPercent,
+      description: i.description || '',
+      is_active: i.isActive ? 1 : 0,
+      is_limited_uses: i.isLimitedUses ? 1 : 0,
+      max_usage: i.maxUsage,
+      usage_count: 0,
+      start_date: i.startDate ? new Date(i.startDate).toISOString() : null,
+      expires_at: i.expiresAt ? new Date(i.expiresAt).toISOString() : null
+    };
+    supabase.from('promo_codes').insert([supabasePayload]).then();
+
     addActivity('admin_action', `Generated promo code: ${i.code}`);
     return id;
   };
@@ -1052,19 +1067,37 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const updatePromoCode = (id: string, u: Partial<Omit<PromoCode, 'id'|'createdAt'|'usageCount'>>) => {
     setPromoCodes(prev => prev.map(p => p.id === id ? { ...p, ...u } : p));
     syncToDB(`/api/promo-codes/${id}`, 'PUT', u, `Promo code updated`).then(runCloudBackup).catch(()=>{});
+
+    const supabasePayload: any = {};
+    if (u.code !== undefined) supabasePayload.code = u.code.trim().toUpperCase();
+    if (u.discountPercent !== undefined) supabasePayload.discount_percent = u.discountPercent;
+    if (u.description !== undefined) supabasePayload.description = u.description;
+    if (u.isActive !== undefined) supabasePayload.is_active = u.isActive ? 1 : 0;
+    if (u.isLimitedUses !== undefined) supabasePayload.is_limited_uses = u.isLimitedUses ? 1 : 0;
+    if (u.maxUsage !== undefined) supabasePayload.max_usage = u.maxUsage;
+    if (u.startDate !== undefined) supabasePayload.start_date = u.startDate ? new Date(u.startDate).toISOString() : null;
+    if (u.expiresAt !== undefined) supabasePayload.expires_at = u.expiresAt ? new Date(u.expiresAt).toISOString() : null;
+    if (Object.keys(supabasePayload).length > 0) {
+      supabase.from('promo_codes').update(supabasePayload).eq('id', id).then();
+    }
+
     addActivity('admin_action', `Updated promo code ID: ${id}`);
   };
   
   const togglePromoCode = (id: string) => {
     const target = promoCodes.find(p => p.id === id);
     setPromoCodes(prev => prev.map(p => p.id === id ? { ...p, isActive: !p.isActive } : p));
-    if (target) syncToDB(`/api/promo-codes/${id}`, 'PUT', { isActive: !target.isActive }, 'Toggled promo').then(runCloudBackup).catch(()=>{});
+    if (target) {
+      syncToDB(`/api/promo-codes/${id}`, 'PUT', { isActive: !target.isActive }, 'Toggled promo').then(runCloudBackup).catch(()=>{});
+      supabase.from('promo_codes').update({ is_active: !target.isActive ? 1 : 0 }).eq('id', id).then();
+    }
     addActivity('admin_action', `Toggled visibility for promo ID: ${id}`);
   };
   
   const deletePromoCode = (id: string) => {
     setPromoCodes(prev => prev.filter(p => p.id !== id));
     syncToDB(`/api/promo-codes/${id}`, 'DELETE', {}, 'Deleted promo').then(runCloudBackup).catch(()=>{});
+    supabase.from('promo_codes').delete().eq('id', id).then();
     addActivity('admin_action', `Deleted promo code ID: ${id}`);
   };
   

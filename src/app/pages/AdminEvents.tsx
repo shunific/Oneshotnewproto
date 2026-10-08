@@ -281,11 +281,17 @@ export function AdminEvents() {
   const openPromoEdit = (p: any) => {
     setEditingPromoId(p.id);
     setPromoForm({ 
-      code: p.code, discountPercent: p.discountPercent, description: p.description, 
-      isLimitedUses: p.isLimitedUses !== false, maxUsage: p.maxUsage, deleteWhenDepleted: p.deleteWhenDepleted || false,
-      isActive: p.isActive, 
-      hasExpiry: !!p.expiresAt, expiresAt: p.expiresAt ? format(new Date(p.expiresAt), "yyyy-MM-dd'T'HH:mm") : '',
-      hasStart: !!p.startDate, startDate: p.startDate ? format(new Date(p.startDate), "yyyy-MM-dd'T'HH:mm") : '' 
+      code: p.code, 
+      discountPercent: p.discountPercent ?? p.discount_percent ?? 10, 
+      description: p.description || '', 
+      isLimitedUses: p.isLimitedUses !== false && p.is_limited_uses !== 0, 
+      maxUsage: p.maxUsage ?? p.max_usage ?? 100, 
+      deleteWhenDepleted: p.deleteWhenDepleted || false,
+      isActive: p.isActive !== false && p.is_active !== 0, 
+      hasExpiry: !!(p.expiresAt || p.expires_at), 
+      expiresAt: (p.expiresAt || p.expires_at) ? format(new Date(p.expiresAt || p.expires_at), "yyyy-MM-dd'T'HH:mm") : '',
+      hasStart: !!(p.startDate || p.start_date), 
+      startDate: (p.startDate || p.start_date) ? format(new Date(p.startDate || p.start_date), "yyyy-MM-dd'T'HH:mm") : '' 
     });
     setDayActionDate(null); setShowPromoModal(true);
   };
@@ -511,6 +517,8 @@ export function AdminEvents() {
     if (editingPromoId) updatePromoCode(editingPromoId, payload);
     else addPromoCode(payload);
     
+    setEditingPromoId(null);
+    setPromoForm(emptyPromoForm);
     setShowPromoConfirm(false);
     setShowPromoModal(false); 
     flash('Promo code saved successfully!');
