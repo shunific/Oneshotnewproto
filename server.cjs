@@ -1121,20 +1121,29 @@ app.delete('/api/closed-dates/:id', (req, res) => {
 
 app.put('/api/promo-codes/:id', (req, res) => {
   const updates = req.body;
-  const keys = Object.keys(updates);
+  const allowedCols = {
+    code: 'code',
+    discountPercent: 'discount_percent',
+    discount_percent: 'discount_percent',
+    description: 'description',
+    isActive: 'is_active',
+    is_active: 'is_active',
+    isLimitedUses: 'is_limited_uses',
+    is_limited_uses: 'is_limited_uses',
+    maxUsage: 'max_usage',
+    max_usage: 'max_usage',
+    usageCount: 'usage_count',
+    usage_count: 'usage_count',
+    startDate: 'start_date',
+    start_date: 'start_date',
+    expiresAt: 'expires_at',
+    expires_at: 'expires_at'
+  };
+
+  const keys = Object.keys(updates).filter(k => allowedCols[k]);
   if (keys.length === 0) return res.json({ message: "Nothing to update" });
 
-  const setClause = keys.map((k) => {
-    if (k === 'discountPercent') return 'discount_percent = ?';
-    if (k === 'isActive') return 'is_active = ?';
-    if (k === 'isLimitedUses') return 'is_limited_uses = ?';
-    if (k === 'maxUsage') return 'max_usage = ?';
-    if (k === 'usageCount') return 'usage_count = ?';
-    if (k === 'startDate') return 'start_date = ?';
-    if (k === 'expiresAt') return 'expires_at = ?';
-    return `${k} = ?`;
-  }).join(', ');
-
+  const setClause = keys.map((k) => `${allowedCols[k]} = ?`).join(', ');
   const values = keys.map((k) => {
     const val = updates[k];
     if (typeof val === 'boolean') return val ? 1 : 0;
@@ -1143,7 +1152,10 @@ app.put('/api/promo-codes/:id', (req, res) => {
   values.push(req.params.id);
 
   db.run(`UPDATE promo_codes SET ${setClause} WHERE id = ?`, values, function (err) {
-    if (err) return res.status(500).json({ error: err.message });
+    if (err) {
+      console.error('❌ Failed to update promo code in SQLite:', err.message);
+      return res.status(500).json({ error: err.message });
+    }
     res.json({ message: "Promo updated." });
   });
 });

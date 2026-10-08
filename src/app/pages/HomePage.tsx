@@ -1089,13 +1089,17 @@ export function HomePage() {
       </header>
 
       {/* ── Section Navigation ── */}
-      <nav className="fixed top-[72px] left-0 right-0 z-40 bg-neutral-900/95 backdrop-blur-sm border-b border-neutral-800/60 flex items-center justify-center gap-1 px-4 overflow-x-auto h-[54px] hide-scrollbar">
+      <nav className={`fixed top-[72px] left-0 right-0 z-40 backdrop-blur-sm border-b flex items-center justify-center gap-1 px-4 overflow-x-auto h-[54px] hide-scrollbar transition-colors ${
+        isLightMode ? 'bg-white/95 border-slate-200 shadow-xs' : 'bg-neutral-900/95 border-neutral-800/60'
+      }`}>
         {allNavSections.map(({ id, label }) => (
           <button
             key={id}
             onClick={() => handleNavClick(id)}
             className={`relative px-4 py-3 text-xs font-semibold whitespace-nowrap transition-all ${
-              activeSection === id ? 'text-emerald-400' : 'text-neutral-500 hover:text-neutral-300'
+              activeSection === id 
+                ? (isLightMode ? 'text-emerald-700 font-bold' : 'text-emerald-400 font-bold') 
+                : (isLightMode ? 'text-slate-600 hover:text-slate-950' : 'text-neutral-500 hover:text-neutral-300')
             }`}
           >
             {label}
@@ -1114,7 +1118,7 @@ export function HomePage() {
           {activeSection === 'home' && (
             <motion.div key="home" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }}>
               
-              <div className="relative h-[70vh] min-h-[500px] overflow-hidden group bg-neutral-950">
+              <div className="relative h-[70vh] min-h-[500px] overflow-hidden group bg-neutral-950 hero-banner">
                 <AnimatePresence mode="wait" custom={heroSlideDir}>
                   <motion.div
                     key={heroSlideIdx}
@@ -1172,7 +1176,7 @@ export function HomePage() {
                     ].map(({ value, label, color }) => (
                       <div key={label} className="p-6 text-center">
                         <p className={`text-3xl font-black ${color} mb-1`}>{value}</p>
-                        <p className="text-xs text-neutral-500 font-medium uppercase tracking-wider">{label}</p>
+                        <p className={`text-xs font-bold uppercase tracking-wider ${isLightMode ? 'text-slate-600' : 'text-neutral-500 font-medium'}`}>{label}</p>
                       </div>
                     ));
                   })()}
@@ -1593,7 +1597,7 @@ export function HomePage() {
                                 </div>
                                 <div className="col-span-1">
                                   <label className="block text-xs text-neutral-400 mb-1.5">Start Time *</label>
-                                  <input type="time" style={{ colorScheme: 'dark' }} value={resForm.timeSlot} onChange={e => setResForm(f => ({ ...f, timeSlot: e.target.value }))} className={`w-full bg-neutral-950 border rounded-xl px-3 py-2.5 text-sm text-neutral-100 text-center outline-none ${['closed', 'happyhour', 'full', 'table_conflict', 'active_conflict'].includes(timeValidation) ? 'border-rose-500/50 text-rose-200' : 'border-neutral-800 focus:border-emerald-500'}`} />
+                                  <input type="time" style={{ colorScheme: isLightMode ? 'light' : 'dark' }} value={resForm.timeSlot} onChange={e => setResForm(f => ({ ...f, timeSlot: e.target.value }))} className={`w-full bg-neutral-950 border rounded-xl px-3 py-2.5 text-sm text-neutral-100 text-center outline-none ${['closed', 'happyhour', 'full', 'table_conflict', 'active_conflict'].includes(timeValidation) ? 'border-rose-500/50 text-rose-200' : 'border-neutral-800 focus:border-emerald-500'}`} />
                                 </div>
                                 <div className="col-span-1">
                                   <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end flex-shrink-0">
@@ -2457,7 +2461,7 @@ export function HomePage() {
                 
                 <div>
                   <label className="block text-xs text-neutral-400 mb-1.5">New Time Slot (Duration: {rescheduleData.reservation.durationHours}h) *</label>
-                  <input type="time" style={{ colorScheme: 'dark' }} required value={rescheduleData.timeSlot} onChange={e => setRescheduleData(prev => prev ? ({ ...prev, timeSlot: e.target.value }) : null)} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-sm text-neutral-100 focus:border-violet-500 outline-none text-center transition-colors" />
+                  <input type="time" style={{ colorScheme: isLightMode ? 'light' : 'dark' }} required value={rescheduleData.timeSlot} onChange={e => setRescheduleData(prev => prev ? ({ ...prev, timeSlot: e.target.value }) : null)} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-sm text-neutral-100 focus:border-violet-500 outline-none text-center transition-colors" />
                 </div>
                 
                 <div className="flex gap-2 pt-2">
