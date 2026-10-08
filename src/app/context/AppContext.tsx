@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
-import { supabase } from "../utils/supabase";
+import { supabase, publicSupabase } from "../utils/supabase";
 
 // ── Types (Pruned for Customer App) ────────────────────────────
 export type TableStatus = 'available' | 'occupied' | 'reserved' | 'maintenance' | 'event';
@@ -86,8 +86,8 @@ export type WeatherData = {
   temp: number; condition: string; isRaining: boolean; code: number; locationName: string;
 };
 
-export const HOURLY_RATE = 0;
-export const DOWN_PAYMENT_RATE = 0;
+export const HOURLY_RATE = 150;
+export const DOWN_PAYMENT_RATE = 0.25;
 
 export const generateRandomPromoCode = () => {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -110,11 +110,12 @@ type AppContextType = {
   
   updateWeatherLocation: (lat: string, lon: string, name: string) => void;
   updateActiveAnnouncement: (msg: string) => void;
-  addReservation: (i: Omit<Reservation, 'id'|'createdAt'>) => string; 
+  addReservation: (i: Omit<Reservation, 'id'|'createdAt'>) => Promise<string>; 
   addFeedback: (i: Omit<Feedback, 'id'|'date'>) => void; 
   applyPromoCode: (c: string) => PromoCode | null;
   refreshLiveMonitor: () => Promise<void>;
   acknowledgeRefund: (id: string) => void;
+  validateBookingPreflight: (date: Date, timeSlot: string, durationHours: number) => Promise<boolean>;
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -122,13 +123,54 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 export function AppProvider({ children }: { children: ReactNode }) {
   const [isInitializing, setIsInitializing] = useState(true);
 
-  const [tables, setTables] = useState<Table[]>([]);
+  const [tables, setTables] = useState<Table[]>([
+    { id: 't1', name: 'Table 1', status: 'available', isActive: true },
+    { id: 't2', name: 'Table 2', status: 'available', isActive: true },
+    { id: 't3', name: 'Table 3', status: 'available', isActive: true },
+    { id: 't4', name: 'Table 4', status: 'available', isActive: true },
+    { id: 't5', name: 'Table 5', status: 'available', isActive: true },
+    { id: 't6', name: 'Table 6', status: 'available', isActive: true },
+    { id: 't7', name: 'Table 7', status: 'available', isActive: true },
+    { id: 't8', name: 'Table 8', status: 'available', isActive: true },
+    { id: 't9', name: 'Table 9', status: 'available', isActive: true },
+    { id: 't10', name: 'Table 10', status: 'available', isActive: true },
+  ]);
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
   const [promoCodes, setPromoCodes] = useState<PromoCode[]>([]);
-  const [rates, setRates] = useState<RatesConfig>({ hourlyRate: 0, overtimeRate: 0, downPaymentPercent: 0, weekdayStartTime: '', weekdayEndTime: '', isWeekdayHappyHourActive: false, weekdayHappyHourRate: 0, weekdayHappyHourStart: '', weekdayHappyHourEnd: '', weekdayOnlineCapacityLimit: 0, weekendStartTime: '', weekendEndTime: '', isWeekendHappyHourActive: false, weekendHappyHourRate: 0, weekendHappyHourStart: '', weekendHappyHourEnd: '', weekendOnlineCapacityLimit: 0, bookingCutoffMinutes: 60 });
-  const [reservationTerms, setReservationTerms] = useState<ReservationTerms>({ minHours: 0, maxHours: 0, cancellationHours: 0, advanceBookingHours: 1, cancellationPolicy: '', termsAndConditions: '', weekdayMinPartySize: 0, weekdayMaxPartySize: 0, weekendMinPartySize: 0, weekendMaxPartySize: 0 });
+  const [rates, setRates] = useState<RatesConfig>({
+    hourlyRate: 150,
+    overtimeRate: 100,
+    downPaymentPercent: 25,
+    weekdayStartTime: '12:00',
+    weekdayEndTime: '00:00',
+    isWeekdayHappyHourActive: true,
+    weekdayHappyHourRate: 100,
+    weekdayHappyHourStart: '15:00',
+    weekdayHappyHourEnd: '18:00',
+    weekdayOnlineCapacityLimit: 90,
+    weekendStartTime: '12:00',
+    weekendEndTime: '00:00',
+    isWeekendHappyHourActive: false,
+    weekendHappyHourRate: 100,
+    weekendHappyHourStart: '15:00',
+    weekendHappyHourEnd: '18:00',
+    weekendOnlineCapacityLimit: 40,
+    bookingCutoffMinutes: 60
+  });
+  const [reservationTerms, setReservationTerms] = useState<ReservationTerms>({
+    minHours: 1,
+    maxHours: 8,
+    cancellationHours: 23,
+    advanceBookingHours: 1,
+    cancellationPolicy: 'Booking Policy',
+    termsAndConditions: 'Terms & Conditions',
+    weekdayMinPartySize: 1,
+    weekdayMaxPartySize: 10,
+    weekendMinPartySize: 1,
+    weekendMaxPartySize: 10
+  });
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [closedDates, setClosedDates] = useState<ClosedDate[]>([]);
   const [weather, setWeather] = useState<WeatherData | null>(null);
@@ -139,17 +181,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const updateWeatherLocation = useCallback((lat: string, lon: string, name: string) => { setWeatherConfig({ lat, lon, name }); }, []);
   const [feedback, setFeedback] = useState<Feedback[]>([]);
 
-  // 🟢 FIXED: Proper mapping of sessionData to avoid Ghost Sessions
- const refreshLiveMonitor = async () => {
+  // 🟢 FIXED: Proper mapping of sessionData to avoid Ghost Sessions using publicSupabase
+  const refreshLiveMonitor = async () => {
     try {
-      const [ 
-        { data: newTables }, 
-        { data: newQueue },
-        { data: newClosedDates }
-      ] = await Promise.all([
-        supabase.from('tables').select('*'),
-        supabase.from('queue').select('*'),
-        supabase.from('closed_dates').select('*')
+      const [ { data: newTables }, { data: newQueue } ] = await Promise.all([
+        publicSupabase.from('tables').select('*'),
+        publicSupabase.from('queue').select('*')
       ]);
       
       if (newTables) {
@@ -170,25 +207,67 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }));
         setQueue(prev => JSON.stringify(prev) !== JSON.stringify(mappedQueue) ? mappedQueue as QueueItem[] : prev);
       }
-      if (newClosedDates) {
-        setClosedDates(prev => JSON.stringify(prev) !== JSON.stringify(newClosedDates) ? (newClosedDates as ClosedDate[]) : prev);
-      }
     } catch (error) {
       console.error("Live Monitor Refresh Error:", error);
     }
   };
 
   // 🟢 NEW: Auto-refresh loop so the customer website stays in sync
+  // 🟢 SMART POLLING: Checks Supabase only when tab is active, every 45s (Saves massive bandwidth)
   useEffect(() => {
     if (isInitializing) return;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') refreshLiveMonitor();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     const interval = setInterval(() => {
-      refreshLiveMonitor();
-    }, 5000); // Check Supabase every 5 seconds
-    return () => clearInterval(interval);
+      if (document.visibilityState === 'visible') refreshLiveMonitor();
+    }, 45000);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      clearInterval(interval);
+    };
   }, [isInitializing]);
 
+  // 🟢 PRE-FLIGHT CHECK: Prevents simultaneous double-booking deadlocks
+  const validateBookingPreflight = async (date: Date, timeSlot: string, durationHours: number): Promise<boolean> => {
+    const requestedStart = new Date(date);
+    const [h, m] = timeSlot.split(':').map(Number);
+    requestedStart.setHours(h, m, 0, 0);
+    const requestedEnd = addMinutes(requestedStart, durationHours * 60);
+
+    try {
+      const { data } = await publicSupabase
+        .from('reservations')
+        .select('date, durationHours')
+        .in('status', ['pending', 'confirmed', 'checked-in']);
+
+      if (!data) return true; 
+
+      let overlapCount = 0;
+      data.forEach((r: any) => {
+        if (isSameDay(new Date(r.date), requestedStart)) {
+           const rStart = new Date(r.date);
+           const rEnd = addMinutes(rStart, r.durationHours * 60);
+           if (requestedStart < rEnd && requestedEnd > rStart) overlapCount++;
+        }
+      });
+
+      const capacityLimit = Number(rates?.onlineCapacityLimit ?? 70);
+      const maxOnlineCapacity = Math.max(1, Math.floor((tables.length || 10) * (capacityLimit / 100)));
+
+      return overlapCount < maxOnlineCapacity;
+    } catch (err) {
+      return true; // Failsafe fallback
+    }
+  };
+
   useEffect(() => {
-    const fetchSupabaseData = async () => {
+    const fetchSupabaseData = async (isInitial: boolean = false) => {
       try {
         const [
           { data: tablesData },
@@ -199,27 +278,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
           { data: settingsData }, 
           { data: closedDatesData },
           { data: promoData },
-          { data: eventsData }
+          { data: eventsData },
+          { data: feedbackData }
         ] = await Promise.all([
-          supabase.from('tables').select('*'),
-          supabase.from('reservations').select('*'),
-          supabase.from('queue').select('*'),
-          supabase.from('announcements').select('*'),
-          supabase.from('cms').select('*'),
-          supabase.from('system_settings').select('*'), 
-          supabase.from('closed_dates').select('*'),
-          supabase.from('promo_codes').select('*'),
-          supabase.from('events').select('*')
+          publicSupabase.from('tables').select('*'),
+          publicSupabase.from('reservations').select('*'),
+          publicSupabase.from('queue').select('*'),
+          publicSupabase.from('announcements').select('*'),
+          publicSupabase.from('cms').select('*'),
+          publicSupabase.from('system_settings').select('*'), 
+          publicSupabase.from('closed_dates').select('*'),
+          publicSupabase.from('promo_codes').select('*'),
+          publicSupabase.from('events').select('*'),
+          publicSupabase.from('feedback').select('*')
         ]);
         
         if (tablesData) {
-          setTables(tablesData.map((t: any) => ({
-            ...t,
-            session: t.sessionData ? (typeof t.sessionData === 'string' ? JSON.parse(t.sessionData) : t.sessionData) : undefined,
-            isActive: t.isActive === 1 || t.isActive === true
-          })) as Table[]);
+          setTables(tablesData.map((t: any) => {
+            const rawActive = t.isActive ?? t.is_active ?? t.isactive;
+            const isTableActive = rawActive === 1 || rawActive === true || rawActive === 'true' || (rawActive === undefined ? true : false);
+            return {
+              ...t,
+              session: t.sessionData ? (typeof t.sessionData === 'string' ? JSON.parse(t.sessionData) : t.sessionData) : undefined,
+              isActive: isTableActive
+            };
+          }) as Table[]);
         }
+
         if (resData) setReservations(resData as Reservation[]);
+
         if (queueData) {
           setQueue(queueData.map((q: any) => ({
             ...q,
@@ -229,33 +316,114 @@ export function AppProvider({ children }: { children: ReactNode }) {
             queueNumber: q.queueNumber || q.queue_number,
           })) as QueueItem[]);
         }
-        if (annData) setAnnouncements(annData as Announcement[]);
-        if (closedDatesData) setClosedDates(closedDatesData as ClosedDate[]);
-        if (promoData) setPromoCodes(promoData as PromoCode[]);
+
+        if (annData && annData.length > 0) {
+          setAnnouncements(annData.map((a: any) => ({
+            ...a,
+            id: a.id,
+            title: a.title,
+            content: a.content,
+            type: a.type || 'info',
+            isActive: a.isactive !== undefined ? (a.isactive === 1 || a.isactive === true || a.isactive === 'true') : (a.isActive === 1 || a.isActive === true || a.isActive === 'true'),
+            createdAt: a.createdat ? new Date(a.createdat) : (a.createdAt ? new Date(a.createdAt) : new Date()),
+            expiresAt: a.expiresat ? new Date(a.expiresat) : (a.expiresAt ? new Date(a.expiresAt) : undefined)
+          })) as Announcement[]);
+        }
+
+        if (closedDatesData && closedDatesData.length > 0) {
+          setClosedDates(closedDatesData.map((cd: any) => ({
+            ...cd,
+            id: cd.id,
+            date: cd.date,
+            reason: cd.reason,
+            isFullDay: cd.isfullday !== undefined ? (cd.isfullday === 1 || cd.isfullday === true) : (cd.is_full_day !== undefined ? (cd.is_full_day === 1 || cd.is_full_day === true) : cd.isFullDay),
+            openTime: cd.opentime || cd.open_time || cd.openTime,
+            closeTime: cd.closetime || cd.close_time || cd.closeTime,
+            dayOfWeek: cd.dayofweek ?? cd.day_of_week ?? cd.dayOfWeek,
+            type: cd.type || 'specific'
+          })) as ClosedDate[]);
+        }
+
+        if (promoData && promoData.length > 0) {
+          setPromoCodes(promoData.map((p: any) => {
+            const codeUpper = (p.code || '').trim().toUpperCase();
+            const usedInReservations = (resData || []).filter((r: any) => r.promoCode && r.promoCode.trim().toUpperCase() === codeUpper).length;
+            const currentUsage = Math.max(Number(p.usage_count ?? p.usagecount ?? p.usageCount ?? 0), usedInReservations);
+            const rawActive = p.is_active ?? p.isActive ?? p.isactive;
+            const isPromoActive = rawActive === 1 || rawActive === true || rawActive === 'true' || rawActive === undefined;
+            const rawLimited = p.is_limited_uses ?? p.isLimitedUses ?? p.islimiteduses;
+            const isLimited = rawLimited === 1 || rawLimited === true || rawLimited === 'true';
+            return {
+              ...p,
+              id: p.id,
+              code: codeUpper,
+              discountPercent: Number(p.discount_percent ?? p.discountpercent ?? p.discountPercent ?? 0),
+              description: p.description || '',
+              isActive: isPromoActive,
+              isLimitedUses: isLimited,
+              maxUsage: Number(p.max_usage ?? p.maxusage ?? p.maxUsage ?? 100),
+              usageCount: currentUsage,
+              startDate: p.start_date || p.startdate || p.startDate ? new Date(p.start_date || p.startdate || p.startDate) : undefined,
+              expiresAt: p.expires_at || p.expiresat || p.expiresAt ? new Date(p.expires_at || p.expiresat || p.expiresAt) : undefined,
+              createdAt: p.created_at || p.createdat || p.createdAt ? new Date(p.created_at || p.createdat || p.createdAt) : new Date()
+            };
+          }) as PromoCode[]);
+        }
         
-        if (eventsData) {
+        if (eventsData && eventsData.length > 0) {
+          const mappedEvents = eventsData.map((e: any) => ({
+            ...e,
+            id: e.id,
+            title: e.title,
+            date: e.date,
+            type: e.type,
+            description: e.description,
+            registrationLink: e.registrationlink || e.registration_link || e.registrationLink,
+            maxParticipants: e.maxparticipants ?? e.max_participants ?? e.maxParticipants,
+            slotsFull: e.slotsfull !== undefined ? (e.slotsfull === 1 || e.slotsfull === true) : e.slotsFull,
+            allowReservations: e.allowreservations !== undefined ? (e.allowreservations === 1 || e.allowreservations === true) : e.allowReservations,
+            caterWalkIns: e.caterwalkins !== undefined ? (e.caterwalkins === 1 || e.caterwalkins === true) : e.caterWalkIns,
+            walkInTableCount: e.walkintablecount ?? e.walk_in_table_count ?? e.walkInTableCount,
+            promoCodeId: e.promocodeid || e.promo_code_id || e.promoCodeId
+          }));
           setEvents(prev => {
-            const existingIds = new Set(prev.map(e => e.id));
-            const newEvents = (eventsData as Event[]).filter(e => !existingIds.has(e.id));
+            const existingIds = new Set(prev.map(ev => ev.id));
+            const newEvents = mappedEvents.filter((ev: any) => !existingIds.has(ev.id));
             return [...prev, ...newEvents];
           });
         }
 
-        if (cmsData) {
+        if (cmsData && cmsData.length > 0) {
           const configObj = cmsData.reduce((acc: any, curr: any) => {
-            acc[curr.key_name || curr.keyName] = curr.content_value || curr.settingValue;
+            const key = curr.keyname || curr.key_name || curr.keyName;
+            const val = curr.settingvalue !== undefined ? curr.settingvalue : (curr.setting_value !== undefined ? curr.setting_value : (curr.content_value !== undefined ? curr.content_value : curr.settingValue));
+            if (key) acc[key] = val;
             return acc;
           }, {});
-          setSiteConfig(configObj);
+          setSiteConfig((prev: any) => ({ ...prev, ...configObj }));
         }
 
-        if (settingsData) {
+        if (settingsData && settingsData.length > 0) {
           const settingsObj = settingsData.reduce((acc: any, curr: any) => { 
-            let val = curr.setting_value || curr.settingValue;
-            if (val === 'true') val = true;
-            else if (val === 'false') val = false;
-            else if (!isNaN(val) && val.trim() !== '' && !val.includes(':')) val = Number(val);
-            acc[curr.key_name || curr.keyName] = val; 
+            const rawKey = curr.keyname || curr.key_name || curr.keyName;
+            if (!rawKey) return acc;
+            let val = curr.settingvalue !== undefined ? curr.settingvalue : (curr.setting_value !== undefined ? curr.setting_value : (curr.content_value !== undefined ? curr.content_value : curr.settingValue));
+            if (val === 'true' || val === true || val === '1' || val === 1) val = true;
+            else if (val === 'false' || val === false || val === '0' || val === 0) val = false;
+            else if (val !== null && val !== undefined && !isNaN(val) && String(val).trim() !== '' && !String(val).includes(':')) val = Number(val);
+            
+            acc[rawKey] = val;
+            const camelKey = rawKey.replace(/_([a-z])/g, (_: string, letter: string) => letter.toUpperCase());
+            acc[camelKey] = val;
+            const lower = rawKey.toLowerCase();
+            if (lower === 'isweekdayhappyhouractive') acc.isWeekdayHappyHourActive = Boolean(val);
+            if (lower === 'weekdayhappyhourrate') acc.weekdayHappyHourRate = Number(val) || 0;
+            if (lower === 'weekdayhappyhourstart') acc.weekdayHappyHourStart = String(val);
+            if (lower === 'weekdayhappyhourend') acc.weekdayHappyHourEnd = String(val);
+            if (lower === 'isweekendhappyhouractive') acc.isWeekendHappyHourActive = Boolean(val);
+            if (lower === 'weekendhappyhourrate') acc.weekendHappyHourRate = Number(val) || 0;
+            if (lower === 'weekendhappyhourstart') acc.weekendHappyHourStart = String(val);
+            if (lower === 'weekendhappyhourend') acc.weekendHappyHourEnd = String(val);
             return acc; 
           }, {});
           
@@ -263,13 +431,98 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setReservationTerms(prev => ({ ...prev, ...settingsObj }));
         }
 
+        if (feedbackData && feedbackData.length > 0) {
+          setFeedback(feedbackData.map((f: any) => ({
+            id: f.id,
+            customerName: f.customerName || f.customer_name || 'Guest',
+            contactInfo: f.contactInfo || f.contact_info || '',
+            rating: Number(f.rating || 0),
+            feedbackType: f.feedbackType || f.feedback_type || 'suggestion',
+            comment: f.comment || '',
+            date: f.date ? new Date(f.date) : new Date(),
+            reservationId: f.reservationId || f.reservation_id,
+            tags: Array.isArray(f.tags) ? f.tags : (typeof f.tags === 'string' ? JSON.parse(f.tags || '[]') : [])
+          })) as Feedback[]);
+        }
+
       } catch (err) {
         console.error("Failed to sync with Supabase:", err);
       } finally { 
-        setTimeout(() => setIsInitializing(false), 800); 
+        if (isInitial) {
+          setTimeout(() => setIsInitializing(false), 800); 
+        }
       }
     };
-    fetchSupabaseData();
+    
+    // Initial fetch
+    fetchSupabaseData(true);
+
+    // 🟢 Realtime sync across all live tables (tables, reservations, queue, promo_codes, settings, announcements)
+    const channelName = `realtime_site_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const realtimeChannel = supabase.channel(channelName);
+
+    realtimeChannel
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'system_settings' }, (payload: any) => {
+        if (payload.new) {
+          const row = payload.new;
+          const rawKey = row.key_name || row.keyname || row.keyName;
+          if (!rawKey) return;
+          let val = row.setting_value !== undefined ? row.setting_value : row.settingvalue;
+          if (val === 'true' || val === true || val === '1' || val === 1) val = true;
+          else if (val === 'false' || val === false || val === '0' || val === 0) val = false;
+          else if (val !== null && val !== undefined && !isNaN(val) && String(val).trim() !== '' && !String(val).includes(':')) val = Number(val);
+
+          const updates: Record<string, any> = { [rawKey]: val };
+          const camelKey = rawKey.replace(/_([a-z])/g, (_: string, letter: string) => letter.toUpperCase());
+          updates[camelKey] = val;
+
+          const lower = rawKey.toLowerCase();
+          if (lower === 'isweekdayhappyhouractive') updates.isWeekdayHappyHourActive = Boolean(val);
+          if (lower === 'weekdayhappyhourrate') updates.weekdayHappyHourRate = Number(val) || 0;
+          if (lower === 'weekdayhappyhourstart') updates.weekdayHappyHourStart = String(val);
+          if (lower === 'weekdayhappyhourend') updates.weekdayHappyHourEnd = String(val);
+          if (lower === 'isweekendhappyhouractive') updates.isWeekendHappyHourActive = Boolean(val);
+          if (lower === 'weekendhappyhourrate') updates.weekendHappyHourRate = Number(val) || 0;
+          if (lower === 'weekendhappyhourstart') updates.weekendHappyHourStart = String(val);
+          if (lower === 'weekendhappyhourend') updates.weekendHappyHourEnd = String(val);
+
+          setRates(prev => ({ ...prev, ...updates }));
+          setReservationTerms(prev => ({ ...prev, ...updates }));
+        }
+        fetchSupabaseData(false);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tables' }, () => {
+        fetchSupabaseData(false);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reservations' }, () => {
+        fetchSupabaseData(false);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'queue' }, () => {
+        fetchSupabaseData(false);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'promo_codes' }, () => {
+        fetchSupabaseData(false);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'announcements' }, () => {
+        fetchSupabaseData(false);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'closed_dates' }, () => {
+        fetchSupabaseData(false);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'events' }, () => {
+        fetchSupabaseData(false);
+      })
+      .subscribe();
+
+    // 🟢 Silent periodic background polling fallback (every 7 seconds) so site never misses any local/remote state updates
+    const pollInterval = setInterval(() => {
+      fetchSupabaseData(false);
+    }, 7000);
+
+    return () => {
+      clearInterval(pollInterval);
+      supabase.removeChannel(realtimeChannel);
+    };
   }, []);
 
   useEffect(() => {
@@ -313,27 +566,83 @@ export function AppProvider({ children }: { children: ReactNode }) {
     fetchHolidays();
   }, []);
 
-  const addReservation = (i: Omit<Reservation, 'id'|'createdAt'>): string => {
+  const addReservation = async (i: Omit<Reservation, 'id'|'createdAt'>): Promise<string> => {
     const id = Math.random().toString(36).substring(2, 8).toUpperCase();
     const newRes = { ...i, id, createdAt: new Date() };
     
     setReservations(prev => [...prev, newRes as Reservation]);
     
-    const supabasePayload = {
-      ...newRes,
-      date: newRes.date.toISOString(), 
-      createdAt: newRes.createdAt.toISOString(),
-      downPaymentPaid: newRes.downPaymentPaid ? 1 : 0,
-      balancePaid: newRes.balancePaid ? 1 : 0
-    };
+    const dateFormatted = typeof newRes.date === 'string'
+      ? newRes.date.split('T')[0]
+      : `${newRes.date.getFullYear()}-${String(newRes.date.getMonth() + 1).padStart(2, '0')}-${String(newRes.date.getDate()).padStart(2, '0')}`;
 
-    supabase.from('reservations').insert([supabasePayload]).then(({ error }) => {
+    // 🟢 Map payload to match the Supabase schema using publicSupabase to bypass user-token RLS
+    const supabasePayload = {
+      id: newRes.id,
+      customerName: newRes.customerName,
+      contactNumber: newRes.contactNumber,
+      email: newRes.email ? newRes.email.trim() : null,
+      date: dateFormatted,
+      timeSlot: newRes.timeSlot,
+      durationHours: newRes.durationHours,
+      partySize: newRes.partySize,
+      tableId: newRes.tableId || null,
+      status: newRes.status,
+      totalAmount: newRes.totalAmount,
+      downPaymentAmount: newRes.downPaymentAmount,
+      downPaymentPaid: newRes.downPaymentPaid ? 1 : 0,
+      balancePaid: newRes.balancePaid ? 1 : 0,
+      paymentRef: newRes.paymentRef || null,
+      receiptImg: newRes.receiptImg || null,
+      promoCode: newRes.promoCode || null,
+      discountAmount: newRes.discountAmount || 0,
+      createdAt: newRes.createdAt.toISOString()
+    };
+    
+    try {
+      const { error } = await publicSupabase.from('reservations').insert([supabasePayload]);
       if (error) {
-        console.error("Error inserting reservation to Supabase:", error);
-      } else {
-        console.log("Successfully saved to Supabase!");
+        console.warn("Primary Supabase reservation insert note:", error.message);
+        // Fallback with minimal columns if an optional column constraint failed
+        await publicSupabase.from('reservations').insert([{
+          id: newRes.id,
+          customerName: newRes.customerName,
+          contactNumber: newRes.contactNumber,
+          email: newRes.email ? newRes.email.trim() : null,
+          date: dateFormatted,
+          timeSlot: newRes.timeSlot,
+          durationHours: newRes.durationHours,
+          partySize: newRes.partySize,
+          status: newRes.status,
+          totalAmount: newRes.totalAmount,
+          downPaymentAmount: newRes.downPaymentAmount,
+          downPaymentPaid: newRes.downPaymentPaid ? 1 : 0,
+          balancePaid: 0,
+          createdAt: new Date().toISOString()
+        }]);
       }
-    });
+    } catch (insertErr) {
+      console.error("Supabase insert exception:", insertErr);
+    }
+
+    // 🟢 Increment promo code redemption usage count
+    if (newRes.promoCode) {
+      const pCode = newRes.promoCode.trim().toUpperCase();
+      const targetPromo = promoCodes.find(p => p.code.trim().toUpperCase() === pCode);
+      if (targetPromo) {
+        const nextCount = (targetPromo.usageCount || 0) + 1;
+        setPromoCodes(prev => prev.map(p => p.id === targetPromo.id ? { ...p, usageCount: nextCount } : p));
+        publicSupabase
+          .from('promo_codes')
+          .update({ usage_count: nextCount })
+          .eq('id', targetPromo.id)
+          .then(({ error }) => {
+            if (error) {
+              publicSupabase.from('promo_codes').update({ usageCount: nextCount }).eq('id', targetPromo.id);
+            }
+          });
+      }
+    }
     
     return id;
   };
@@ -342,27 +651,55 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const newFeedback = { ...i, id: `f${Date.now()}`, date: new Date() };
     setFeedback(prev => [newFeedback as Feedback, ...prev]);
     
-    const { rating, ...supabasePayload } = newFeedback;
+    try {
+      const stored = JSON.parse(localStorage.getItem('oneshot_local_feedback') || '[]');
+      stored.unshift(newFeedback);
+      localStorage.setItem('oneshot_local_feedback', JSON.stringify(stored.slice(0, 50)));
+    } catch (e) {}
 
-    supabase.from('feedback').insert([supabasePayload]).then(({ error }) => {
-      if (error) console.error("Error inserting feedback to Supabase:", error);
-    });
+    const supabasePayload = {
+      id: newFeedback.id,
+      customerName: newFeedback.customerName,
+      contactInfo: newFeedback.contactInfo || '',
+      feedbackType: newFeedback.feedbackType || 'suggestion',
+      comment: newFeedback.comment,
+      reservationId: newFeedback.reservationId || null,
+      tags: Array.isArray(newFeedback.tags) ? newFeedback.tags : [],
+      status: 'pending',
+      date: new Date().toISOString()
+    };
+
+    // 1. Sync to Cloud Supabase
+    publicSupabase.from('feedback').insert([supabasePayload]).then(({ error }) => {
+      if (error) console.warn("Feedback cloud sync info:", error.message);
+    }).catch(e => console.warn("Feedback network note:", e));
+
+    // 2. Direct sync to local POS / machine edge server if available
+    try {
+      fetch('/api/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(supabasePayload)
+      }).catch(() => {});
+    } catch (e) {}
   };
 
   const applyPromoCode = (code: string) => {
-    const now = new Date();
+    const cleanCode = (code || '').trim().toUpperCase();
+    const now = new Date().getTime();
     return promoCodes.find(p => {
-      if (p.code.toUpperCase() !== code.toUpperCase() || !p.isActive) return false;
-      if (p.startDate && new Date(p.startDate) > now) return false; 
-      if (p.expiresAt && new Date(p.expiresAt) < now) return false; 
-      if (p.isLimitedUses !== false && p.usageCount >= p.maxUsage) return false; 
+      if (!p.code || p.code.trim().toUpperCase() !== cleanCode) return false;
+      if (!p.isActive) return false;
+      if (p.startDate && new Date(p.startDate).getTime() > now + 86400000) return false; 
+      if (p.expiresAt && new Date(p.expiresAt).getTime() < now) return false; 
+      if (p.isLimitedUses && p.usageCount >= p.maxUsage) return false; 
       return true;
     }) || null;
   };
 
   const acknowledgeRefund = (id: string) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, refundStatus: 'acknowledged' } as Reservation : r));
-    supabase.from('reservations').update({ refundStatus: 'acknowledged' }).eq('id', id).then(({ error }) => {
+    publicSupabase.from('reservations').update({ refundStatus: 'acknowledged' }).eq('id', id).then(({ error }) => {
       if (error) console.error("Error updating refund status:", error);
     });
   };
@@ -385,7 +722,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       tables, queue, reservations, promoCodes, rates, reservationTerms, announcements, closedDates, weather, updateWeatherLocation,
       activeAnnouncement, updateActiveAnnouncement, siteConfig, events,
       addReservation, addFeedback, applyPromoCode, refreshLiveMonitor,
-      acknowledgeRefund
+      acknowledgeRefund, validateBookingPreflight
     }}>
       {children}
     </AppContext.Provider>

@@ -255,9 +255,10 @@ export function LiveMonitor() {
     return m > 0 ? `${h}h ${m}m` : `${h}h`;
   };
 
-  const availableCount = tables.filter(t => t.status === 'available').length;
-  const occupiedCount = tables.filter(t => t.status === 'occupied').length;
-  const reservedCount = tables.filter(t => t.status === 'reserved').length;
+  const activeTablesList = tables.filter(t => t.isActive === true || t.isActive === 1 || (t as any).isactive === 1 || (t as any).isactive === true);
+  const availableCount = activeTablesList.filter(t => t.status === 'available').length;
+  const occupiedCount = activeTablesList.filter(t => t.status === 'occupied').length;
+  const reservedCount = activeTablesList.filter(t => t.status === 'reserved').length;
   const waitingQueue = queue.filter(q => q.status === 'waiting' || q.status === 'called');
 
   const timeStr = now.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
@@ -314,7 +315,7 @@ export function LiveMonitor() {
             <h2 className="text-sm font-bold text-neutral-300 uppercase tracking-widest">Table Status</h2>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3">
-            {tables.map(table => (
+            {activeTablesList.map(table => (
               <TableCard key={table.id} table={table} />
             ))}
           </div>

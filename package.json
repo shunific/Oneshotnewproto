@@ -4,7 +4,7 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host 0.0.0.0 --port 3000",
     "build": "vite build",
     "preview": "vite preview"
   },
@@ -14,8 +14,23 @@
     "directories": {
       "output": "release/"
     },
+    "asar": true,
+    "asarUnpack": [
+      "server.cjs",
+      "node_modules/sqlite3/**/*"
+    ],
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "server.cjs",
+      "package.json"
+    ],
     "win": {
-      "target": "nsis"
+      "target": [
+        "nsis",
+        "zip"
+      ],
+      "icon": "electron/icon.ico"
     }
   },
   "dependencies": {
@@ -64,6 +79,7 @@
     "react-day-picker": "8.10.1",
     "react-dnd": "16.0.1",
     "react-dnd-html5-backend": "16.0.1",
+    "react-google-recaptcha": "^3.1.0",
     "react-hook-form": "7.55.0",
     "react-popper": "2.3.0",
     "react-resizable-panels": "2.1.7",
@@ -74,30 +90,18 @@
     "sonner": "2.0.3",
     "tailwind-merge": "3.2.0",
     "tw-animate-css": "1.3.8",
-    "vaul": "1.1.2"
+    "vaul": "1.1.2",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
   },
   "devDependencies": {
     "@tailwindcss/vite": "4.1.12",
+    "@types/react": "^18.3.1",
+    "@types/react-dom": "^18.3.1",
+    "@types/react-google-recaptcha": "^2.1.9",
     "@vitejs/plugin-react": "4.7.0",
     "cross-env": "^10.1.0",
     "tailwindcss": "4.1.12",
     "vite": "6.3.5"
-  },
-  "peerDependencies": {
-    "react": "18.3.1",
-    "react-dom": "18.3.1"
-  },
-  "peerDependenciesMeta": {
-    "react": {
-      "optional": true
-    },
-    "react-dom": {
-      "optional": true
-    }
-  },
-  "pnpm": {
-    "overrides": {
-      "vite": "6.3.5"
-    }
   }
 }
