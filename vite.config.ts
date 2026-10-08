@@ -19,6 +19,12 @@ export default defineConfig({
   // 🟢 CHANGED: Set to '/' for Vercel, or remove the line entirely
   base: '/', 
   
+  server: {
+    host: '0.0.0.0',
+    port: 3000,
+    allowedHosts: true,
+  },
+  
   plugins: [
     figmaAssetResolver(),
     // The React and Tailwind plugins are both required for Make, even if

@@ -267,7 +267,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    const fetchSupabaseData = async () => {
+    const fetchSupabaseData = async (isInitial: boolean = false) => {
       try {
         const [
           { data: tablesData },
@@ -304,7 +304,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
             };
           }) as Table[]);
         }
+
         if (resData) setReservations(resData as Reservation[]);
+
         if (queueData) {
           setQueue(queueData.map((q: any) => ({
             ...q,
@@ -314,6 +316,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             queueNumber: q.queueNumber || q.queue_number,
           })) as QueueItem[]);
         }
+
         if (annData && annData.length > 0) {
           setAnnouncements(annData.map((a: any) => ({
             ...a,
@@ -326,6 +329,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             expiresAt: a.expiresat ? new Date(a.expiresat) : (a.expiresAt ? new Date(a.expiresAt) : undefined)
           })) as Announcement[]);
         }
+
         if (closedDatesData && closedDatesData.length > 0) {
           setClosedDates(closedDatesData.map((cd: any) => ({
             ...cd,
@@ -339,6 +343,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             type: cd.type || 'specific'
           })) as ClosedDate[]);
         }
+
         if (promoData && promoData.length > 0) {
           setPromoCodes(promoData.map((p: any) => {
             const codeUpper = (p.code || '').trim().toUpperCase();
@@ -348,7 +353,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
             const isPromoActive = rawActive === 1 || rawActive === true || rawActive === 'true' || rawActive === undefined;
             const rawLimited = p.is_limited_uses ?? p.isLimitedUses ?? p.islimiteduses;
             const isLimited = rawLimited === 1 || rawLimited === true || rawLimited === 'true';
-
             return {
               ...p,
               id: p.id,
@@ -411,7 +415,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
             acc[rawKey] = val;
             const camelKey = rawKey.replace(/_([a-z])/g, (_: string, letter: string) => letter.toUpperCase());
             acc[camelKey] = val;
-
             const lower = rawKey.toLowerCase();
             if (lower === 'isweekdayhappyhouractive') acc.isWeekdayHappyHourActive = Boolean(val);
             if (lower === 'weekdayhappyhourrate') acc.weekdayHappyHourRate = Number(val) || 0;
@@ -421,7 +424,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
             if (lower === 'weekendhappyhourrate') acc.weekendHappyHourRate = Number(val) || 0;
             if (lower === 'weekendhappyhourstart') acc.weekendHappyHourStart = String(val);
             if (lower === 'weekendhappyhourend') acc.weekendHappyHourEnd = String(val);
-
             return acc; 
           }, {});
           
@@ -446,16 +448,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
       } catch (err) {
         console.error("Failed to sync with Supabase:", err);
       } finally { 
-        setTimeout(() => setIsInitializing(false), 800); 
+        if (isInitial) {
+          setTimeout(() => setIsInitializing(false), 800); 
+        }
       }
     };
-    fetchSupabaseData();
+    
+    // Initial fetch
+    fetchSupabaseData(true);
 
-    // 🟢 Realtime sync for system_settings (reflects local machine changes instantly)
-    const channelName = `settings_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    const settingsChannel = supabase.channel(channelName);
+    // 🟢 Realtime sync across all live tables (tables, reservations, queue, promo_codes, settings, announcements)
+    const channelName = `realtime_site_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const realtimeChannel = supabase.channel(channelName);
 
-    settingsChannel
+    realtimeChannel
       .on('postgres_changes', { event: '*', schema: 'public', table: 'system_settings' }, (payload: any) => {
         if (payload.new) {
           const row = payload.new;
@@ -483,11 +489,39 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setRates(prev => ({ ...prev, ...updates }));
           setReservationTerms(prev => ({ ...prev, ...updates }));
         }
+        fetchSupabaseData(false);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tables' }, () => {
+        fetchSupabaseData(false);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reservations' }, () => {
+        fetchSupabaseData(false);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'queue' }, () => {
+        fetchSupabaseData(false);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'promo_codes' }, () => {
+        fetchSupabaseData(false);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'announcements' }, () => {
+        fetchSupabaseData(false);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'closed_dates' }, () => {
+        fetchSupabaseData(false);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'events' }, () => {
+        fetchSupabaseData(false);
       })
       .subscribe();
 
+    // 🟢 Silent periodic background polling fallback (every 7 seconds) so site never misses any local/remote state updates
+    const pollInterval = setInterval(() => {
+      fetchSupabaseData(false);
+    }, 7000);
+
     return () => {
-      supabase.removeChannel(settingsChannel);
+      clearInterval(pollInterval);
+      supabase.removeChannel(realtimeChannel);
     };
   }, []);
 

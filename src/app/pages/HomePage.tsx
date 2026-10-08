@@ -987,14 +987,14 @@ export function HomePage() {
       <header className="fixed top-0 left-0 right-0 z-50 h-[72px] bg-neutral-950/95 backdrop-blur-md border-b border-neutral-800/60 flex items-center overflow-visible">
         <button
           onClick={() => handleNavClick('home')}
-          className="h-full flex items-center px-5 pr-12 bg-emerald-700 hover:bg-emerald-600 transition-colors flex-shrink-0 relative z-10 cursor-pointer text-left"
+          className="brand-logo-btn h-full flex items-center px-5 pr-12 bg-emerald-700 hover:bg-emerald-600 transition-colors flex-shrink-0 relative z-10 cursor-pointer text-left"
           style={{ clipPath: 'polygon(0 0, 100% 0, 82% 100%, 0 100%)', minWidth: 220 }}
         >
           <div className="flex items-center gap-2.5">
             <img src={logoImg} alt="One Shot Bar & Billiards" className="h-9 w-9 object-contain rounded-lg flex-shrink-0" />
             <div>
-              <p className="text-white text-[17px] font-black tracking-tight leading-tight">ONE SHOT</p>
-              <p className="text-emerald-200 text-[10px] uppercase tracking-[0.2em] font-semibold">Bar & Billiards</p>
+              <p className="text-white text-[17px] font-black tracking-tight leading-tight" style={{ color: '#ffffff' }}>ONE SHOT</p>
+              <p className="text-emerald-200 text-[10px] uppercase tracking-[0.2em] font-semibold" style={{ color: '#a7f3d0' }}>Bar & Billiards</p>
             </div>
           </div>
         </button>
@@ -1323,7 +1323,17 @@ export function HomePage() {
                       <label className="block text-xs text-neutral-400 mb-1.5">Message <span className="text-rose-500">*</span></label>
                       <textarea value={feedbackForm.message} onChange={e => setFeedbackForm(f => ({ ...f, message: e.target.value }))} placeholder="Please provide details..." rows={4} required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500 resize-none outline-none" />
                     </div>
-                    <button type="submit" disabled={!feedbackForm.name || !feedbackForm.contact || !feedbackForm.type || (feedbackForm.type === 'other' && !feedbackForm.customType) || !feedbackForm.message} className="w-full bg-sky-600 hover:bg-sky-500 disabled:bg-slate-200 disabled:text-slate-400 disabled:border disabled:border-slate-300 disabled:cursor-not-allowed dark:disabled:bg-neutral-800 dark:disabled:text-neutral-500 text-white py-3 rounded-xl text-sm font-semibold transition-colors shadow-sm">Submit Feedback</button>
+                    <button
+                      type="submit"
+                      disabled={!feedbackForm.name || !feedbackForm.contact || !feedbackForm.type || (feedbackForm.type === 'other' && !feedbackForm.customType) || !feedbackForm.message}
+                      className={`w-full py-3 rounded-xl text-sm font-semibold transition-colors shadow-sm text-white ${
+                        isLightMode
+                          ? 'bg-sky-600 hover:bg-sky-500 disabled:bg-slate-200 disabled:text-slate-400 disabled:border disabled:border-slate-300'
+                          : 'bg-sky-600 hover:bg-sky-500 disabled:bg-neutral-800 disabled:text-neutral-500 disabled:border disabled:border-neutral-700'
+                      } disabled:cursor-not-allowed`}
+                    >
+                      Submit Feedback
+                    </button>
                   </form>
                 )}
               </div>
@@ -1681,7 +1691,11 @@ export function HomePage() {
                                     type="button"
                                     onClick={handleApplyPromo}
                                     disabled={!promoCodeInput.trim()}
-                                    className="px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:bg-slate-200 disabled:text-slate-400 disabled:border disabled:border-slate-300 disabled:cursor-not-allowed dark:disabled:bg-neutral-800 dark:disabled:text-neutral-500 text-white rounded-lg text-xs font-bold transition-colors"
+                                    className={`px-4 py-2 text-white rounded-lg text-xs font-bold transition-colors ${
+                                      isLightMode
+                                        ? 'bg-amber-600 hover:bg-amber-500 disabled:bg-slate-200 disabled:text-slate-400 disabled:border disabled:border-slate-300'
+                                        : 'bg-amber-600 hover:bg-amber-500 disabled:bg-neutral-800 disabled:text-neutral-500 disabled:border disabled:border-neutral-700'
+                                    } disabled:cursor-not-allowed`}
                                   >
                                     Apply
                                   </button>
@@ -1773,7 +1787,11 @@ export function HomePage() {
                               <button
                                 type="submit"
                                 disabled={!resForm.name || !resForm.phone || !resForm.timeSlot || timeValidation !== 'valid' || isVerifying || confirmingPayment}
-                                className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-200 disabled:text-slate-400 disabled:border disabled:border-slate-300 disabled:cursor-not-allowed dark:disabled:bg-neutral-800 dark:disabled:text-neutral-500 text-white py-3.5 rounded-xl font-bold text-sm shadow-lg shadow-emerald-900/30 transition-all flex items-center justify-center gap-2"
+                                className={`w-full text-white py-3.5 rounded-xl font-bold text-sm shadow-lg transition-all flex items-center justify-center gap-2 ${
+                                  isLightMode
+                                    ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-500/20 disabled:bg-slate-200 disabled:text-slate-400 disabled:border disabled:border-slate-300'
+                                    : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-900/30 disabled:bg-neutral-800 disabled:text-neutral-500 disabled:border disabled:border-neutral-700'
+                                } disabled:cursor-not-allowed`}
                               >
                                 {(isVerifying || confirmingPayment) ? <><RefreshCw size={14} className="animate-spin" /> Processing...</> : <>Confirm & Reserve <CheckCircle size={16} /></>}
                               </button>
@@ -2205,7 +2223,7 @@ export function HomePage() {
                               : color === 'amber' 
                               ? (isLightMode ? 'text-amber-600' : 'text-amber-400') 
                               : (isLightMode ? 'text-slate-900' : 'text-white')
-                          }`}>{rate}</span>
+                          }`} style={{ color: isLightMode ? (color === 'emerald' ? '#059669' : color === 'amber' ? '#d97706' : '#0f172a') : undefined }}>{rate}</span>
                           <span className={`text-sm mb-1 font-semibold ${isLightMode ? 'text-slate-500' : 'text-neutral-500'}`}>{unit}</span>
                         </div>
                         <p className={`text-xs mb-5 leading-relaxed ${isLightMode ? 'text-slate-600' : 'text-neutral-500'}`}>{desc}</p>
@@ -2214,10 +2232,10 @@ export function HomePage() {
                             <li key={f} className={`flex items-center gap-2 text-xs ${isLightMode ? 'text-slate-700 font-medium' : 'text-neutral-400'}`}>
                               <CheckCircle size={13} className={
                                 color === 'emerald' 
-                                  ? (isLightMode ? 'text-emerald-600' : 'text-emerald-500') 
-                                  : color === 'amber' 
-                                  ? (isLightMode ? 'text-amber-600' : 'text-amber-500') 
-                                  : (isLightMode ? 'text-slate-500' : 'text-neutral-500')
+                                   ? (isLightMode ? 'text-emerald-600' : 'text-emerald-500') 
+                                   : color === 'amber' 
+                                   ? (isLightMode ? 'text-amber-600' : 'text-amber-500') 
+                                   : (isLightMode ? 'text-slate-500' : 'text-neutral-500')
                               } />
                               {f}
                             </li>
@@ -2228,16 +2246,16 @@ export function HomePage() {
                   })()}
                 </div>
 
-                <div className={`border rounded-2xl p-6 max-w-4xl mx-auto shadow-sm transition-colors ${isLightMode ? 'bg-white border-slate-200 shadow-slate-100' : 'bg-neutral-900 border-neutral-800'}`}>
+                <div className={`border rounded-2xl p-6 max-w-4xl mx-auto shadow-sm transition-colors reservation-policy-card ${isLightMode ? 'bg-white border-slate-200 shadow-slate-100' : 'bg-neutral-900 border-neutral-800'}`}>
                   <h3 className={`font-bold mb-4 text-base ${isLightMode ? 'text-slate-900' : 'text-white'}`}>Reservation Policies & Terms</h3>
-                  <div className={`flex gap-3 border rounded-xl p-4 mb-5 transition-colors ${isLightMode ? 'bg-emerald-50/90 border-emerald-200' : 'bg-emerald-950/40 border-emerald-700/30'}`}>
+                  <div className={`flex gap-3 border rounded-xl p-4 mb-5 transition-colors policy-redemption-banner ${isLightMode ? 'bg-emerald-50/90 border-emerald-200' : 'bg-emerald-950/40 border-emerald-700/30'}`}>
                     <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center mt-0.5 ${isLightMode ? 'bg-emerald-100 text-emerald-700' : 'bg-emerald-600/20 text-emerald-400'}`}>
                       <Info size={15} />
                     </div>
                     <div>
-                      <p className={`text-xs font-bold mb-1 ${isLightMode ? 'text-emerald-800' : 'text-emerald-300'}`}>Reservation Redemption Policy</p>
-                      <p className={`text-xs leading-relaxed ${isLightMode ? 'text-slate-700' : 'text-neutral-400'}`}>
-                        After completing your reservation and {rates?.downPaymentPercent ?? 25}% down payment, the <span className={`font-bold ${isLightMode ? 'text-slate-900' : 'text-white font-medium'}`}>remaining balance must be settled before or after your game</span> — payable via <span className={`font-bold ${isLightMode ? 'text-slate-900' : 'text-white font-medium'}`}>Cash or GCash</span>.
+                      <p className={`text-xs font-bold mb-1 policy-banner-title ${isLightMode ? 'text-emerald-800' : 'text-emerald-300'}`}>Reservation Redemption Policy</p>
+                      <p className={`text-xs leading-relaxed policy-banner-desc ${isLightMode ? 'text-slate-700' : 'text-neutral-400'}`}>
+                        After completing your reservation and {rates?.downPaymentPercent ?? 25}% down payment, the <span className={`font-bold policy-banner-highlight ${isLightMode ? 'text-slate-900' : 'text-white font-medium'}`}>remaining balance must be settled before or after your game</span> — payable via <span className={`font-bold policy-banner-highlight ${isLightMode ? 'text-slate-900' : 'text-white font-medium'}`}>Cash or GCash</span>.
                       </p>
                     </div>
                   </div>
@@ -2253,9 +2271,9 @@ export function HomePage() {
                         { label: 'Grace Period', value: '15 minutes' },
                         { label: 'Cancellation Policy', value: reservationTerms?.cancellationPolicy || 'Booking Policy' },
                       ].map(({ label, value }) => (
-                        <div key={label} className={`flex justify-between py-2.5 border-b ${isLightMode ? 'border-slate-200 text-slate-800' : 'border-neutral-800/60'}`}>
-                          <span className={`text-xs ${isLightMode ? 'text-slate-600 font-semibold' : 'text-neutral-500'}`}>{label}</span>
-                          <span className={`text-xs font-bold text-right ml-2 ${isLightMode ? 'text-slate-900' : 'text-neutral-200 font-medium'}`}>{value}</span>
+                        <div key={label} className={`flex justify-between py-2.5 border-b policy-rule-row ${isLightMode ? 'border-slate-200 text-slate-800' : 'border-neutral-800/60'}`}>
+                          <span className={`text-xs policy-rule-label ${isLightMode ? 'text-slate-600 font-semibold' : 'text-neutral-500'}`}>{label}</span>
+                          <span className={`text-xs font-bold text-right ml-2 policy-rule-value ${isLightMode ? 'text-slate-900' : 'text-neutral-200 font-medium'}`}>{value}</span>
                         </div>
                       ));
                     })()}

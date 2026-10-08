@@ -261,9 +261,23 @@
   color: #ffffff !important;
 }
 
+/* 🟢 Brand Logo in Fixed Navbar: Always crisp white text on emerald background */
+.theme-light nav.fixed .brand-logo-btn,
+.theme-light nav.fixed button.bg-emerald-700,
+.theme-light nav.fixed button.bg-emerald-700 *,
+.theme-light nav.fixed button.bg-emerald-700 p,
+.theme-light .brand-logo-btn * {
+  color: #ffffff !important;
+}
+.theme-light nav.fixed button.bg-emerald-700 p.text-emerald-200,
+.theme-light .brand-logo-btn p.text-emerald-200 {
+  color: #a7f3d0 !important;
+}
+
 /* 🟢 Primary Action Buttons: Always retain crisp white text & white icons */
 .theme-light .bg-emerald-600,
 .theme-light .bg-emerald-500,
+.theme-light .bg-emerald-700,
 .theme-light .bg-amber-600,
 .theme-light .bg-amber-500,
 .theme-light .bg-rose-600,
@@ -274,6 +288,7 @@
 }
 .theme-light .bg-emerald-600 *,
 .theme-light .bg-emerald-500 *,
+.theme-light .bg-emerald-700 *,
 .theme-light .bg-amber-600 *,
 .theme-light .bg-amber-500 *,
 .theme-light .bg-rose-600 *,
@@ -296,12 +311,12 @@
   box-shadow: 0 2px 4px -1px rgba(0, 0, 0, 0.03) !important;
 }
 
-.theme-light nav.fixed button {
+.theme-light nav.fixed button:not(.bg-emerald-700):not(.brand-logo-btn) {
   color: #475569 !important;
   font-weight: 600 !important;
 }
 
-.theme-light nav.fixed button:hover {
+.theme-light nav.fixed button:not(.bg-emerald-700):not(.brand-logo-btn):hover {
   color: #0f172a !important;
 }
 
@@ -514,13 +529,32 @@
   box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.07), 0 8px 10px -6px rgba(0, 0, 0, 0.03) !important;
 }
 
+/* 🟢 Action & Form Buttons explicitly in Light Mode */
+.theme-light button.bg-sky-600:not(:disabled),
+.theme-light button.bg-sky-600:not(:disabled) * {
+  background-color: #0284c7 !important;
+  color: #ffffff !important;
+}
+
+.theme-light button.bg-amber-600:not(:disabled),
+.theme-light button.bg-amber-600:not(:disabled) * {
+  background-color: #d97706 !important;
+  color: #ffffff !important;
+}
+
+.theme-light button.bg-emerald-600:not(:disabled),
+.theme-light button.bg-emerald-600:not(:disabled) * {
+  background-color: #059669 !important;
+  color: #ffffff !important;
+}
+
 /* 🟢 Disabled Buttons in Light Mode: Never pitch black! */
 .theme-light button:disabled,
 .theme-light button[disabled],
 .theme-light button.disabled\:bg-neutral-800:disabled,
 .theme-light .disabled\:bg-neutral-800:disabled,
 .theme-light .disabled\:bg-slate-200:disabled {
-  background-color: #f1f5f9 !important;
+  background-color: #e2e8f0 !important;
   color: #94a3b8 !important;
   border: 1px solid #cbd5e1 !important;
   box-shadow: none !important;
