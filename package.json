@@ -12,7 +12,8 @@
     "postinstall": "electron-builder install-app-deps",
     "rebuild": "electron-rebuild -f -w sqlite3",
     "electron:dev": "cross-env NODE_ENV=development concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
-    "electron:build": "npm run rebuild && vite build && electron-builder"
+    "electron:build": "npm run rebuild && vite build && electron-builder",
+    "electron:build:mac": "npm run rebuild && vite build && electron-builder --mac"
   },
   "build": {
     "appId": "com.oneshot.ms",
@@ -42,6 +43,30 @@
     "win": {
       "target": "nsis",
       "icon": "electron/icon.ico"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.business",
+      "icon": "electron/icon.ico",
+      "identity": null
+    },
+    "dmg": {
+      "title": "${productName} ${version}",
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
     }
   },
   "dependencies": {
