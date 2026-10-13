@@ -50,7 +50,7 @@
         "zip"
       ],
       "category": "public.app-category.business",
-      "icon": "electron/icon.ico",
+      "icon": "electron/icon.png",
       "identity": null
     },
     "dmg": {

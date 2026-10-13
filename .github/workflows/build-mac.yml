@@ -35,6 +35,14 @@ jobs:
       - name: Build Web Assets
         run: npm run build
 
+      - name: Ensure Environment Resource
+        run: |
+          if [ ! -f .env.tester1 ]; then
+            echo "VITE_SUPABASE_URL=https://olywhyaozjlkjrnsdydg.supabase.co" > .env.tester1
+            echo "VITE_SUPABASE_SERVICE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9seXdoeWFvempsa2pybnNkeWRnIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4OTg5NjAxNCwiZXhwIjoyMTA1NDcyMDE0fQ.9M87B5oO8bKLtkaH5MIpzZ1KzvhE3qr6y5GApWzStn4" >> .env.tester1
+            echo "SQLITE_DB_PATH=oneshot-tester1.db" >> .env.tester1
+          fi
+
       - name: Build macOS Electron Package (.dmg & .zip)
         run: npx electron-builder --mac -c.mac.identity=null
         env:
