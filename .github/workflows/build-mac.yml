@@ -44,7 +44,7 @@ jobs:
           fi
 
       - name: Build macOS Electron Package (.dmg & .zip)
-        run: npx electron-builder --mac -c.mac.identity=null
+        run: npx electron-builder --mac --publish never -c.mac.identity=null
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
