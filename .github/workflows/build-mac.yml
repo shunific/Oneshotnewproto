@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - local-machine-main-tester1
+      - main
     paths:
       - 'electron/**'
       - 'src/**'
@@ -26,7 +27,9 @@ jobs:
           cache: 'npm'
 
       - name: Install Dependencies
-        run: npm install --legacy-peer-deps
+        run: |
+          npm install --legacy-peer-deps
+          npm install react@18.3.1 react-dom@18.3.1 --legacy-peer-deps
 
       - name: Rebuild Native Dependencies (macOS)
         run: npm run rebuild
@@ -35,7 +38,7 @@ jobs:
         run: npm run build
 
       - name: Build macOS Electron Package (.dmg & .zip)
-        run: npx electron-builder --mac
+        run: npx electron-builder --mac -c.mac.identity=null
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
