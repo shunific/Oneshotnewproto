@@ -17,4 +17,3 @@ CREATE TABLE public."system_settings" ("key_name" text PRIMARY KEY,"setting_valu
 CREATE TABLE public."system_status" ("id" integer PRIMARY KEY,"last_seen_at" timestamp with time zone);
 CREATE TABLE public."tables" ("id" text PRIMARY KEY,"name" text,"status" text,"isactive" integer,"maintenancereason" text,"sessiondata" text,"isActive" integer,"maintenanceReason" text,"sessionData" text);
 CREATE TABLE public."watchlist" ("id" text PRIMARY KEY,"name" text,"reason" text,"description" text,"status" text,"image" text,"dateadded" timestamp with time zone,"resolveddate" timestamp with time zone,"isarchived" integer,"evidencelink" text,"dateAdded" timestamp without time zone,"evidenceLink" text,"isArchived" integer,"resolvedDate" timestamp without time zone);
-

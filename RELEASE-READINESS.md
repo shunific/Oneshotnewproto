@@ -11,4 +11,3 @@ One narrow live security change was applied on20October2026: enabling the existi
 Before completing release: verify native UI, publish and test the matching reviewed customer/cloud changes, populate approved venue policy/physical-table mappings/cloud memberships, and complete every remaining questionnaire flow. Confirm revocation of the privileged credential exposed in older source/builds; deleting it from this branch does not revoke old copies. Do not ship a service-role credential in a desktop/customer app. Reference: https://supabase.com/docs/guides/getting-started/api-keys
 
 No real funds were transferred. The original downloaded app and synthetic QA profiles remain separate. This branch is not approval to mark the whole capstone complete.
-

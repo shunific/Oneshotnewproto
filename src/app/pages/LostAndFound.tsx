@@ -93,7 +93,7 @@ export function LostAndFound() {
       }
 
       if (!mounted.current) return;
-      await addLostItem({ 
+      await addLostItem({
         itemName: form.itemName.trim(), 
         description: form.description.trim(), 
         image: finalImageUrl, 

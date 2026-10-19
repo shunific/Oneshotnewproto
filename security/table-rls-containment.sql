@@ -6,4 +6,3 @@ BEGIN
   END IF;
 END $$;
 ALTER TABLE public.tables ENABLE ROW LEVEL SECURITY;
-
