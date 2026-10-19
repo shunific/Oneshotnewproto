@@ -12,7 +12,7 @@ test('an older floor poll cannot erase newer held-table authority adopted by exp
  const {readPendingReservationMoveList}=await import('../src/app/utils/sessionPersistence.js');
  const moves=[{requestId:'qa_floor_pending',moveId:'11111111-1111-4111-8111-111111111111',sourceId:'source',targetId:'target',phase:'prepared'}];
  let pending=[],error='',release;const gate=new Promise(resolve=>{release=resolve;});let requests=0;
- const env={identityRef:{current:'qa-staff'},identityGeneration:{current:1},authMutationInFlight:{current:false},floorRefreshGeneration:{current:0},readPendingReservationMoveList,
+ const env={cmsGeneration:{current:0},cmsInFlight:{current:false},cmsSnapshotRef:{current:null},validateCmsSnapshot:require('../cms-contract.mjs').validateCmsSnapshot,setCmsSaveError(){},identityRef:{current:'qa-staff'},identityGeneration:{current:1},authMutationInFlight:{current:false},floorRefreshGeneration:{current:0},readPendingReservationMoveList,
   setPendingReservationMoves:value=>{pending=value;},setReservationMoveError:value=>{error=value;},setTables(){},setQueue(){},setReservations(){},setInventory(){},
   localFetch:async url=>({ok:true,json:async()=>{if(!url.endsWith('/native/reservation-moves'))return[];requests++;if(requests===1){await gate;return{moves:[]};}return{moves};}}),
  };
@@ -29,7 +29,7 @@ async function harness(localFetch){
  const {readPendingReservationMoveList}=await import('../src/app/utils/sessionPersistence.js');
  const state={pending:[],error:'',tables:[],reservations:[],rates:{},initialized:true,writes:0};
  const set=name=>value=>{state[name]=typeof value==='function'?value(state[name]):value;state.writes++;};
- const env={identityRef:{current:'qa-staff'},identityGeneration:{current:1},authMutationInFlight:{current:false},floorRefreshGeneration:{current:0},readPendingReservationMoveList,localFetch,
+ const env={cmsGeneration:{current:0},cmsInFlight:{current:false},cmsSnapshotRef:{current:null},validateCmsSnapshot:require('../cms-contract.mjs').validateCmsSnapshot,setCmsSaveError(){},identityRef:{current:'qa-staff'},identityGeneration:{current:1},authMutationInFlight:{current:false},floorRefreshGeneration:{current:0},readPendingReservationMoveList,localFetch,
   setPendingReservationMoves:set('pending'),setReservationMoveError:set('error'),setTables:set('tables'),setReservations:set('reservations'),setQueue:set('queue'),setInventory:set('inventory'),setRates:set('rates'),setIsInitializing:set('initialized'),
  };
  for(const name of ['setStaffUsers','setSessionHistory','setActivities','setFeedback','setLostItems','setWatchlist','setReservationTerms','setAnnouncements','setSiteConfig','setClosedDates','setPromoCodes','setEvents','setIsSystemOffline','setLastSynced','remindPendingSessions'])env[name]=()=>{};

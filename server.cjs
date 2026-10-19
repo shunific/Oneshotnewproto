@@ -287,6 +287,7 @@ registerCheckoutRoutes(app, dbPath);
 registerRefundRoutes(app, dbPath, { requireAdmin: auth.requireAdmin });
 registerPolicyRoutes(app, dbPath, { requireAdmin: auth.requireAdmin });
 registerVenueAvailabilityRoutes(app,dbPath);
+require('./server-cms.cjs').registerCmsRoutes(app,dbPath,{requireAuth:auth.requireAuth,requireAdmin:auth.requireAdmin,resolveActor:auth.resolveSessionActor,isActorCurrent:(token,actor)=>auth.isSessionCurrent(token,actor.localStaffId),readyBefore:databaseReady});
 require('./server-venue-content.cjs').registerVenueContentRoutes(app,dbPath,{requireAuth:auth.requireAuth,requireAdmin:auth.requireAdmin,resolveActor:auth.resolveSessionActor,isActorCurrent:(token,actor)=>auth.isSessionCurrent(token,actor.localStaffId),readyBefore:databaseReady});
 const reservationMoves={move:async(...args)=>(await nativeReservationRuntime).move(...args),recover:async(...args)=>(await nativeReservationRuntime).recoverMove(...args)};
 const sessionState = registerSessionStateRoutes(app, dbPath, {reservationMoves,readyBefore:Promise.all([checkoutSchemaReady,auth.ready]),resolveActor:auth.resolveSessionActor,isActorCurrent:(token,actor)=>auth.isSessionCurrent(token,actor.localStaffId)});
@@ -423,21 +424,7 @@ const getSettingsHandler = (req, res) => {
 app.get('/api/settings/rates', getSettingsHandler);
 app.get('/api/settings/terms', getSettingsHandler);
 
-app.get('/api/cms', (req, res) => {
-  db.all(`SELECT keyName, settingValue FROM cms`, [], (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    const config = {};
-    rows.forEach(row => {
-      const val = row.settingValue;
-      if (val && (val.startsWith('[') || val.startsWith('{'))) {
-        config[row.keyName] = safeParseJSON(val, val);
-      } else {
-        config[row.keyName] = val;
-      }
-    });
-    res.json(config);
-  });
-});
+
 
 app.get('/api/lost-and-found', (req, res) => {
   db.all(`SELECT * FROM lost_and_found ORDER BY foundDate DESC`, [], (err, rows) => {
@@ -489,35 +476,7 @@ app.post('/api/ai/predict-wait-time', (req, res) => {
 // ====================================================================
 
 
-app.put('/api/cms', (req, res) => {
-  const payload = req.body;
-  const keys = Object.keys(payload);
-  if (keys.length === 0) return res.json({ message: "No CMS content to update" });
-  let index = 0;
-  let errors = [];
-  
-  const processNextKey = () => {
-    if (index >= keys.length) {
-      if (errors.length > 0) return res.status(500).json({ error: "Some CMS fields failed to save.", details: errors });
-      return res.json({ message: "CMS content updated successfully." });
-    }
-    const key = keys[index];
-    const rawVal = payload[key];
-    const value = (typeof rawVal === 'object' && rawVal !== null) ? JSON.stringify(rawVal) : String(rawVal ?? '');
-    
-    db.run(
-      `INSERT INTO cms (keyName, settingValue, updatedAt) VALUES (?, ?, CURRENT_TIMESTAMP)
-       ON CONFLICT(keyName) DO UPDATE SET settingValue = excluded.settingValue, updatedAt = CURRENT_TIMESTAMP`,
-      [key, value],
-      function(err) {
-        if (err) { errors.push({ key, error: err.message }); }
-        index++;
-        processNextKey();
-      }
-    );
-  };
-  processNextKey();
-});
+
 
 app.post('/api/cache-reservations', (req, res) => {
   const { reservations } = req.body;

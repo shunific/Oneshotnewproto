@@ -7,6 +7,7 @@ const os = require('node:os');
 const net = require('node:net');
 const http = require('node:http');
 const { once } = require('node:events');
+const {randomUUID}=require('node:crypto');
 const sqlite3 = require('sqlite3');
 
 async function freePort() {
@@ -40,7 +41,7 @@ async function legacySources(dir) {
   const db = new sqlite3.Database(path.join(dir, 'oneshot.db'), sqlite3.OPEN_READONLY);
   const read = query => new Promise((resolve, reject) => db.all(query, [], (error, rows) => error ? reject(error) : resolve(rows)));
   try {
-    return { settings: await read('SELECT * FROM system_settings ORDER BY key_name'), cms: await read('SELECT * FROM cms_content ORDER BY key_name') };
+    return { settings: await read('SELECT * FROM system_settings ORDER BY key_name'), cms: await read('SELECT * FROM cms_content ORDER BY key_name'), modernCms:await read('SELECT keyName,settingValue FROM cms ORDER BY keyName') };
   } finally { await new Promise(resolve => db.close(resolve)); }
 }
 
@@ -121,11 +122,22 @@ test('full server enforces authenticated durable staff accounts across migration
     assert.equal(rates.hourlyRate, 150);
     assert.equal(rates.custom_key, 'modern-preserved');
     const cms = await (await admin('/api/cms')).json();
-    assert.equal(cms.welcomeTitle, 'Modern welcome');
-    assert.equal(cms.legacyFooter, 'Legacy footer');
+    assert.deepEqual(cms.record,{heroImages:[],aboutImage:null});
+    assert.match(cms.revision,/^[a-f0-9]{64}$/);
     const sources = await legacySources(dir);
+    assert.equal(sources.modernCms.find(row=>row.keyName==='welcomeTitle').settingValue,'Modern welcome');
+    assert.equal(sources.modernCms.find(row=>row.keyName==='legacyFooter').settingValue,'Legacy footer');
     assert.deepEqual(sources.settings, [{ key_name: 'custom_key', setting_value: 'legacy-conflict' }, { key_name: 'hourlyRate', setting_value: '150' }]);
     assert.deepEqual(sources.cms, [{ key_name: 'legacyFooter', content_value: 'Legacy footer' }, { key_name: 'welcomeTitle', content_value: 'Legacy welcome' }]);
+  });
+  await t.test('actual CMS routes save atomically and replay an old command without replacing newer images',async()=>{
+    const initial=await (await admin('/api/cms')).json(),actorId=(await (await admin('/api/auth/me')).json()).user.id;
+    const command={requestId:randomUUID(),expectedActorId:actorId,expectedRevision:initial.revision,patch:{heroImages:['https://example.test/qa-original.png'],aboutImage:'https://example.test/qa-about.png'}};
+    const first=await admin('/api/cms','PUT',command);assert.equal(first.status,200);const original=await first.json();
+    const newer=await admin('/api/cms','PUT',{requestId:randomUUID(),expectedActorId:actorId,expectedRevision:original.revision,patch:{heroImages:['https://example.test/qa-newer.png']}});assert.equal(newer.status,200);const saved=await newer.json();
+    const replay=await admin('/api/cms','PUT',command);assert.equal(replay.status,200);const old=await replay.json();assert.equal(old.replayed,true);assert.deepEqual(old.record,original.record);
+    const current=await (await admin('/api/cms')).json();assert.deepEqual(current.record,saved.record);assert.equal(current.revision,saved.revision);
+    const cleared=await admin('/api/cms','PUT',{requestId:randomUUID(),expectedActorId:actorId,expectedRevision:current.revision,patch:{heroImages:[],aboutImage:null}});assert.equal(cleared.status,200);
   });
   await t.test('staff creation acknowledges durable ID without disclosing password or recovery PIN', async () => {
     const created = await admin('/api/staff', 'POST', account);
@@ -305,9 +317,11 @@ test('full server enforces authenticated durable staff accounts across migration
     assert.equal(rates.hourlyRate, 150);
     assert.equal(rates.custom_key, 'modern-preserved');
     const cms = await (await admin('/api/cms')).json();
-    assert.equal(cms.welcomeTitle, 'Modern welcome');
-    assert.equal(cms.legacyFooter, 'Legacy footer');
+    assert.deepEqual(cms.record,{heroImages:[],aboutImage:null});
+    assert.match(cms.revision,/^[a-f0-9]{64}$/);
     const sources = await legacySources(dir);
+    assert.equal(sources.modernCms.find(row=>row.keyName==='welcomeTitle').settingValue,'Modern welcome');
+    assert.equal(sources.modernCms.find(row=>row.keyName==='legacyFooter').settingValue,'Legacy footer');
     assert.equal(sources.settings.length, 2);
     assert.equal(sources.cms.length, 2);
     assert.equal(sources.settings.find(row => row.key_name === 'custom_key').setting_value, 'legacy-conflict');

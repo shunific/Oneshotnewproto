@@ -1,4 +1,6 @@
 import { pendingVenueCreates as readVenueCreates, saveVenueCreate } from '../utils/venueContentPersistence.js';
+import { pendingCmsSave as readPendingCmsSave, saveCmsConfig } from '../utils/cmsPersistence.js';
+import { validateCmsSnapshot } from '../../../cms-contract.mjs';
 import { venueCanonical, venueExact, normalizeVenuePayload, validateVenueRecord } from '../../../venue-content-contract.mjs';
 import { pendingContentCreates as readContentCreates, saveContentCreate } from '../utils/contentCreatePersistence';
 import { pendingQueueOperations as readPendingQueueOperations, saveQueueOperation, retryQueueOperation, queueSnapshot } from '../utils/queuePersistence.js';
@@ -184,7 +186,7 @@ type AppContextType = {
   events: Event[]; addEvent: (e: Omit<Event, 'id'>) => Promise<string>; updateEvent: (id: string, updates: Partial<Omit<Event, 'id'>>, expectedRecord?: any) => Promise<void>; deleteEvent: (id: string, expectedRecord?: any) => Promise<void>; pendingVenueCreates: any[]; venueCreateError: string; retryVenueCreate: (kind: string) => Promise<any>;
   addStaffUser: (u: Omit<StaffUser, 'id'|'createdAt'>) => Promise<StaffUser>; updateStaffUser: (id: string, u: Partial<StaffUser>) => Promise<void>; resetStaffUserPassword: (id: string) => Promise<void>; toggleStaffUserActive: (id: string) => void;
   savePolicySettings: (r: Partial<RatesConfig>, t: Partial<ReservationTerms>, revision: string) => Promise<any>; addAnnouncement: (a: Omit<Announcement, 'id'|'createdAt'>) => Promise<void>; updateAnnouncement: (id: string, u: Partial<Announcement>) => Promise<void>; deleteAnnouncement: (id: string) => Promise<void>; toggleAnnouncement: (id: string) => Promise<void>; addClosedDate: (c: Omit<ClosedDate, 'id'>) => Promise<string>; removeClosedDate: (id: string, expectedRecord?: any) => Promise<void>; updateClosedDate: (id: string, u: Partial<ClosedDate>, expectedRecord?: any) => Promise<void>;
-  siteConfig: any; updateSiteConfig: (config: any) => void; refreshLiveMonitor: () => void;
+  siteConfig: any; updateSiteConfig: (config: any) => Promise<any>; pendingCmsSave: any; cmsSaveError: string; retryCmsSave: () => Promise<any>; refreshCmsConfig: () => Promise<any>; refreshLiveMonitor: () => void;
   lostItems: LostItem[];
   addLostItem: (i: Omit<LostItem, 'id'>) => Promise<void>;
   updateLostItem: (id: string, u: Partial<LostItem>) => void;
@@ -219,6 +221,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const identityGeneration = useRef(0);
   const floorRefreshGeneration = useRef(0);
   const authMutationInFlight = useRef<symbol | null>(null);
+  const cmsSnapshotRef = useRef<any>(null);
+  const cmsGeneration = useRef(0);
+  const cmsInFlight = useRef(false);
   if (!recoveryStorage.current) { try { recoveryStorage.current = sessionStorage; } catch { /* Authentication remains unavailable without recovery storage. */ } }
   const [isInitializing, setIsInitializing] = useState(true);
 
@@ -276,6 +281,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const [siteConfig, setSiteConfig] = useState<any>(null);
+  const [pendingCmsSave, setPendingCmsSave] = useState<any>(null);
+  const [cmsSaveError, setCmsSaveError] = useState('');
   const updateWeatherLocation = useCallback((lat: string, lon: string, name: string) => { setWeatherConfig({ lat, lon, name }); }, []);
   const [lostItems, setLostItems] = useState<LostItem[]>([]);
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
@@ -349,6 +356,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (lostRows) setLostItems(lostRows);
       if (watchRows) setWatchlist(watchRows);
       if (!isCurrent()) return;
+      const cmsEpoch = cmsGeneration.current;
       const results = await Promise.all(['reservations', 'settings/rates', 'settings/terms', 'announcements', 'cms', 'closed-dates', 'promo-codes', 'events'].map(readLocal));
       if (!isCurrent()) return;
       const [resData, ratesData, termsData, annData, cmsData, closedData, promosData, eventsData] = results;
@@ -356,7 +364,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (ratesData) setRates(prev => isCurrent() ? ({ ...prev, ...ratesData }) : prev);
       if (termsData) setReservationTerms(prev => isCurrent() ? ({ ...prev, ...termsData }) : prev);
       if (annData) setAnnouncements(annData);
-      if (cmsData) setSiteConfig(cmsData);
+      if (cmsData && !cmsInFlight.current && cmsGeneration.current === cmsEpoch) {
+        try { const saved = validateCmsSnapshot(cmsData); cmsSnapshotRef.current = saved; setSiteConfig((prev: any) => isCurrent() && !cmsInFlight.current && cmsGeneration.current === cmsEpoch ? saved.record : prev); }
+        catch { setCmsSaveError('Saved local images could not be verified. Reload before editing.'); }
+      }
       if (closedData) setClosedDates(closedData);
       if (promosData) setPromoCodes(promosData);
       if (eventsData) setEvents(eventsData);
@@ -666,6 +677,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const clearIdentity = () => {
     identityGeneration.current++;
     identityRef.current = null; authAccountRef.current = null;
+    cmsGeneration.current++; cmsSnapshotRef.current = null;
+    setSiteConfig(null); setPendingCmsSave(null); setCmsSaveError('');
     setIsInitializing(false); setIsLoggingOut(false); setLastSynced(null);
     setStaffLoggedIn(false); setAdminLoggedIn(false);
     setStaffProfile({ id: '', username: '', fullName: '', role: '', phone: '', joinedDate: '', isAdmin: false });
@@ -1203,11 +1216,56 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const updateEvent=async(id:string,u:Partial<Omit<Event,'id'>>,expectedRecord?:any)=>mutateVenueRecord('event',id,u,expectedRecord||events.find(row=>row.id===id));
   const deleteEvent=async(id:string,expectedRecord?:any)=>mutateVenueRecord('event',id,null,expectedRecord||events.find(row=>row.id===id),true);
 
- const updateSiteConfig = (newConfig: any) => {
-    setSiteConfig((prev: any) => ({ ...prev, ...newConfig }));
-    syncToDB('/api/cms', 'PUT', newConfig, `Updated Website Content`).then(runCloudBackup).catch(()=>{});
-    addActivity('admin_action', `Updated public website CMS content`);
+  // CMS saves retain the original request until both its commit and current images are verified.
+  const refreshCmsRecovery = () => {
+    const owner = identityRef.current;
+    if (!owner || owner !== staffProfile.id || !staffProfile.isAdmin) { setPendingCmsSave(null); setCmsSaveError(''); return; }
+    try { setPendingCmsSave(readPendingCmsSave(localStorage, owner)); setCmsSaveError(''); }
+    catch { setPendingCmsSave(null); setCmsSaveError('CMS recovery storage is unavailable. Restore it before saving images.'); }
   };
+  useEffect(refreshCmsRecovery, [staffProfile.id, staffProfile.isAdmin]);
+  const refreshCmsConfig = async () => {
+    const owner = identityRef.current, epoch = identityGeneration.current;
+    const isCurrent = () => !!owner && !authMutationInFlight.current && identityRef.current === owner && identityGeneration.current === epoch && owner === staffProfile.id && staffProfile.isAdmin === true;
+    if (!isCurrent()) throw new Error('Administrator sign-in is required.');
+    if (cmsInFlight.current) throw new Error('Wait for the current image save to finish before reloading.');
+    const refresh = ++cmsGeneration.current;
+    const response = await localFetch('http://localhost:3001/api/cms');
+    if (!response.ok) throw new Error('Saved local images could not be reloaded. Your draft is kept.');
+    const snapshot = validateCmsSnapshot(await response.json());
+    const canApply = () => isCurrent() && cmsGeneration.current === refresh && !cmsInFlight.current;
+    if (!canApply()) throw new Error('Image reload was superseded. Reload the current saved section.');
+    cmsSnapshotRef.current = snapshot;
+    setSiteConfig((prev: any) => canApply() ? snapshot.record : prev);
+    refreshCmsRecovery();
+    return snapshot;
+  };
+  const persistCmsConfig = async (patch: any, retry = false) => {
+    const owner = identityRef.current, epoch = identityGeneration.current;
+    const isCurrent = () => !!owner && !authMutationInFlight.current && identityRef.current === owner && identityGeneration.current === epoch && owner === staffProfile.id && staffProfile.isAdmin === true;
+    if (!isCurrent()) throw new Error('Administrator sign-in is required.');
+    if (cmsInFlight.current) throw new Error('A CMS save is already being checked. Wait before retrying.');
+    cmsInFlight.current = true; cmsGeneration.current++;
+    let recoveryPending = false;
+    const applySnapshot = (snapshot: any) => { if (!isCurrent()) throw new Error('Administrator account changed. Reload saved images.'); cmsSnapshotRef.current = snapshot; setSiteConfig((prev: any) => isCurrent() ? snapshot.record : prev); };
+    try {
+      const result = await saveCmsConfig({storage: localStorage, ownerId: owner, revision: cmsSnapshotRef.current?.revision, patch, retry, isCurrent,
+        request: (command: any) => syncToDB('/api/cms', 'PUT', command, 'Image settings saved locally'),
+        read: async () => { const response = await localFetch('http://localhost:3001/api/cms'); if (!response.ok) throw new Error('Saved images could not be refreshed. Recover the original save before editing.'); return await response.json(); }
+      });
+      applySnapshot({record: result.record, revision: result.revision});
+      recoveryPending = result.recoveryPending;
+      return result;
+    } catch (error) {
+      if ((error as any)?.code === 'CMS_REVIEW_REQUIRED' && isCurrent()) applySnapshot((error as any).snapshot);
+      throw error;
+    } finally {
+      cmsGeneration.current++; cmsInFlight.current = false;
+      if (isCurrent()) { refreshCmsRecovery(); if (recoveryPending) setCmsSaveError('Image save confirmed, but recovery cleanup needs review. Retry only its saved original.'); }
+    }
+  };
+ const updateSiteConfig = (patch: any) => persistCmsConfig(patch);
+  const retryCmsSave = () => persistCmsConfig(null, true);
 
   if (isInitializing) {
     return (
@@ -1237,7 +1295,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addFeedback, resolveFeedback, addActivity, addPromoCode, updatePromoCode, togglePromoCode, deletePromoCode, applyPromoCode,
       events, addEvent, updateEvent, deleteEvent,
       addStaffUser, updateStaffUser, resetStaffUserPassword, toggleStaffUserActive,
-      savePolicySettings, addAnnouncement, updateAnnouncement, deleteAnnouncement, toggleAnnouncement, pendingVenueCreates, venueCreateError, retryVenueCreate, addClosedDate, removeClosedDate, updateClosedDate, siteConfig, updateSiteConfig, refreshLiveMonitor,
+      savePolicySettings, addAnnouncement, updateAnnouncement, deleteAnnouncement, toggleAnnouncement, pendingVenueCreates, venueCreateError, retryVenueCreate, addClosedDate, removeClosedDate, updateClosedDate, siteConfig, updateSiteConfig, pendingCmsSave, cmsSaveError, retryCmsSave, refreshCmsConfig, refreshLiveMonitor,
       lostItems, addLostItem, updateLostItem, deleteLostItem,
       watchlist, addWatchlistItem, updateWatchlistItem, deleteWatchlistItem, sessionHistory, addSessionHistory, resetPasswordWithPin, isSystemOffline,
       hashPassword,

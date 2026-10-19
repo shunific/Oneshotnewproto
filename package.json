@@ -1,7 +1,7 @@
 {
   "name": "oneshot-bar-billiards-app",
   "private": true,
-  "version": "0.0.2-rc.26",
+  "version": "0.0.2-rc.27",
   "description": "Point of Sale and Reservation Management System for One Shot Bar & Billiards",
   "author": "Mark Joseph Morcozo",
   "type": "module",
@@ -57,7 +57,9 @@
       "server-venue-availability.cjs",
       "server-table-start.cjs",
       "venue-content-contract.mjs",
-      "server-venue-content.cjs"
+      "server-venue-content.cjs",
+      "cms-contract.mjs",
+      "server-cms.cjs"
     ],
     "directories": {
       "output": "release/"
@@ -102,7 +104,9 @@
       "server-venue-availability.cjs",
       "server-table-start.cjs",
       "venue-content-contract.mjs",
-      "server-venue-content.cjs"
+      "server-venue-content.cjs",
+      "cms-contract.mjs",
+      "server-cms.cjs"
     ],
     "win": {
       "target": "nsis",
