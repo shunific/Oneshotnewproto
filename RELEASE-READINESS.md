@@ -1,0 +1,14 @@
+# Capstone repair checkpoint — RC26
+
+The local POS has704 passing native tests, a successful renderer build and a verified arm64 package. This branch repairs staff authentication, durable local operations and retry recovery, billing/checkout/refunds, reviewed open-time limits, receipt-backed reporting, and local promo/announcement/closure/event saving. The macOS workflow no longer embeds a privileged Supabase credential and now runs regression and artifact checks.
+
+This is a draft integration checkpoint. The original83-feature questionnaire is not fully passed. Local calendar enforcement uses saved local records; hosted freshness and reservation-v2 calendar coordination remain unverified. Local content saves do not publish to the customer website. The full matching customer/cloud cutover is prepared separately and remains unapplied. Native RC26 interface acceptance is pending normal Mac unlock.
+
+The extension form now forwards its selected payment method/reference. Open-time copy states the existing one-hour minimum and half-hour billing blocks. Closure/event forms await validated acknowledgements, preserve failed drafts, recover original creates, and reject stale edits. They no longer create or broadly cancel untrusted hosted reservation tags.
+
+One narrow live security change was applied on20October2026: enabling the existing public.tables SELECT policies. Actual rollback-only role probes preserved reads and denied INSERT/UPDATE/DELETE for anon/authenticated, with no QA records retained. This is separate from the14-source coordinated cloud migration. Existing public reads remain broad; the coordinated privacy cutover is still required.
+
+Before completing release: verify native UI, publish and test the matching reviewed customer/cloud changes, populate approved venue policy/physical-table mappings/cloud memberships, and complete every remaining questionnaire flow. Confirm revocation of the privileged credential exposed in older source/builds; deleting it from this branch does not revoke old copies. Do not ship a service-role credential in a desktop/customer app. Reference: https://supabase.com/docs/guides/getting-started/api-keys
+
+No real funds were transferred. The original downloaded app and synthetic QA profiles remain separate. This branch is not approval to mark the whole capstone complete.
+

@@ -1,3 +1,4 @@
+import { localFetch } from './utils/localApi';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router';
 import {
@@ -12,7 +13,7 @@ import { addMinutes, differenceInSeconds, format } from 'date-fns';
 import { useAppContext } from './context/AppContext';
 import { LockScreen } from './components/LockScreen';
 import logoImg from 'figma:asset/40eb82831843e17a3c48a360fd80f0aaaa58ddc8.png';
-import { FirstTimeLoginModal } from './components/FirstTimeLoginModal';
+
 import { AnimatePresence, motion } from 'motion/react';
 
 const navItems = [
@@ -183,7 +184,7 @@ export function Layout() {
   const { queue, tables, reservations, promoCodes, watchlist, activities, staffLoggedIn, staffLogout, staffProfile } = useAppContext() as any;
   const location = useLocation();
   const navigate = useNavigate();
-  const [showSetup, setShowSetup] = useState(staffProfile?.isFirstLogin === 1);
+
 
   // Sync recent searches to local storage whenever they change
   useEffect(() => {
@@ -328,11 +329,11 @@ export function Layout() {
 
   return (
     <>
-      {showSetup && <FirstTimeLoginModal onComplete={() => setShowSetup(false)} />}
+
       
       {isLocked && <LockScreen onUnlock={handleUnlockTerminal} />}
         
-      <div className={`flex h-screen bg-neutral-900 text-neutral-100 overflow-hidden transition-all duration-300 ${isLocked ? 'pointer-events-none blur-md select-none opacity-50' : ''}`}>
+      <div ref={node => { if (node) node.inert = isLocked; }} aria-hidden={isLocked || undefined} className={`flex h-screen bg-neutral-900 text-neutral-100 overflow-hidden transition-all duration-300 ${isLocked ? 'pointer-events-none blur-md select-none opacity-50' : ''}`}>
         
         {/* Mobile Overlay */}
         {sidebarOpen && (
@@ -399,8 +400,7 @@ export function Layout() {
             <div className="px-4 pb-4">
               <button
                 onClick={() => {
-                  sessionStorage.setItem('oneshot_admin_auth', 'true');
-                   window.location.href = '/admin';
+                  navigate('/admin');
                 }}
                 className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-neutral-400 hover:text-neutral-200 transition-all text-xs font-semibold"
               >

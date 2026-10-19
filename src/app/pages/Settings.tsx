@@ -1,16 +1,19 @@
+import { CloudStaffAccess } from '../components/CloudStaffAccess';
+import { authRequest } from '../utils/localApi';
+import { localFetch } from '../utils/localApi';
 import { useState, useMemo, useRef } from 'react';
 import { useAppContext } from '../context/AppContext';
 import {
   User, Lock, Phone, Eye, EyeOff, Palette, Sun, Moon,
   Save, CheckCircle, Pencil, X, Calendar, Tag,
   AlertTriangle, UploadCloud, BarChart2, CalendarCheck, 
-  ShoppingCart, LayoutGrid, Clock, Download, ShieldAlert
+  ShoppingCart, LayoutGrid, Clock, ShieldAlert
 } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { formatDistanceToNow } from 'date-fns';
 import logoImg from 'figma:asset/40eb82831843e17a3c48a360fd80f0aaaa58ddc8.png';
 
-type Section = 'overview' | 'profile' | 'appearance' | 'security';
+type Section = 'overview' | 'profile' | 'appearance' | 'security' | 'cloud';
 
 const getPasswordStrength = (pw: string) => {
   if (!pw) return { score: 0, color: 'bg-neutral-800', isValid: false };
@@ -21,7 +24,7 @@ const getPasswordStrength = (pw: string) => {
 
   if (score === 1) return { score, color: 'bg-rose-500', isValid: false };
   if (score === 2) return { score, color: 'bg-amber-500', isValid: false };
-  return { score, color: 'bg-emerald-500', isValid: true };
+  return { score, color: score === 3 && pw.length <= 256 ? 'bg-emerald-500' : 'bg-rose-500', isValid: score === 3 && pw.length <= 256 && pw !== 'oneshotstaff' };
 };
 
 // 🟢 NEW: Theme Palettes matching your inspiration image
@@ -34,7 +37,7 @@ const COLOR_PALETTES = [
 ];
 
 export function SettingsPage() {
-  const { staffProfile, updateStaffProfile, activities, hashPassword, staffUsers, updateStaffUser, theme, updateTheme, primaryColor, updatePrimaryColor } = useAppContext();
+  const { staffProfile, updateStaffProfile, activities, changeOwnCredentials, verifyPassword, staffUsers, updateStaffUser, theme, updateTheme, primaryColor, updatePrimaryColor } = useAppContext();
   const navigate = useNavigate();
 
   const [activeSection, setActiveSection] = useState<Section>('overview');
@@ -48,9 +51,11 @@ export function SettingsPage() {
   const [profileForm, setProfileForm] = useState({ fullName: staffProfile.fullName, phone: staffProfile.phone, role: staffProfile.role });
 
   const [secEdit, setSecEdit] = useState(false);
-  const [secForm, setSecForm] = useState({ username: staffProfile.username, currentPassword: '', newPassword: '', confirmPassword: '' });
+  const [secForm, setSecForm] = useState({ username: staffProfile.username, currentPassword: '', newPassword: '', confirmPassword: '', newRecoveryPin: '' });
   const [showPw, setShowPw] = useState({ current: false, new: false, confirm: false });
   const [secError, setSecError] = useState('');
+  const securityInFlight = useRef(false);
+  const [isSavingSecurity, setIsSavingSecurity] = useState(false);
 
   const userActivities = useMemo(() => activities.filter((a: any) => a.metadata?.actorId === staffProfile.id), [activities, staffProfile.id]);
 
@@ -73,7 +78,7 @@ export function SettingsPage() {
   };
 
   // 🟢 FIXED: Added strict validation checks before saving
-  const handleSaveProfile = () => {
+  const handleSaveProfile = async () => {
     if (!profileForm.fullName.trim()) {
       flash("Full Name cannot be empty.", "error");
       return;
@@ -82,9 +87,16 @@ export function SettingsPage() {
       flash("Phone number must be exactly 11 digits.", "error");
       return;
     }
-    updateStaffProfile({ fullName: profileForm.fullName.trim(), phone: profileForm.phone });
-    setProfileEdit(false); 
-    flash("Profile changes saved!", "success");
+    try {
+      if (!staffProfile.id) throw new Error('Current account was not found');
+      const changes = { fullName: profileForm.fullName.trim(), phone: profileForm.phone };
+      await updateStaffUser(staffProfile.id, changes);
+      updateStaffProfile(changes);
+      setProfileEdit(false);
+      flash("Profile changes saved!", "success");
+    } catch {
+      flash("Failed to save profile changes. Please try again.", "error");
+    }
   };
 
   const handleSaveAvatar = async () => {
@@ -94,15 +106,14 @@ export function SettingsPage() {
       const formData = new FormData();
       formData.append('image', pendingFile);
 
-      const res = await fetch('http://localhost:3001/api/images', { method: 'POST', body: formData });
+      const res = await localFetch('http://localhost:3001/api/images', { method: 'POST', body: formData });
       if (!res.ok) throw new Error('Failed to upload image');
       const data = await res.json();
 
+      if (!staffProfile.id) throw new Error('Current account was not found');
+      await updateStaffUser(staffProfile.id, { avatarImg: data.url });
       updateStaffProfile({ avatarImg: data.url });
       setAvatarImg(data.url);
-      
-      const targetUser = staffUsers.find(u => u.username === staffProfile.username);
-      if (targetUser) updateStaffUser(targetUser.id, { avatarImg: data.url });
 
       setPendingAvatar(null); setPendingFile(null);
       flash("Profile picture updated!", "success");
@@ -112,43 +123,53 @@ export function SettingsPage() {
   };
 
   const handleSaveSecurity = async () => {
+    if (securityInFlight.current) return;
     setSecError('');
     if (!secForm.currentPassword) { setSecError('Enter your current password to confirm changes.'); return; }
     
-    const hashedCurrent = await hashPassword(secForm.currentPassword);
-    const targetUser = staffUsers.find(u => u.username === staffProfile.username);
-    
-    if (targetUser?.password !== hashedCurrent) { setSecError('Current password is incorrect.'); return; }
-    
-    if (secForm.newPassword) {
-      if (!pwStrength.isValid) { setSecError('New password does not meet security requirements.'); return; }
-      if (secForm.newPassword !== secForm.confirmPassword) { setSecError('New passwords do not match.'); return; }
-    }
+    if (secForm.newRecoveryPin && !/^\d{4,12}$/.test(secForm.newRecoveryPin)) { setSecError('Recovery PIN must contain 4–12 digits.'); return; }
+    securityInFlight.current = true;
+    setIsSavingSecurity(true);
+    let passwordSaved = false;
+    let pinSaved = false;
+    try {
+      if (!staffProfile.id) throw new Error('Current account was not found');
+      if (secForm.newPassword) {
+        if (!pwStrength.isValid) { setSecError('New password does not meet security requirements.'); return; }
+        if (secForm.newPassword !== secForm.confirmPassword) { setSecError('New passwords do not match.'); return; }
+        if (secForm.newPassword === secForm.currentPassword) { setSecError('Choose a different password from your current password.'); return; }
+      }
 
-    const hashedNew = secForm.newPassword ? await hashPassword(secForm.newPassword) : undefined;
-    updateStaffProfile({ username: secForm.username || staffProfile.username, ...(hashedNew ? { password: hashedNew } : {}) });
-    
-    setSecEdit(false); setSecForm(f => ({ ...f, currentPassword: '', newPassword: '', confirmPassword: '' }));
-    flash("Security credentials saved!", "success");
+      if (secForm.newPassword) {
+        await changeOwnCredentials({ currentPassword: secForm.currentPassword, newPassword: secForm.newPassword, recoveryPin: secForm.newRecoveryPin || undefined });
+        passwordSaved = true;
+        pinSaved = Boolean(secForm.newRecoveryPin);
+      } else if (secForm.newRecoveryPin) {
+        await authRequest('change-pin', { currentPassword: secForm.currentPassword, recoveryPin: secForm.newRecoveryPin });
+        pinSaved = true;
+      } else if (!await verifyPassword(secForm.currentPassword)) { setSecError('Current password is incorrect.'); return; }
+      if (secForm.username && secForm.username !== staffProfile.username) {
+        const result = await authRequest('change-username', { username: secForm.username, currentPassword: secForm.newPassword || secForm.currentPassword });
+        updateStaffProfile(result.user);
+      }
+      setSecEdit(false);
+      setSecForm(f => ({ ...f, currentPassword: '', newPassword: '', confirmPassword: '', newRecoveryPin: '' }));
+      flash("Security credentials saved!", "success");
+    } catch {
+      if (passwordSaved || pinSaved) {
+        setSecForm(f => ({ ...f, currentPassword: passwordSaved ? secForm.newPassword : f.currentPassword, newPassword: passwordSaved ? '' : f.newPassword, confirmPassword: passwordSaved ? '' : f.confirmPassword, newRecoveryPin: pinSaved ? '' : f.newRecoveryPin }));
+        setSecError('Your password or PIN was saved, but the username change failed. Review the username and try again.');
+      } else setSecError('Failed to save security credentials. Please try again.');
+    } finally {
+      securityInFlight.current = false;
+      setIsSavingSecurity(false);
+    }
   };
 
-  const handleDownloadPin = () => {
-    const targetUser = staffUsers.find(u => u.username === staffProfile.username);
-    if (!targetUser?.recoveryPin) {
-      flash("Recovery PIN not found.", "error");
-      return;
-    }
-    const text = `ONE SHOT BAR & BILLIARDS\n=================================\nACCOUNT RECOVERY CREDENTIALS\n=================================\n\nAccount Name : ${targetUser.fullName}\nUsername     : ${targetUser.username}\nRole         : ${targetUser.role.toUpperCase()}\n\nOFFLINE RECOVERY PIN: ${targetUser.recoveryPin}\n\n=================================\nIMPORTANT: Keep this file secure. Because this system operates offline, if you forget your password, you will strictly need this 4-digit PIN to recover your account without a Super Admin.\n`;
-    const blob = new Blob([text], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `oneshot-recovery-pin-${targetUser.username}.txt`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-    flash("Recovery PIN downloaded successfully!", "success");
+  const handleSetNewPin = () => {
+    setSecEdit(true);
+    setSecError('');
+    setSecForm(f => ({ ...f, username: staffProfile.username }));
   };
 
   const tabs: { id: Section; label: string; icon: React.ElementType }[] = [
@@ -156,6 +177,7 @@ export function SettingsPage() {
     { id: 'profile',    label: 'Profile',    icon: User },
     { id: 'appearance', label: 'Appearance', icon: Palette },
     { id: 'security',   label: 'Security',   icon: Lock },
+    { id: 'cloud', label: 'Cloud staff', icon: UploadCloud },
   ];
 
   return (
@@ -231,6 +253,7 @@ export function SettingsPage() {
         ))}
       </div>
 
+      {activeSection === 'cloud' && <CloudStaffAccess key={staffProfile.id} localStaffId={staffProfile.id || ''} />}
       {/* OVERVIEW */}
       {activeSection === 'overview' && (
         <div className="space-y-4">
@@ -413,7 +436,7 @@ export function SettingsPage() {
         <div className="space-y-6 animate-in fade-in duration-300">
           <div className="bg-neutral-950 border border-neutral-800 rounded-2xl overflow-hidden">
             <div className="px-6 py-4 border-b border-neutral-800 flex items-center justify-between">
-              <div><h3 className="text-sm font-bold text-neutral-100">Login Credentials</h3><p className="text-xs text-neutral-500 mt-0.5">Manage your username and password</p></div>
+              <div><h3 className="text-sm font-bold text-neutral-100">Login Credentials</h3><p className="text-xs text-neutral-500 mt-0.5">Manage your username, password and recovery PIN</p></div>
               {!secEdit ? <button onClick={() => { setSecEdit(true); setSecError(''); setSecForm(f => ({ ...f, username: staffProfile.username })); }} className="flex items-center gap-1.5 text-xs text-neutral-400 bg-neutral-800 border border-neutral-700 px-3 py-1.5 rounded-lg"><Pencil size={12} /> Edit</button> : <button onClick={() => { setSecEdit(false); setSecError(''); }} className="flex items-center gap-1.5 text-xs text-neutral-500 px-3 py-1.5 rounded-lg"><X size={12} /> Cancel</button>}
             </div>
             <div className="p-6 space-y-4">
@@ -427,7 +450,7 @@ export function SettingsPage() {
 
               {secEdit && (
                 <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 space-y-3 mt-2">
-                  <p className="text-xs text-neutral-500 uppercase tracking-widest font-semibold">Change Password</p>
+                  <p className="text-xs text-neutral-500 uppercase tracking-widest font-semibold">Change Password or Recovery PIN</p>
                   
                   <div>
                     <label className="block text-xs text-neutral-400 mb-1.5">Current Password <span className="text-rose-500">*</span></label>
@@ -450,7 +473,7 @@ export function SettingsPage() {
                           <div className={`h-full ${pwStrength.score >= 2 ? pwStrength.color : 'bg-transparent'} transition-all w-1/3`} />
                           <div className={`h-full ${pwStrength.score >= 3 ? pwStrength.color : 'bg-transparent'} transition-all w-1/3`} />
                         </div>
-                        <p className={`text-[10px] ${pwStrength.isValid ? 'text-emerald-500' : 'text-neutral-500'}`}>Requires 8+ characters, letters, and numbers.</p>
+                        <p className={`text-[10px] ${pwStrength.isValid ? 'text-emerald-500' : 'text-neutral-500'}`}>Requires 8–256 characters, letters, and numbers.</p>
                       </div>
                     )}
                   </div>
@@ -462,12 +485,17 @@ export function SettingsPage() {
                       <button type="button" tabIndex={-1} onClick={() => setShowPw(s => ({ ...s, confirm: !s.confirm }))} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500">{showPw.confirm ? <EyeOff size={13} /> : <Eye size={13} />}</button>
                     </div>
                   </div>
+                  <div>
+                    <label htmlFor="new-recovery-pin" className="block text-xs text-neutral-400 mb-1.5">New Recovery PIN (optional)</label>
+                    <input id="new-recovery-pin" type="password" inputMode="numeric" autoComplete="new-password" maxLength={12} value={secForm.newRecoveryPin} onChange={e => setSecForm(f => ({ ...f, newRecoveryPin: e.target.value.replace(/\D/g, '').slice(0, 12) }))} placeholder="Leave blank to keep your current PIN" className="w-full bg-neutral-800 border border-neutral-700 rounded-xl px-3 py-2 text-sm text-neutral-100" />
+                    <p className="mt-1.5 text-[10px] text-neutral-500">Use 4–12 digits. Keep your PIN private in a secure place; it cannot be retrieved after saving.</p>
+                  </div>
                   {secError && <div className="flex items-center gap-2 bg-rose-950/50 border border-rose-800/40 text-rose-400 text-xs px-3 py-2.5 rounded-xl"><AlertTriangle size={13} className="flex-shrink-0" />{secError}</div>}
                 </div>
               )}
               {secEdit && (
                 <div className="pt-1 flex justify-end">
-                  <button onClick={handleSaveSecurity} disabled={secForm.newPassword ? !pwStrength.isValid : false} className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white text-sm rounded-xl font-semibold"><Save size={14} /> Save Credentials</button>
+                  <button onClick={handleSaveSecurity} disabled={isSavingSecurity || (secForm.newPassword ? !pwStrength.isValid : false) || (!!secForm.newRecoveryPin && !/^\d{4,12}$/.test(secForm.newRecoveryPin))} className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white text-sm rounded-xl font-semibold"><Save size={14} /> {isSavingSecurity ? 'Saving...' : 'Save Credentials'}</button>
                 </div>
               )}
             </div>
@@ -484,50 +512,17 @@ export function SettingsPage() {
             </div>
             <div className="p-6">
               <p className="text-xs text-neutral-400 leading-relaxed mb-5">
-                Because this system is designed to operate completely offline, there are no email reset links. If you forget your password, your 4-digit Recovery PIN is the <strong>ONLY</strong> way to regain access to your account without requiring a Super Admin to manually reset it.
+                Your recovery PIN lets you reset a forgotten password while offline. The saved PIN cannot be retrieved or downloaded. To replace it, enter your current password and a new PIN in Login Credentials. Keep the new PIN private in a secure place.
               </p>
               <button 
-                onClick={handleDownloadPin}
+                onClick={handleSetNewPin}
                 className="flex items-center gap-2 px-5 py-3 bg-amber-600/10 hover:bg-amber-600/20 text-amber-500 border border-amber-600/30 rounded-xl text-sm font-bold transition-all"
               >
-                <Download size={16} /> Download Recovery PIN (.txt)
+                <Lock size={16} /> Set a New Recovery PIN
               </button>
             </div>
           </div>
-          <div className="mt-10 p-6 bg-rose-950/20 border border-rose-900/50 rounded-2xl text-center">
-          <h3 className="text-rose-500 font-black text-lg mb-2">Alpha Testing Reset</h3>
-            <p className="text-xs text-rose-400/80 mb-4">
-               This will wipe all active tables, queues, reservations, and history from the local and cloud database.
-              </p>
- <button 
-    onClick={async () => {
-      if(window.confirm("⚠️ WARNING: This will permanently delete all test transactions and reset the venue to empty. Are you sure?")) {
-        try {
-          const response = await fetch('http://localhost:3001/api/debug/reset', { method: 'POST' });
-          
-          // 🟢 STRICT CHECK: Stop and show error if server rejects or 404s
-          if (!response.ok) {
-             const errData = await response.json().catch(() => ({ error: 'Endpoint missing or server crashed.' }));
-             alert(`❌ Wipe Failed: ${errData.error}\n\nCheck your terminal! If it's a Cloud error, you need to use your Supabase SERVICE_ROLE_KEY in your .env file to bypass security restrictions.`);
-             return;
-          }
-          
-          // 2. Wipe the Frontend (Browser Memory)
-          localStorage.clear();
-          sessionStorage.clear();
-          
-          alert("✅ Test data and browser cache successfully wiped! The app will now reload.");
-          window.location.href = '/'; 
-        } catch (e) {
-          alert("❌ Failed to reach Edge Server. Is localhost:3001 running?");
-        }
-      }
-    }}
-    className="bg-rose-600 hover:bg-rose-500 text-white font-bold py-3 px-6 rounded-xl text-sm transition-colors shadow-lg shadow-rose-900/40"
-  >
-    Wipe All Test Data
-  </button>
-</div>
+
         </div>
       )}
     </div>

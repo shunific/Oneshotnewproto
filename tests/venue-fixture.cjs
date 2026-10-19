@@ -1,0 +1,4 @@
+// Explicit synthetic venue settings for isolated calendar-aware transaction tests.
+const run=(db,sql,args=[])=>new Promise((resolve,reject)=>db.run(sql,args,e=>e?reject(e):resolve()));
+async function seedVenue(db){for(const sql of ['CREATE TABLE IF NOT EXISTS systemSettings(keyName TEXT PRIMARY KEY,settingValue TEXT)','CREATE TABLE IF NOT EXISTS closed_dates(id TEXT,closed_date TEXT,type TEXT,day_of_week INTEGER,is_full_day INTEGER,open_time TEXT,close_time TEXT)','CREATE TABLE IF NOT EXISTS events(id TEXT,date TEXT,duration TEXT,eventTableIds TEXT,caterWalkIns INTEGER)','CREATE TABLE IF NOT EXISTS reservations(id TEXT,tableId TEXT,status TEXT,date TEXT,timeSlot TEXT,durationHours INTEGER)'])await run(db,sql);for(const [k,v]of Object.entries({weekdayStartTime:'00:00',weekdayEndTime:'23:59',weekendStartTime:'00:00',weekendEndTime:'23:59',bookingCutoffMinutes:'0'}))await run(db,'INSERT OR IGNORE INTO systemSettings VALUES(?,?)',[k,v]);}
+module.exports={seedVenue};

@@ -1,3 +1,5 @@
+import { localFetch } from '../utils/localApi';
+import { EmployeeProfileEditor } from '../components/EmployeeProfileEditor';
 import { useState, useEffect, useRef } from 'react';
 import { useAppContext, StaffUser } from '../context/AppContext';
 import { Plus, X, User, Phone, CheckCircle, Eye, EyeOff, Trash2, History, Activity, RefreshCw, MoreVertical, ShieldAlert } from 'lucide-react';
@@ -16,13 +18,14 @@ const blankForm: FormState = { username: '', password: '', confirmPassword: '', 
 
 export function AdminUsers() {
   const { staffUsers, activities, addStaffUser, updateStaffUser, resetStaffUserPassword, hashPassword, staffProfile } = useAppContext() as any;
-  
+
+  const [editingEmployee, setEditingEmployee] = useState<StaffUser | null>(null);
   const [showForm, setShowForm]     = useState(false);
   const [form, setForm]             = useState<FormState>(blankForm);
   const [showPw, setShowPw]                 = useState(false);
   const [showConfirmPw, setShowConfirmPw]   = useState(false);
   const [resetMsg, setResetMsg]     = useState<string | null>(null);
-  
+
   const [viewTab, setViewTab]       = useState<'active' | 'archived'>('active');
   const [filterRole, setFilterRole] = useState<'all' | StaffUser['role']>('all');
 
@@ -48,7 +51,7 @@ export function AdminUsers() {
 
  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!form.username || !form.fullName || !form.password || !form.confirmPassword) {
       alert("Please fill all required fields.");
       return;
@@ -68,44 +71,51 @@ export function AdminUsers() {
       alert("Passwords do not match. Please retype the password to confirm.");
       return;
     }
-    
+
     const isUsernameTaken = staffUsers.some((u: any) => u.username.toLowerCase() === form.username.toLowerCase());
     if (isUsernameTaken) { alert("Error: That username is already taken. Please choose another."); return; }
-    
-    const hashedPw = await hashPassword(form.password);
-    
-    // 🟢 NEW: Generate a random 4-digit PIN for offline recovery (1000 - 9999)
-    const generatedPin = Math.floor(1000 + Math.random() * 9000).toString();
-    
+
+
+
+
+
+    const { confirmPassword, ...accountFields } = form;
     const payload = {
-      ...form,
-      password: hashedPw,
+      ...accountFields,
+      password: form.password,
       isActive: true,
-      recoveryPin: generatedPin, 
-      isFirstLogin: 1, 
+
+      isFirstLogin: 1,
     };
-    
+
     setLoadingMsg('SAVING NEW USER...');
     setIsLoading(true);
-    addStaffUser(payload as any);
-    setShowForm(false);
-    setForm(blankForm);
-
-    setTimeout(() => {
+    try {
+      await addStaffUser(payload as any);
+      setShowForm(false);
+      setForm(blankForm);
+    } catch {
+      alert('Staff account was not saved. Your form is preserved; please try again.');
+    } finally {
       setIsLoading(false);
-    }, 800);
+    }
   };
 
-  const handleResetPassword = (id: string, name: string) => {
+  const handleResetPassword = async (id: string, name: string) => {
     setOpenDropdownId(null);
-    if (window.confirm(`Are you sure you want to reset the password for ${name}? It will be changed to "oneshotstaff" and they will be forced to change it on their next login.`)) {
-      resetStaffUserPassword(id);
-      setResetMsg(`Password for ${name} has been securely reset to: oneshotstaff`);
+    if (window.confirm(`Are you sure you want to reset the password for ${name}? You will choose a unique temporary password; they must change it at next login.`)) {
+      try {
+        await resetStaffUserPassword(id);
+      } catch {
+        alert('Password was not saved. Please try again.');
+        return;
+      }
+      setResetMsg(`Password for ${name} has been reset. Share the temporary password privately.`);
       setTimeout(() => setResetMsg(null), 8000);
     }
   };
 
-  const handleArchive = (id: string, name: string, username: string) => {
+  const handleArchive = async (id: string, name: string, username: string) => {
     setOpenDropdownId(null);
 
     // 🟢 SAFEGUARD 1: Block archiving Super Admin
@@ -132,27 +142,31 @@ export function AdminUsers() {
 
       setLoadingMsg('ARCHIVING USER...');
       setIsLoading(true);
-      updateStaffUser(id, { isActive: false });
-
-      setTimeout(() => {
+      try {
+        await updateStaffUser(id, { isActive: false });
+      } catch {
+        alert('Staff changes were not saved. Please try again.');
+      } finally {
         setIsLoading(false);
-      }, 800);
+      }
     }
   };
 
-  const handleRestore = (id: string) => {
+  const handleRestore = async (id: string) => {
     setLoadingMsg('REACTIVATING USER...');
     setIsLoading(true);
-    updateStaffUser(id, { isActive: true });
-
-    setTimeout(() => {
+    try {
+      await updateStaffUser(id, { isActive: true });
+    } catch {
+      alert('Staff changes were not saved. Please try again.');
+    } finally {
       setIsLoading(false);
-    }, 800);
+    }
   };
 
-  const toggleAdmin = (id: string, currentStatus: boolean, role: string, username: string) => {
-    if (role === 'cashier') return; 
-    
+  const toggleAdmin = async (id: string, currentStatus: boolean, role: string, username: string) => {
+    if (role === 'cashier') return;
+
     // 🟢 SAFEGUARD 1: Block modifying Super Admin
     if (username === 'superadmin' || id === 'admin_001') {
       alert('Action Denied: The Master Super Admin must always retain administrator privileges.');
@@ -175,11 +189,13 @@ export function AdminUsers() {
 
     setLoadingMsg('UPDATING PERMISSIONS...');
     setIsLoading(true);
-    updateStaffUser(id, { isAdmin: !currentStatus });
-
-    setTimeout(() => {
+    try {
+      await updateStaffUser(id, { isAdmin: !currentStatus });
+    } catch {
+      alert('Staff changes were not saved. Please try again.');
+    } finally {
       setIsLoading(false);
-    }, 800);
+    }
   };
 
   const displayUsers = staffUsers.filter((u: any) => {
@@ -268,7 +284,7 @@ export function AdminUsers() {
           return (
             <div key={u.id} className={`bg-neutral-950 border rounded-xl p-5 transition-colors ${viewTab === 'archived' ? 'border-rose-900/30 opacity-75' : 'border-neutral-800 hover:border-neutral-700'}`}>
               <div className="flex items-start gap-4">
-                
+
                 <div className="flex flex-col items-center gap-2">
                   {u.avatarImg ? (
                     <img src={u.avatarImg.startsWith('http') ? u.avatarImg : `http://localhost:3001${u.avatarImg}`} alt={u.fullName} className={`w-11 h-11 rounded-xl object-cover border ${viewTab === 'archived' ? 'border-rose-900/30 opacity-50' : 'border-neutral-700'}`} />
@@ -287,7 +303,7 @@ export function AdminUsers() {
                     <span className={`flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${rc.color}`}>{rc.icon} {rc.label}</span>
                     {viewTab === 'archived' && <span className="text-[10px] bg-rose-900/30 text-rose-400 border border-rose-800 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">Archived</span>}
                   </div>
-                  
+
                   <div className="flex items-center gap-4 text-xs text-neutral-500 flex-wrap mb-3">
                     <span className="flex items-center gap-1"><User size={10} /> @{u.username}</span>
                     {u.phone && <span className="flex items-center gap-1"><Phone size={10} /> {u.phone}</span>}
@@ -305,6 +321,7 @@ export function AdminUsers() {
                 </div>
 
                 <div className="flex items-center gap-2 flex-shrink-0">
+                  <button type="button" onClick={() => { setOpenDropdownId(null); setEditingEmployee(u); }} className="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 text-xs text-neutral-300 hover:text-white">Edit employee</button>
                   {viewTab === 'active' ? (
                     <>
                       {/* Admin Privilege Switch (Disabled if role is cashier OR if it's the logged-in user or superadmin) */}
@@ -380,6 +397,8 @@ export function AdminUsers() {
         })}
       </div>
 
+      {editingEmployee && <EmployeeProfileEditor key={editingEmployee.id} employee={editingEmployee} currentUserId={staffProfile?.id} save={updateStaffUser} onSaved={() => setEditingEmployee(null)} onCancel={() => setEditingEmployee(null)} />}
+
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div className="bg-neutral-950 border border-amber-900/30 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
@@ -391,7 +410,7 @@ export function AdminUsers() {
               <button onClick={() => setShowForm(false)} className="p-2 text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 rounded-lg"><X size={16} /></button>
             </div>
             <form onSubmit={handleSave} className="overflow-y-auto flex-1 p-6 space-y-4">
-              
+
               <div>
                 <label className="text-xs text-neutral-400 mb-1.5 block font-medium">Full Name *</label>
                 <input
@@ -428,7 +447,7 @@ export function AdminUsers() {
                   <span className="text-[10px] text-neutral-500 font-mono">{form.username.length}/50</span>
                 </div>
               </div>
-              
+
               <div>
                 <label className="text-xs text-neutral-400 mb-1.5 block font-medium">Password *</label>
                 <div className="relative">
@@ -455,7 +474,7 @@ export function AdminUsers() {
                   <span className="text-[10px] text-neutral-500 font-mono">{form.password.length}/50</span>
                 </div>
               </div>
-              
+
               <div>
                 <div className="flex justify-between items-center mb-1.5">
                   <label className="text-xs text-neutral-400 block font-medium">Confirm Password *</label>
