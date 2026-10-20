@@ -1,30 +1,31 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { localFetch } from '../utils/localApi';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { PesoSign } from '../components/PesoSign';
-import { 
-  Save, Clock, DollarSign, AlertCircle, ShieldCheck, 
+import {
+  Save, Clock, DollarSign, AlertCircle, ShieldCheck,
   FileText, ToggleLeft, ToggleRight, X,
   ShieldAlert, AlertTriangle, CheckCircle, Lock
 } from 'lucide-react';
-import { supabase } from '../utils/supabase';
 
 export default function AdminPolicyRatesEditor() {
-  const { rates, reservationTerms, updateRates, updateReservationTerms, theme, isSystemOffline, tables } = useAppContext() as any;
+  const { rates, reservationTerms, savePolicySettings, staffProfile, theme } = useAppContext() as any;
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [policyRevision, setPolicyRevision] = useState<string | null>(null);
+  const [policyLoadError, setPolicyLoadError] = useState('');
+  const [policyWarning, setPolicyWarning] = useState(false);
+  const [policyBaseline, setPolicyBaseline] = useState<any>(null);
+  const savedRates = policyBaseline?.rates || rates;
+  const savedTerms = policyBaseline?.terms || reservationTerms;
 
-  const activeTablesCount = useMemo(() => {
-    if (!tables || !Array.isArray(tables)) return 0;
-    return tables.filter((t: any) => t.isActive && t.status !== 'maintenance').length;
-  }, [tables]);
-
-  const [ratesForm, setRatesForm] = useState({ 
+  const [ratesForm, setRatesForm] = useState({
     ...rates,
     downPaymentPercent: rates.downPaymentPercent ?? 50,
     overtimeRate: rates.overtimeRate ?? rates.hourlyRate ?? 0,
   });
-  
+
   const [termsForm, setTermsForm] = useState({
     ...reservationTerms,
     weekdayMinPartySize: reservationTerms.weekdayMinPartySize ?? 1,
@@ -33,7 +34,7 @@ export default function AdminPolicyRatesEditor() {
     weekendMaxPartySize: reservationTerms.weekendMaxPartySize ?? 8,
     cancellationHours: reservationTerms.cancellationHours ?? 24
   });
-  
+
   const [showSummaryModal, setShowSummaryModal] = useState(false);
 
   const [toast, setToast] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
@@ -47,66 +48,29 @@ export default function AdminPolicyRatesEditor() {
 
   const [gracePeriodMins, setGracePeriodMins] = useState(15);
 
-  // INITIAL DUAL-FETCH ON MOUNT WITH WATCHDOG
   useEffect(() => {
-    let isMounted = true;
-    const fetchPoliciesAndRates = async () => {
-      setIsLoading(true);
-
-      const timeoutId = setTimeout(() => {
-        if (isMounted && (!navigator.onLine || isSystemOffline)) {
-          flash("Cloud unreachable: Running on local SQLite database snapshot.", "error");
-        }
-      }, 5000);
-
+    let active = true;
+    setIsLoading(true);
+    setPolicyRevision(null);
+    void (async () => {
       try {
-        const [localRes, cloudRes] = await Promise.allSettled([
-          fetch('http://localhost:3001/api/settings/rates').then(r => r.ok ? r.json() : null),
-          supabase.from('system_settings').select('*').then(res => res.data || null)
-        ]);
-
-        let mergedSettings: any = {};
-
-        if (cloudRes.status === 'fulfilled' && cloudRes.value) {
-          const cloudObj = cloudRes.value.reduce((acc: any, curr: any) => {
-            let val = curr.setting_value || curr.settingValue;
-            if (val === 'true') val = true;
-            else if (val === 'false') val = false;
-            else if (!isNaN(val) && val.trim() !== '' && !val.includes(':')) val = Number(val);
-            acc[curr.key_name || curr.keyName] = val;
-            return acc;
-          }, {});
-          mergedSettings = { ...mergedSettings, ...cloudObj };
-        }
-
-        if (localRes.status === 'fulfilled' && localRes.value) {
-          mergedSettings = { ...mergedSettings, ...localRes.value };
-        }
-
-        if (isMounted && Object.keys(mergedSettings).length > 0) {
-          setRatesForm(prev => ({ 
-            ...prev, 
-            ...mergedSettings,
-            downPaymentPercent: mergedSettings.downPaymentPercent ?? 50,
-            overtimeRate: mergedSettings.overtimeRate ?? mergedSettings.hourlyRate ?? 0
-          }));
-          setTermsForm(prev => ({ ...prev, ...mergedSettings }));
-        }
-      } catch (err) {
-        if (isMounted) {
-          flash("Configured from local database.", "error");
-        }
-      } finally {
-        clearTimeout(timeoutId);
-        if (isMounted) {
-          setTimeout(() => setIsLoading(false), 300);
-        }
-      }
-    };
-
-    fetchPoliciesAndRates();
-    return () => { isMounted = false; };
-  }, [isSystemOffline]);
+        const response = await localFetch('http://localhost:3001/api/settings/policy');
+        const saved = await response.json();
+        if (!active) return;
+        if (!response.ok || saved.actorId !== staffProfile.id || !/^[a-f0-9]{64}$/.test(saved.revision || '') || !saved.settings?.rates || !saved.settings?.terms) throw new Error('Saved policies could not be loaded. Reload before making changes.');
+        const editable = (values: any) => Object.fromEntries(Object.entries(values).map(([key, value]) => [key, value ?? '']));
+        setRatesForm(editable(saved.settings.rates) as any);
+        setTermsForm(editable(saved.settings.terms) as any);
+        setPolicyRevision(saved.revision);
+        setPolicyBaseline(saved.settings);
+        setPolicyWarning(!!saved.missingKeys?.length || !!saved.invalidKeys?.length);
+        setPolicyLoadError('');
+      } catch (error: any) {
+        if (active) setPolicyLoadError(error.message || 'Saved policies could not be loaded.');
+      } finally { if (active) setIsLoading(false); }
+    })();
+    return () => { active = false; };
+  }, [staffProfile.id]);
 
   const parseToMins = (t: string) => {
     if (!t || !t.includes(':')) return 0;
@@ -138,7 +102,7 @@ export default function AdminPolicyRatesEditor() {
       const s = parseToMins(start || '12:00');
       let e = parseToMins(end || '02:00');
       if (e <= s) e += 24 * 60;
-      const cutoff = e - 60; 
+      const cutoff = e - Number(ratesForm.bookingCutoffMinutes);
       if (cutoff <= s) return 'No online bookings';
       return `${fmt12(start || '12:00')} to ${fmt12(cutoff)}`;
     } catch (e) {
@@ -155,7 +119,7 @@ export default function AdminPolicyRatesEditor() {
     const { name, value } = e.target;
     const cleanDigits = value.replace(/\D/g, '').slice(0, 4);
     const numericValue = cleanDigits === '' ? 0 : Number(cleanDigits);
-    
+
     setRatesForm(prev => {
       const next = { ...prev, [name]: numericValue };
       if (name === 'hourlyRate') {
@@ -192,8 +156,18 @@ export default function AdminPolicyRatesEditor() {
   };
 
   const handleReviewChanges = () => {
-    const hr = Number(ratesForm.hourlyRate) || 0;
-    const ov = Number(ratesForm.overtimeRate) || 0;
+    if (!policyRevision) { flash('Reload saved settings before making changes.', 'error'); return; }
+    const requiredNumbers = [ratesForm.hourlyRate, ratesForm.overtimeRate, ratesForm.downPaymentPercent, ratesForm.bookingCutoffMinutes, ratesForm.weekdayHappyHourRate, ratesForm.weekendHappyHourRate, ratesForm.weekdayOnlineCapacityLimit, ratesForm.weekendOnlineCapacityLimit, termsForm.minHours, termsForm.maxHours, termsForm.advanceBookingHours, termsForm.cancellationHours, termsForm.weekdayMinPartySize, termsForm.weekdayMaxPartySize, termsForm.weekendMinPartySize, termsForm.weekendMaxPartySize];
+    if (requiredNumbers.some(value => value === '' || value == null || !Number.isFinite(Number(value)))) { flash('Complete all numeric policy fields before saving.', 'error'); return; }
+    if (!Number.isInteger(Number(termsForm.minHours)) || !Number.isInteger(Number(termsForm.maxHours)) || Number(termsForm.minHours) < 1 || Number(termsForm.maxHours) > 24 || Number(termsForm.minHours) > Number(termsForm.maxHours)) { flash('Booking duration must be 1–24 whole hours, with minimum no greater than maximum.', 'error'); return; }
+    if (!Number.isInteger(Number(ratesForm.bookingCutoffMinutes)) || Number(ratesForm.bookingCutoffMinutes) < 0 || Number(ratesForm.bookingCutoffMinutes) > 1440) { flash('Booking cutoff must be 0–1440 whole minutes before closing.', 'error'); return; }
+    if (Number(termsForm.advanceBookingHours) < 0 || Number(termsForm.advanceBookingHours) > 168) { flash('Advance booking time must be between 0 and 168 hours.', 'error'); return; }
+    const timeFields = ['weekdayStartTime', 'weekdayEndTime', 'weekdayHappyHourStart', 'weekdayHappyHourEnd', 'weekendStartTime', 'weekendEndTime', 'weekendHappyHourStart', 'weekendHappyHourEnd'];
+    if (timeFields.some(key => !/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(ratesForm[key] || ''))) { flash('Choose every opening, closing and happy-hour time before saving.', 'error'); return; }
+    if (typeof ratesForm.isWeekdayHappyHourActive !== 'boolean' || typeof ratesForm.isWeekendHappyHourActive !== 'boolean') { flash('Choose the weekday and weekend happy-hour status before saving.', 'error'); return; }
+    if ([ratesForm.weekdayOnlineCapacityLimit, ratesForm.weekendOnlineCapacityLimit].some(value => !Number.isInteger(Number(value)) || Number(value) < 0 || Number(value) > 500)) { flash('Online table capacity must be 0–500 whole tables.', 'error'); return; }
+    const hr = Number(ratesForm.hourlyRate);
+    const ov = Number(ratesForm.overtimeRate);
     const dp = Number(ratesForm.downPaymentPercent) || 0;
     const minWkDay = Number(termsForm.weekdayMinPartySize) || 0;
     const maxWkDay = Number(termsForm.weekdayMaxPartySize) || 0;
@@ -216,14 +190,14 @@ export default function AdminPolicyRatesEditor() {
     }
 
     if (ratesForm.isWeekdayHappyHourActive) {
-      const wkHHRate = Number(ratesForm.weekdayHappyHourRate) || 0;
+      const wkHHRate = Number(ratesForm.weekdayHappyHourRate);
       if (wkHHRate <= 0) { flash('Weekday Happy Hour Rate must be greater than ₱0.', 'error'); return; }
       if (ratesForm.weekdayHappyHourStart === ratesForm.weekdayHappyHourEnd) {
         flash('Weekday Happy Hour start and end times cannot be identical.', 'error'); return;
       }
     }
     if (ratesForm.isWeekendHappyHourActive) {
-      const weHHRate = Number(ratesForm.weekendHappyHourRate) || 0;
+      const weHHRate = Number(ratesForm.weekendHappyHourRate);
       if (weHHRate <= 0) { flash('Weekend Happy Hour Rate must be greater than ₱0.', 'error'); return; }
       if (ratesForm.weekendHappyHourStart === ratesForm.weekendHappyHourEnd) {
         flash('Weekend Happy Hour start and end times cannot be identical.', 'error'); return;
@@ -245,46 +219,50 @@ export default function AdminPolicyRatesEditor() {
     setIsSaving(true);
     try {
       const ratesPayload = {
-        hourlyRate: Number(ratesForm.hourlyRate) || 0,
-        overtimeRate: Number(ratesForm.overtimeRate) || 0,
-        downPaymentPercent: Number(ratesForm.downPaymentPercent) || 50,
-        weekdayStartTime: ratesForm.weekdayStartTime || '12:00',
-        weekdayEndTime: ratesForm.weekdayEndTime || '00:00',
-        isWeekdayHappyHourActive: !!ratesForm.isWeekdayHappyHourActive,
-        weekdayHappyHourRate: Number(ratesForm.weekdayHappyHourRate) || 0,
-        weekdayHappyHourStart: ratesForm.weekdayHappyHourStart || '15:00',
-        weekdayHappyHourEnd: ratesForm.weekdayHappyHourEnd || '18:00',
-        weekdayOnlineCapacityLimit: activeTablesCount,
-        weekendStartTime: ratesForm.weekendStartTime || '12:00',
-        weekendEndTime: ratesForm.weekendEndTime || '02:00',
-        isWeekendHappyHourActive: !!ratesForm.isWeekendHappyHourActive,
-        weekendHappyHourRate: Number(ratesForm.weekendHappyHourRate) || 0,
-        weekendHappyHourStart: ratesForm.weekendHappyHourStart || '15:00',
-        weekendHappyHourEnd: ratesForm.weekendHappyHourEnd || '18:00',
-        weekendOnlineCapacityLimit: activeTablesCount,
+        hourlyRate: Number(ratesForm.hourlyRate),
+        bookingCutoffMinutes: Number(ratesForm.bookingCutoffMinutes),
+        overtimeRate: Number(ratesForm.overtimeRate),
+        downPaymentPercent: Number(ratesForm.downPaymentPercent),
+        weekdayStartTime: ratesForm.weekdayStartTime,
+        weekdayEndTime: ratesForm.weekdayEndTime,
+        isWeekdayHappyHourActive: ratesForm.isWeekdayHappyHourActive,
+        weekdayHappyHourRate: Number(ratesForm.weekdayHappyHourRate),
+        weekdayHappyHourStart: ratesForm.weekdayHappyHourStart,
+        weekdayHappyHourEnd: ratesForm.weekdayHappyHourEnd,
+        weekdayOnlineCapacityLimit: Number(ratesForm.weekdayOnlineCapacityLimit),
+        weekendStartTime: ratesForm.weekendStartTime,
+        weekendEndTime: ratesForm.weekendEndTime,
+        isWeekendHappyHourActive: ratesForm.isWeekendHappyHourActive,
+        weekendHappyHourRate: Number(ratesForm.weekendHappyHourRate),
+        weekendHappyHourStart: ratesForm.weekendHappyHourStart,
+        weekendHappyHourEnd: ratesForm.weekendHappyHourEnd,
+        weekendOnlineCapacityLimit: Number(ratesForm.weekendOnlineCapacityLimit),
       };
 
       const termsPayload = {
-        minHours: 1, // Standard hardcoded minimum
-        maxHours: 24, // Handled dynamically by cutoff
-        advanceBookingHours: 1, // Default fallback
-        cancellationHours: Number(termsForm.cancellationHours) || 24,
+        minHours: Number(termsForm.minHours),
+        maxHours: Number(termsForm.maxHours),
+        advanceBookingHours: Number(termsForm.advanceBookingHours),
+        cancellationHours: Number(termsForm.cancellationHours),
         cancellationPolicy: termsForm.cancellationPolicy || '',
         termsAndConditions: termsForm.termsAndConditions || '',
-        weekdayMinPartySize: Number(termsForm.weekdayMinPartySize) || 1,
-        weekdayMaxPartySize: Number(termsForm.weekdayMaxPartySize) || 10,
-        weekendMinPartySize: Number(termsForm.weekendMinPartySize) || 1,
-        weekendMaxPartySize: Number(termsForm.weekendMaxPartySize) || 10,
+        weekdayMinPartySize: Number(termsForm.weekdayMinPartySize),
+        weekdayMaxPartySize: Number(termsForm.weekdayMaxPartySize),
+        weekendMinPartySize: Number(termsForm.weekendMinPartySize),
+        weekendMaxPartySize: Number(termsForm.weekendMaxPartySize),
       };
-      
-      await updateRates(ratesPayload);
-      await updateReservationTerms(termsPayload);
 
-      flash("Policies & Rates successfully updated locally and synced to cloud!", "success");
-    } catch (e) { 
-      flash('Failed to save settings to local database.', 'error'); 
-    } finally { 
-      setTimeout(() => setIsSaving(false), 400); 
+      if (!policyRevision) throw new Error('Reload saved settings before making changes.');
+      const saved = await savePolicySettings(ratesPayload, termsPayload, policyRevision);
+      setPolicyRevision(saved.revision);
+      setPolicyBaseline(saved.settings);
+      setPolicyWarning(false);
+
+      flash("Policies & Rates saved locally.", "success");
+    } catch (e: any) {
+      flash(e.message || 'Save not confirmed. Your edits are kept; reload saved settings before retrying.', 'error');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -341,29 +319,31 @@ export default function AdminPolicyRatesEditor() {
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-8 pb-20 animate-in fade-in duration-300">
-      
+
+      {(policyLoadError || policyWarning) && <div role="alert" className="rounded-xl border border-amber-800 bg-amber-950/40 p-4 text-amber-200 text-sm">{policyLoadError || 'Some saved policy values are missing or invalid. Review every field before saving.'}</div>}
+      <button type="button" onClick={() => window.location.reload()} className="text-sm underline text-neutral-400">Reload saved settings</button>
       {/* 🟢 TOP-RIGHT FLOATING TOAST WITH 5S TIMER & FADE OUT */}
       {toast && (
-        <div 
+        <div
           className="fixed top-6 right-6 z-[9999] animate-in slide-in-from-top-4 fade-in duration-300"
           style={{ animation: 'toast-fade-out 5s forwards' }}
         >
           <div className={`relative overflow-hidden flex items-start gap-3 px-5 py-4 rounded-xl border shadow-2xl backdrop-blur-md min-w-[320px] max-w-md ${
-            toast.type === 'success' 
-              ? 'bg-emerald-950/90 border-emerald-900/50 text-emerald-400' 
+            toast.type === 'success'
+              ? 'bg-emerald-950/90 border-emerald-900/50 text-emerald-400'
               : 'bg-rose-950/90 border-rose-900/50 text-rose-400'
           }`}>
             <div className="mt-0.5 flex-shrink-0">
               {toast.type === 'success' ? <CheckCircle size={18} /> : <AlertTriangle size={18} />}
             </div>
             <span className="text-sm font-semibold leading-snug whitespace-pre-wrap pr-4">{toast.msg}</span>
-            <button 
-              onClick={() => { setToast(null); if (toastTimeout.current) clearTimeout(toastTimeout.current); }} 
+            <button
+              onClick={() => { setToast(null); if (toastTimeout.current) clearTimeout(toastTimeout.current); }}
               className="absolute top-4 right-4 text-neutral-500 hover:text-white transition-colors"
             >
               <X size={14} />
             </button>
-            <div 
+            <div
               className={`absolute bottom-0 left-0 h-1 ${toast.type === 'success' ? 'bg-emerald-500' : 'bg-rose-500'}`}
               style={{ animation: 'toast-shrink 5s linear forwards' }}
             />
@@ -395,7 +375,7 @@ export default function AdminPolicyRatesEditor() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-        
+
         {/* LEFT COLUMN: RATES & HAPPY HOUR */}
         <div className="space-y-8">
           <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6 shadow-sm">
@@ -408,14 +388,14 @@ export default function AdminPolicyRatesEditor() {
                   <span>Standard Hourly Rate (₱)</span>
                   {Number(ratesForm.hourlyRate) > 1000 && <span className="text-amber-400 text-[10px] font-bold">⚠️ &gt;1000</span>}
                 </label>
-                <input 
-                  type="text" 
-                  inputMode="numeric" 
-                  name="hourlyRate" 
-                  value={ratesForm.hourlyRate} 
-                  onChange={handleRateInput} 
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  name="hourlyRate"
+                  value={ratesForm.hourlyRate}
+                  onChange={handleRateInput}
                   placeholder="0"
-                  className="w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-neutral-100 focus:border-emerald-500 outline-none font-mono" 
+                  className="w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-neutral-100 focus:border-emerald-500 outline-none font-mono"
                 />
               </div>
               <div>
@@ -423,14 +403,14 @@ export default function AdminPolicyRatesEditor() {
                   <span>Overtime Rate (₱)</span>
                   {Number(ratesForm.overtimeRate) > 1000 && <span className="text-amber-400 text-[10px] font-bold">⚠️ &gt;1000</span>}
                 </label>
-                <input 
-                  type="text" 
-                  inputMode="numeric" 
-                  name="overtimeRate" 
-                  value={ratesForm.overtimeRate} 
-                  onChange={handleRateInput} 
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  name="overtimeRate"
+                  value={ratesForm.overtimeRate}
+                  onChange={handleRateInput}
                   placeholder="0"
-                  className="w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-neutral-100 focus:border-emerald-500 outline-none font-mono" 
+                  className="w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-neutral-100 focus:border-emerald-500 outline-none font-mono"
                 />
               </div>
             </div>
@@ -523,7 +503,7 @@ export default function AdminPolicyRatesEditor() {
               <FileText className="text-emerald-500" /> Booking Rules & Limits
             </h2>
             <div className="space-y-4">
-              
+
               <div className="grid grid-cols-2 gap-4 bg-neutral-950 p-4 border border-neutral-800/80 rounded-xl mb-4">
                 <div className="space-y-3">
                     <h3 className="text-[10px] uppercase font-bold text-emerald-500 border-b border-neutral-800 pb-1">Weekday Limits</h3>
@@ -541,6 +521,16 @@ export default function AdminPolicyRatesEditor() {
                 </div>
               </div>
 
+              <div className="grid grid-cols-2 gap-4">
+                {(['weekday', 'weekend'] as const).map(day => <label key={day} className="text-xs text-neutral-400">{day === 'weekday' ? 'Weekday' : 'Weekend'} online table capacity<input type="number" name={`${day}OnlineCapacityLimit`} value={ratesForm[`${day}OnlineCapacityLimit`]} min="0" max="500" step="1" onChange={e => setRatesForm(prev => ({ ...prev, [`${day}OnlineCapacityLimit`]: e.target.value }))} className="mt-1 w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-neutral-100" /></label>)}
+                {(['weekday', 'weekend'] as const).map(day => { const key = day === 'weekday' ? 'isWeekdayHappyHourActive' : 'isWeekendHappyHourActive'; return typeof ratesForm[key] !== 'boolean' && <label key={day} className="text-xs text-neutral-400">{day} happy hour status<select value="" onChange={e => setRatesForm(prev => ({ ...prev, [key]: e.target.value === 'true' }))} className="mt-1 w-full bg-neutral-950 border border-neutral-800 rounded p-3"><option value="" disabled>Choose a status</option><option value="false">Inactive</option><option value="true">Active</option></select></label>; })}
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                {([['minHours', 'Minimum booking hours'], ['maxHours', 'Maximum booking hours'], ['advanceBookingHours', 'Advance booking hours']] as const).map(([name, label]) => <label key={name} className="text-xs text-neutral-400">{label}<input type="number" name={name} value={termsForm[name]} min={name === 'advanceBookingHours' ? 0 : 1} max={name === 'advanceBookingHours' ? 168 : 24} step="1" onChange={e => setTermsForm(prev => ({ ...prev, [name]: e.target.value }))} className="mt-1 w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-neutral-100" /></label>)}
+                <label className="text-xs text-neutral-400">Booking cutoff before closing (minutes)<input type="number" name="bookingCutoffMinutes" value={ratesForm.bookingCutoffMinutes} min="0" max="1440" step="1" onChange={e => setRatesForm(prev => ({ ...prev, bookingCutoffMinutes: e.target.value }))} className="mt-1 w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-neutral-100" /></label>
+              </div>
+
               <div>
                 <label className="block text-xs text-neutral-400 mb-1 uppercase tracking-wider">Cancel Window (Hrs)</label>
                 <input type="text" inputMode="numeric" name="cancellationHours" value={termsForm.cancellationHours} onChange={handleHourInput} placeholder="24" className="w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-neutral-100 focus:border-emerald-500 outline-none font-mono" />
@@ -551,18 +541,18 @@ export default function AdminPolicyRatesEditor() {
                   <label className="block text-xs text-neutral-400 uppercase tracking-wider">Booking Policies (Displayed to Users)</label>
                   <CharCount current={termsForm.cancellationPolicy} max={400} />
                 </div>
-                <textarea 
-                  maxLength={400} 
-                  name="cancellationPolicy" 
-                  value={termsForm.cancellationPolicy} 
+                <textarea
+                  maxLength={400}
+                  name="cancellationPolicy"
+                  value={termsForm.cancellationPolicy}
                   onChange={(e) => {
                     handleTermsChange(e);
                     e.currentTarget.style.height = 'auto';
                     e.currentTarget.style.height = e.currentTarget.scrollHeight + 'px';
-                  }} 
-                  rows={2} 
-                  className="w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-sm text-neutral-100 focus:border-emerald-500 outline-none resize-none overflow-hidden" 
-                  placeholder="E.g. No refunds on same-day cancellations..." 
+                  }}
+                  rows={2}
+                  className="w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-sm text-neutral-100 focus:border-emerald-500 outline-none resize-none overflow-hidden"
+                  placeholder="E.g. No refunds on same-day cancellations..."
                 />
               </div>
               <div>
@@ -570,27 +560,27 @@ export default function AdminPolicyRatesEditor() {
                   <label className="block text-xs text-neutral-400 uppercase tracking-wider">General Terms & Conditions</label>
                   <CharCount current={termsForm.termsAndConditions} max={600} />
                 </div>
-                <textarea 
-                  maxLength={600} 
-                  name="termsAndConditions" 
-                  value={termsForm.termsAndConditions} 
+                <textarea
+                  maxLength={600}
+                  name="termsAndConditions"
+                  value={termsForm.termsAndConditions}
                   onChange={(e) => {
                     handleTermsChange(e);
                     e.currentTarget.style.height = 'auto';
                     e.currentTarget.style.height = e.currentTarget.scrollHeight + 'px';
-                  }} 
-                  rows={2} 
-                  className="w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-sm text-neutral-100 focus:border-emerald-500 outline-none resize-none overflow-hidden" 
-                  placeholder="General establishment rules..." 
+                  }}
+                  rows={2}
+                  className="w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-sm text-neutral-100 focus:border-emerald-500 outline-none resize-none overflow-hidden"
+                  placeholder="General establishment rules..."
                 />
               </div>
-              
+
             </div>
           </div>
         </div>
       </div>
 
-     
+
 
       {/* ALL-INCLUSIVE CONFIRMATION MODAL */}
       {showSummaryModal && (
@@ -606,32 +596,38 @@ export default function AdminPolicyRatesEditor() {
             </div>
             <div className="p-6 space-y-5">
               <p className="text-sm text-neutral-400">
-                Please review all policies and rates. Items highlighted have been modified:
+                Please review all policies and savedRates. Items highlighted have been modified:
               </p>
               <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 text-sm space-y-1 text-neutral-300 max-h-[50vh] overflow-y-auto">
-                {renderChangeRow('Base Hourly Rate', rates.hourlyRate, ratesForm.hourlyRate, true)}
-                {renderChangeRow('Overtime Rate', rates.overtimeRate, ratesForm.overtimeRate, true)}
-                {renderChangeRow('Down Payment Required', `${rates.downPaymentPercent}%`, `${ratesForm.downPaymentPercent}%`)}
-                
+                {renderChangeRow('Base Hourly Rate', savedRates.hourlyRate, ratesForm.hourlyRate, true)}
+                {renderChangeRow('Overtime Rate', savedRates.overtimeRate, ratesForm.overtimeRate, true)}
+                {renderChangeRow('Down Payment Required', `${savedRates.downPaymentPercent}%`, `${ratesForm.downPaymentPercent}%`)}
+
                 <div className="pt-3 pb-1 mt-2 border-t border-neutral-800/60 font-bold text-emerald-500 text-[10px] uppercase tracking-widest">Weekday Setup</div>
-                {renderChangeRow('Store Hours', `${fmt12(rates.weekdayStartTime)} - ${fmt12(rates.weekdayEndTime)}`, `${fmt12(ratesForm.weekdayStartTime)} - ${fmt12(ratesForm.weekdayEndTime)}`)}
-                {renderChangeRow('Happy Hour Status', rates.isWeekdayHappyHourActive, ratesForm.isWeekdayHappyHourActive)}
-                {renderChangeRow('Happy Hour Window', `${fmt12(rates.weekdayHappyHourStart)} - ${fmt12(rates.weekdayHappyHourEnd)}`, `${fmt12(ratesForm.weekdayHappyHourStart)} - ${fmt12(ratesForm.weekdayHappyHourEnd)}`)}
-                {renderChangeRow('Happy Hour Rate', rates.weekdayHappyHourRate, ratesForm.weekdayHappyHourRate, true)}
-                {renderChangeRow('Min/Max Party Size', `${reservationTerms.weekdayMinPartySize}-${reservationTerms.weekdayMaxPartySize}`, `${termsForm.weekdayMinPartySize}-${termsForm.weekdayMaxPartySize}`)}
-                
+                {renderChangeRow('Store Hours', `${fmt12(savedRates.weekdayStartTime)} - ${fmt12(savedRates.weekdayEndTime)}`, `${fmt12(ratesForm.weekdayStartTime)} - ${fmt12(ratesForm.weekdayEndTime)}`)}
+                {renderChangeRow('Happy Hour Status', savedRates.isWeekdayHappyHourActive, ratesForm.isWeekdayHappyHourActive)}
+                {renderChangeRow('Happy Hour Window', `${fmt12(savedRates.weekdayHappyHourStart)} - ${fmt12(savedRates.weekdayHappyHourEnd)}`, `${fmt12(ratesForm.weekdayHappyHourStart)} - ${fmt12(ratesForm.weekdayHappyHourEnd)}`)}
+                {renderChangeRow('Happy Hour Rate', savedRates.weekdayHappyHourRate, ratesForm.weekdayHappyHourRate, true)}
+                {renderChangeRow('Min/Max Party Size', `${savedTerms.weekdayMinPartySize}-${savedTerms.weekdayMaxPartySize}`, `${termsForm.weekdayMinPartySize}-${termsForm.weekdayMaxPartySize}`)}
+
                 <div className="pt-3 pb-1 mt-2 border-t border-neutral-800/60 font-bold text-emerald-500 text-[10px] uppercase tracking-widest">Weekend Setup</div>
-                {renderChangeRow('Store Hours', `${fmt12(rates.weekendStartTime)} - ${fmt12(rates.weekendEndTime)}`, `${fmt12(ratesForm.weekendStartTime)} - ${fmt12(ratesForm.weekendEndTime)}`)}
-                {renderChangeRow('Happy Hour Status', rates.isWeekendHappyHourActive, ratesForm.isWeekendHappyHourActive)}
-                {renderChangeRow('Happy Hour Window', `${fmt12(rates.weekendHappyHourStart)} - ${fmt12(rates.weekendHappyHourEnd)}`, `${fmt12(ratesForm.weekendHappyHourStart)} - ${fmt12(ratesForm.weekendHappyHourEnd)}`)}
-                {renderChangeRow('Happy Hour Rate', rates.weekendHappyHourRate, ratesForm.weekendHappyHourRate, true)}
-                {renderChangeRow('Min/Max Party Size', `${reservationTerms.weekendMinPartySize}-${reservationTerms.weekendMaxPartySize}`, `${termsForm.weekendMinPartySize}-${termsForm.weekendMaxPartySize}`)}
-                
+                {renderChangeRow('Store Hours', `${fmt12(savedRates.weekendStartTime)} - ${fmt12(savedRates.weekendEndTime)}`, `${fmt12(ratesForm.weekendStartTime)} - ${fmt12(ratesForm.weekendEndTime)}`)}
+                {renderChangeRow('Happy Hour Status', savedRates.isWeekendHappyHourActive, ratesForm.isWeekendHappyHourActive)}
+                {renderChangeRow('Happy Hour Window', `${fmt12(savedRates.weekendHappyHourStart)} - ${fmt12(savedRates.weekendHappyHourEnd)}`, `${fmt12(ratesForm.weekendHappyHourStart)} - ${fmt12(ratesForm.weekendHappyHourEnd)}`)}
+                {renderChangeRow('Happy Hour Rate', savedRates.weekendHappyHourRate, ratesForm.weekendHappyHourRate, true)}
+                {renderChangeRow('Min/Max Party Size', `${savedTerms.weekendMinPartySize}-${savedTerms.weekendMaxPartySize}`, `${termsForm.weekendMinPartySize}-${termsForm.weekendMaxPartySize}`)}
+
                 <div className="pt-3 pb-1 mt-2 border-t border-neutral-800/60 font-bold text-emerald-500 text-[10px] uppercase tracking-widest">Policies</div>
-                {renderChangeRow('Cancellation Grace', `${reservationTerms.cancellationHours} Hrs`, `${termsForm.cancellationHours} Hrs`)}
-                {renderChangeRow('Cancellation Policy', truncate(reservationTerms.cancellationPolicy), truncate(termsForm.cancellationPolicy))}
-                {renderChangeRow('General T&C Text', truncate(reservationTerms.termsAndConditions), truncate(termsForm.termsAndConditions))}
-                
+                {renderChangeRow('Minimum booking hours', savedTerms.minHours, termsForm.minHours)}
+                {renderChangeRow('Maximum booking hours', savedTerms.maxHours, termsForm.maxHours)}
+                {renderChangeRow('Advance booking hours', savedTerms.advanceBookingHours, termsForm.advanceBookingHours)}
+                {renderChangeRow('Booking cutoff (minutes)', savedRates.bookingCutoffMinutes, ratesForm.bookingCutoffMinutes)}
+                {renderChangeRow('Weekday online table capacity', savedRates.weekdayOnlineCapacityLimit, ratesForm.weekdayOnlineCapacityLimit)}
+                {renderChangeRow('Weekend online table capacity', savedRates.weekendOnlineCapacityLimit, ratesForm.weekendOnlineCapacityLimit)}
+                {renderChangeRow('Cancellation Grace', `${savedTerms.cancellationHours} Hrs`, `${termsForm.cancellationHours} Hrs`)}
+                {renderChangeRow('Cancellation Policy', truncate(savedTerms.cancellationPolicy), truncate(termsForm.cancellationPolicy))}
+                {renderChangeRow('General T&C Text', truncate(savedTerms.termsAndConditions), truncate(termsForm.termsAndConditions))}
+
                 <div className="pt-3 pb-1 mt-2 border-t border-neutral-800/60 font-bold text-emerald-500 text-[10px] uppercase tracking-widest">Anti-Ghosting & Fraud Defense</div>
                 {renderChangeRow('No-Show Grace Period', `${gracePeriodMins}m Late`, `${gracePeriodMins}m Late`)}
                 {renderChangeRow('Staff Receipt Verification', "System Enforced", "System Enforced")}

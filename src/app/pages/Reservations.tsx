@@ -141,7 +141,7 @@ export function Reservations() {
     updateDownPayment, updateBalance, tables, events, promoCodes, closedDates, 
     rates, updateRefundStatus, theme, reservationTerms,
     staffUsers, hashPassword, addActivity, sessionHistory, 
-    lastSynced, forceFullSync, addWatchlistItem, staffProfile
+    lastSynced, forceFullSync, addWatchlistItem, staffProfile, availableTables, reservationMoveError
   } = useAppContext() as any;
   const navigate = useNavigate();
   
@@ -482,6 +482,7 @@ export function Reservations() {
   const downPayment = totalAmount * (downPaymentPercentVal / 100);
 
   const handleCheckIn = (res: any) => {
+    if(reservationMoveError){flash('Refresh transfer recovery in Table Monitor before assigning a table.','error');return;}
     const resDate = new Date(res.date);
     if (!isToday(resDate)) {
       flash(`Strict Check-In Policy: Check-ins are ONLY allowed on the exact date of the reservation (${format(resDate, 'MMM d, yyyy')}).`, "error");
@@ -493,19 +494,19 @@ export function Reservations() {
 
     if (res.tableId) {
       const preferredTable = tables.find((t: any) => t.id === res.tableId);
-      if (preferredTable && preferredTable.status !== 'available') {
+      if (preferredTable && !availableTables.some((table:any)=>table.id===preferredTable.id)) {
         const choice = window.confirm(`Their preferred table (${preferredTable.name}) is currently occupied.\n\nClick OK to assign them to ANY available table, or Cancel to manually add them to the Waiting Queue.`);
         if (!choice) {
           navigate('/staff/queue');
           return;
         }
-      } else if (preferredTable && preferredTable.status === 'available') {
+      } else if (preferredTable && availableTables.some((table:any)=>table.id===preferredTable.id)) {
         targetTableId = preferredTable.id;
       }
     }
 
     if (!targetTableId) {
-      const firstAvail = tables.find((t: any) => t.status === 'available' && t.isActive);
+      const firstAvail = availableTables[0];
       if (firstAvail) {
         targetTableId = firstAvail.id;
       } else {

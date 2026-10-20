@@ -23,11 +23,14 @@ export function AdminInventory() {
   // Modal states
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingStock, setEditingStock] = useState<number | null>(null);
   const [form, setForm] = useState<InventoryForm>(emptyForm);
 
   // Quick Restock State
   const [restockId, setRestockId] = useState<string | null>(null);
   const [restockAmount, setRestockAmount] = useState('');
+  const [error, setError] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
 
   const categories = ['All', ...Array.from(new Set(inventory.map(i => i.category)))];
 
@@ -38,13 +41,17 @@ export function AdminInventory() {
   });
 
   const openCreate = () => {
+    setError('');
     setEditingId(null);
+    setEditingStock(null);
     setForm(emptyForm);
     setShowModal(true);
   };
 
   const openEdit = (item: any) => {
+    setError('');
     setEditingId(item.id);
+    setEditingStock(item.stock);
     setForm({
       name: item.name,
       category: item.category,
@@ -54,31 +61,68 @@ export function AdminInventory() {
     setShowModal(true);
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.name || !form.price || !form.stock) return;
-
+    if (isSaving) return;
+    setError('');
+    const price = Number(form.price);
+    const stock = Number(form.stock);
+    if (!form.name.trim() || !form.price.trim() || !form.stock.trim() || !Number.isFinite(price) || price < 0 || !Number.isSafeInteger(stock) || stock < 0) {
+      setError('Enter an item name, a nonnegative price, and a whole stock quantity.');
+      return;
+    }
     const payload = {
-      name: form.name,
-      category: form.category,
-      price: parseFloat(form.price),
-      stock: parseInt(form.stock),
-      isActive: true
+      name: form.name.trim(), category: form.category, price, stock,
+      isActive: editingId ? inventory.find(item => item.id === editingId)?.isActive ?? true : true,
     };
-
-    if (editingId) updateInventoryItem(editingId, payload);
-    else addInventoryItem(payload);
-
-    setShowModal(false);
+    setIsSaving(true);
+    try {
+      if (editingId) {
+        if (editingStock === null) throw new Error('Opening stock is unavailable');
+        await updateInventoryItem(editingId, payload, editingStock);
+      }
+      else await addInventoryItem(payload);
+      setShowModal(false);
+    } catch {
+      setError('Unable to save inventory. Your changes are still here. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const handleRestock = (e: React.FormEvent, itemId: string, currentStock: number) => {
+  const handleRestock = async (e: React.FormEvent, itemId: string, currentStock: number) => {
     e.preventDefault();
-    const add = parseInt(restockAmount);
-    if (!add || add <= 0) return;
-    updateInventoryItem(itemId, { stock: currentStock + add });
-    setRestockId(null);
-    setRestockAmount('');
+    if (isSaving) return;
+    setError('');
+    const add = Number(restockAmount);
+    if (!Number.isSafeInteger(add) || add <= 0 || !Number.isSafeInteger(currentStock + add)) {
+      setError('Enter a positive whole restock quantity.');
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await updateInventoryItem(itemId, { stock: currentStock + add }, currentStock);
+      setRestockId(null);
+      setRestockAmount('');
+    } catch {
+      setError('Unable to restock this item. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleItemAction = async (itemId: string, isActive?: boolean) => {
+    if (isSaving) return;
+    setError('');
+    setIsSaving(true);
+    try {
+      if (isActive === undefined) await deleteInventoryItem(itemId);
+      else await updateInventoryItem(itemId, { isActive });
+    } catch {
+      setError('Unable to update inventory. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -91,7 +135,7 @@ export function AdminInventory() {
           </h2>
           <p className="text-xs text-neutral-400 mt-1">Manage food, drinks, and extras available at the Point of Sale.</p>
         </div>
-        <button onClick={openCreate} className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-emerald-900/20">
+        <button disabled={isSaving} onClick={openCreate} className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-emerald-900/20">
           <Plus size={16} /> Add Item
         </button>
       </div>
@@ -111,6 +155,8 @@ export function AdminInventory() {
           ))}
         </div>
       </div>
+
+      {error && !showModal && <p role="alert" className="text-sm text-rose-400">{error}</p>}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filtered.map(item => {
@@ -137,7 +183,7 @@ export function AdminInventory() {
                       lowStock ? 'bg-amber-950/40 border-amber-800/50 text-amber-400' : 
                       'bg-neutral-950 border-neutral-800 text-neutral-400'
                     }`}>
-                      <Archive size={12} /> Stock: {item.stock}
+                      <Archive size={12} /> Stock: {item.stock}{!item.isActive && ' · Archived'}
                     </div>
                     {outOfStock && <span className="text-[10px] font-bold text-rose-500 uppercase tracking-wider flex items-center gap-1"><AlertTriangle size={10}/> Out of Stock</span>}
                   </div>
@@ -147,14 +193,15 @@ export function AdminInventory() {
                   {restockId === item.id ? (
                     <form onSubmit={(e) => handleRestock(e, item.id, item.stock)} className="flex-1 flex gap-1">
                       <input type="number" min="1" required autoFocus value={restockAmount} onChange={e => setRestockAmount(e.target.value)} placeholder="+ Add qty" className="w-20 bg-neutral-950 border border-neutral-700 rounded-lg px-2 text-xs text-white outline-none focus:border-emerald-500" />
-                      <button type="submit" className="bg-emerald-600 text-white px-2 py-1.5 rounded-lg text-[10px] font-bold">Save</button>
-                      <button type="button" onClick={() => setRestockId(null)} className="bg-neutral-800 text-neutral-400 px-2 py-1.5 rounded-lg text-[10px] font-bold">Cancel</button>
+                      <button disabled={isSaving} type="submit" className="bg-emerald-600 text-white px-2 py-1.5 rounded-lg text-[10px] font-bold">Save</button>
+                      <button disabled={isSaving} type="button" onClick={() => setRestockId(null)} className="bg-neutral-800 text-neutral-400 px-2 py-1.5 rounded-lg text-[10px] font-bold">Cancel</button>
                     </form>
                   ) : (
                     <>
-                      <button onClick={() => setRestockId(item.id)} className="flex-1 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs rounded-lg font-semibold transition-colors">Quick Restock</button>
-                      <button onClick={() => openEdit(item)} className="p-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-blue-400 rounded-lg transition-colors"><Edit2 size={14} /></button>
-                      <button onClick={() => deleteInventoryItem(item.id)} className="p-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-rose-400 rounded-lg transition-colors"><Trash2 size={14} /></button>
+                      <button disabled={isSaving} onClick={() => { setError(''); setRestockId(item.id); }} className="flex-1 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs rounded-lg font-semibold transition-colors">Quick Restock</button>
+                      <button disabled={isSaving} onClick={() => handleItemAction(item.id, !item.isActive)} className="px-2 py-1.5 bg-neutral-800 text-neutral-300 text-xs rounded-lg">{item.isActive ? 'Archive' : 'Restore'}</button>
+                      <button disabled={isSaving} onClick={() => openEdit(item)} className="p-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-blue-400 rounded-lg transition-colors"><Edit2 size={14} /></button>
+                      <button disabled={isSaving} onClick={() => handleItemAction(item.id)} className="p-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-rose-400 rounded-lg transition-colors"><Trash2 size={14} /></button>
                     </>
                   )}
                 </div>
@@ -178,9 +225,10 @@ export function AdminInventory() {
               <div>
                 <h3 className="font-bold text-neutral-200">{editingId ? 'Edit Item' : 'New Inventory Item'}</h3>
               </div>
-              <button onClick={() => setShowModal(false)} className="p-1.5 text-neutral-500 hover:text-white rounded-lg transition-colors"><X size={15}/></button>
+              <button disabled={isSaving} onClick={() => setShowModal(false)} className="p-1.5 text-neutral-500 hover:text-white rounded-lg transition-colors"><X size={15}/></button>
             </div>
             <form onSubmit={handleSave} className="p-6 space-y-4">
+              {error && <p role="alert" className="text-sm text-rose-400">{error}</p>}
               <div>
                 <label className="text-xs font-semibold text-neutral-400 block mb-1.5 flex items-center gap-1.5"><Tag size={11} /> Item Name</label>
                 <input required autoFocus value={form.name} onChange={e => setForm({...form, name: e.target.value})} placeholder="e.g. San Mig Light" className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-emerald-500/50" />
@@ -205,8 +253,8 @@ export function AdminInventory() {
                 </div>
               </div>
               <div className="flex gap-2 pt-2">
-                <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2.5 bg-neutral-800 text-neutral-300 text-sm rounded-xl">Cancel</button>
-                <button type="submit" className="flex-1 bg-emerald-600 text-white text-sm rounded-xl font-semibold py-2.5">Save Item</button>
+                <button disabled={isSaving} type="button" onClick={() => setShowModal(false)} className="px-4 py-2.5 bg-neutral-800 text-neutral-300 text-sm rounded-xl">Cancel</button>
+                <button disabled={isSaving} type="submit" className="flex-1 bg-emerald-600 text-white text-sm rounded-xl font-semibold py-2.5">Save Item</button>
               </div>
             </form>
           </div>

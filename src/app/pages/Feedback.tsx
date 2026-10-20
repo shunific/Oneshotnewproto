@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAppContext } from '../context/AppContext';
 import {
   MessageSquare, ThumbsUp, Tag, AlertTriangle, Lightbulb,
@@ -17,7 +17,11 @@ const TYPE_CONFIG: Record<FeedbackType, { label: string; color: string; bg: stri
 };
 
 export function FeedbackPage() {
-  const { feedback, resolveFeedback, adminLoggedIn } = useAppContext();
+  const { feedback, resolveFeedback, adminLoggedIn, staffProfile } = useAppContext();
+  const actorId = adminLoggedIn && staffProfile?.isAdmin ? staffProfile.id : null;
+  const resolutionOwner = useRef({ id: actorId, generation: 0 });
+  if (resolutionOwner.current.id !== actorId) resolutionOwner.current = { id: actorId, generation: resolutionOwner.current.generation + 1 };
+  const resolutionInFlight = useRef(false);
   
   // ── States ──
   const [filterType, setFilterType] = useState<FeedbackType | 'all'>('all');
@@ -27,8 +31,14 @@ export function FeedbackPage() {
   const [endDate, setEndDate] = useState<string>('');
 
   // ── Resolution Modal State ──
-  const [resolveModal, setResolveModal] = useState<{ id: string; name: string } | null>(null);
+  const [resolveModal, setResolveModal] = useState<{ id: string; name: string; actorId: string; generation: number } | null>(null);
   const [resolveNotes, setResolveNotes] = useState('');
+  const [isResolving, setIsResolving] = useState(false);
+  const [resolveError, setResolveError] = useState('');
+  useEffect(() => {
+    resolutionInFlight.current = false;
+    setResolveModal(null); setResolveNotes(''); setResolveError(''); setIsResolving(false);
+  }, [actorId]);
 
   // ── Filtering Logic ──
   const filtered = feedback.filter(f => {
@@ -75,12 +85,21 @@ export function FeedbackPage() {
     return Object.entries(tagMap).sort((a, b) => b[1] - a[1]).slice(0, 6);
   })();
 
-  const handleResolve = (e: React.FormEvent) => {
+  const handleResolve = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!resolveModal || !resolveNotes.trim()) return;
-    resolveFeedback(resolveModal.id, resolveNotes.trim());
-    setResolveModal(null);
-    setResolveNotes('');
+    const owner = resolutionOwner.current;
+    if (resolutionInFlight.current || !owner.id || !resolveModal || resolveModal.actorId !== owner.id || resolveModal.generation !== owner.generation) return;
+    if (!resolveNotes.trim() || resolveNotes.length > 2000) { setResolveError('Enter a resolution summary of 1–2000 characters.'); return; }
+    resolutionInFlight.current = true; setIsResolving(true); setResolveError('');
+    try {
+      await resolveFeedback(resolveModal.id, resolveNotes.trim());
+      if (resolutionOwner.current !== owner) return;
+      setResolveModal(null); setResolveNotes('');
+    } catch (error: any) {
+      if (resolutionOwner.current === owner) setResolveError(error.message || 'Resolution could not be confirmed. Your notes have been kept.');
+    } finally {
+      if (resolutionOwner.current === owner) { resolutionInFlight.current = false; setIsResolving(false); }
+    }
   };
 
   return (
@@ -270,7 +289,7 @@ export function FeedbackPage() {
               )}
 
               {/* Resolution Block */}
-              {adminLoggedIn && (
+              {actorId && (
                 <div className="mt-4 pt-4 border-t border-neutral-800/50">
                   {fb.status === 'resolved' ? (
                     <div className="bg-emerald-950/20 border border-emerald-900/40 p-3 rounded-lg flex gap-3 items-start">
@@ -282,7 +301,7 @@ export function FeedbackPage() {
                     </div>
                   ) : (
                     <button 
-                      onClick={() => setResolveModal({ id: fb.id, name: fb.customerName })}
+                      onClick={() => { if (!actorId) return; setResolveNotes(''); setResolveError(''); setResolveModal({ id: fb.id, name: fb.customerName, actorId, generation: resolutionOwner.current.generation }); }}
                       className="text-xs font-bold text-neutral-400 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
                     >
                       <CheckCircle2 size={14} /> Mark as Resolved
@@ -296,7 +315,7 @@ export function FeedbackPage() {
       </div>
 
       {/* ── Resolve Modal ── */}
-      {resolveModal && (
+      {resolveModal && actorId === resolveModal.actorId && resolutionOwner.current.generation === resolveModal.generation && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
           <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
             <div className="px-6 py-4 border-b border-neutral-800 flex justify-between items-center bg-neutral-900/50">
@@ -307,17 +326,20 @@ export function FeedbackPage() {
                   <p className="text-xs text-neutral-500">{resolveModal.name}</p>
                 </div>
               </div>
-              <button type="button" onClick={() => { setResolveModal(null); setResolveNotes(''); }} className="p-1.5 text-neutral-500 hover:text-white rounded-lg transition-colors">
+              <button type="button" aria-label="Close resolution" disabled={isResolving} onClick={() => { setResolveModal(null); setResolveNotes(''); setResolveError(''); }} className="p-1.5 text-neutral-500 hover:text-white rounded-lg transition-colors">
                 <X size={16} />
               </button>
             </div>
 
             <form onSubmit={handleResolve} className="p-6 space-y-4">
               <div className="space-y-2">
-                <label className="text-xs text-neutral-400 uppercase tracking-wider font-semibold">Resolution Summary / Admin Notes *</label>
+                <label htmlFor="feedback-resolution-notes" className="text-xs text-neutral-400 uppercase tracking-wider font-semibold">Resolution Summary / Admin Notes *</label>
                 <textarea
+                  id="feedback-resolution-notes"
                   required
                   autoFocus
+                  disabled={isResolving}
+                  maxLength={2000}
                   rows={4}
                   value={resolveNotes}
                   onChange={(e) => setResolveNotes(e.target.value)}
@@ -325,13 +347,14 @@ export function FeedbackPage() {
                   className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 placeholder-neutral-600 resize-none"
                 />
               </div>
+              {resolveError && <p role="alert" className="text-sm text-rose-400">{resolveError}</p>}
 
               <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => { setResolveModal(null); setResolveNotes(''); }} className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors font-semibold">
+                <button type="button" disabled={isResolving} onClick={() => { setResolveModal(null); setResolveNotes(''); setResolveError(''); }} className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors font-semibold">
                   Cancel
                 </button>
-                <button type="submit" disabled={!resolveNotes.trim()} className="flex-1 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white text-sm rounded-xl font-bold transition-all shadow-lg shadow-emerald-900/30 flex items-center justify-center gap-2">
-                  <CheckCircle2 size={16} /> Confirm Resolution
+                <button type="submit" disabled={isResolving || !resolveNotes.trim() || resolveNotes.length > 2000} className="flex-1 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white text-sm rounded-xl font-bold transition-all shadow-lg shadow-emerald-900/30 flex items-center justify-center gap-2">
+                  <CheckCircle2 size={16} /> {isResolving ? 'Saving resolution…' : 'Confirm Resolution'}
                 </button>
               </div>
             </form>

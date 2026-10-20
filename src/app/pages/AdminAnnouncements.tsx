@@ -1,4 +1,5 @@
-import { useState, useRef } from 'react';
+import { PendingContentCreate } from '../components/PendingContentCreate';
+import { useState, useRef, useEffect } from 'react';
 import { useAppContext, Announcement, AnnouncementType } from '../context/AppContext';
 import { Plus, X, Pencil, Trash2, Megaphone, ToggleLeft, ToggleRight, CheckCircle, Info, AlertTriangle, Star, Calendar, Clock, Archive, RotateCcw } from 'lucide-react';
 import { format } from 'date-fns';
@@ -10,28 +11,32 @@ const TYPE_CONFIG: Record<AnnouncementType, { label: string; color: string; bg: 
   event:   { label: 'Event',   color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', icon: Calendar },
 };
 
-type FormState = { 
-  title: string; content: string; type: AnnouncementType; 
-  isActive: boolean; 
-  hasExpiry: boolean; expiresAt: string; 
-  startDate: string; 
+type FormState = {
+  title: string; content: string; type: AnnouncementType;
+  isActive: boolean;
+  hasExpiry: boolean; expiresAt: string;
+  startDate: string;
 };
 
-const blank: FormState = { 
-  title: '', content: '', type: 'info', 
-  isActive: true, 
-  hasExpiry: false, expiresAt: '', 
-  startDate: '' 
+const blank: FormState = {
+  title: '', content: '', type: 'info',
+  isActive: true,
+  hasExpiry: false, expiresAt: '',
+  startDate: ''
 };
 
 export function AdminAnnouncements() {
-  const { announcements, addAnnouncement, updateAnnouncement, deleteAnnouncement, toggleAnnouncement } = useAppContext();
+  const { announcements, addAnnouncement, updateAnnouncement, deleteAnnouncement, toggleAnnouncement, pendingContentCreates, contentCreateError, retryContentCreate } = useAppContext();
   const [showForm, setShowForm]   = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const inFlight = useRef(false);
+  const [clock, setClock] = useState(Date.now());
+  useEffect(() => { const timer = setInterval(() => setClock(Date.now()), 30000); return () => clearInterval(timer); }, []);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm]           = useState<FormState>(blank);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [viewTab, setViewTab]     = useState<'active' | 'history'>('active');
-  
+
   // 🟢 TOAST STATE WITH 5-SECOND FADE
   const [toast, setToast] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
   const toastTimeout = useRef<NodeJS.Timeout | null>(null);
@@ -42,14 +47,14 @@ export function AdminAnnouncements() {
     toastTimeout.current = setTimeout(() => setToast(null), 5000);
   };
 
-  const openAdd  = () => { setEditingId(null); setForm(blank); setShowForm(true); };
+  const openAdd  = () => { if (inFlight.current) return; setEditingId(null); setForm(blank); setShowForm(true); };
 
   const getMinDateTime = () => {
     const now = new Date();
     now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
     return now.toISOString().slice(0, 16);
   };
-  
+
   const safeFormat = (val: any, fmt: string, fallback = '—') => {
     if (!val) return fallback;
     const d = new Date(val);
@@ -57,28 +62,31 @@ export function AdminAnnouncements() {
   };
 
   const openEdit = (a: Announcement) => {
+    if (inFlight.current) return;
     setEditingId(a.id);
-    const sDate = (a as any).startDate || (a as any).startdate; 
+    const sDate = (a as any).startDate || (a as any).startdate;
     const expDate = a.expiresAt || (a as any).expiresat;
     const safeIso = (v: any) => {
       if (!v) return '';
       const d = new Date(v);
-      return isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 16);
+      return isNaN(d.getTime()) ? '' : format(d, "yyyy-MM-dd'T'HH:mm");
     };
-    setForm({ 
-      title: a.title, content: a.content, type: a.type || 'info', 
-      isActive: a.isActive ?? true, 
-      hasExpiry: !!expDate, 
+    setForm({
+      title: a.title, content: a.content, type: a.type || 'info',
+      isActive: a.isActive ?? true,
+      hasExpiry: !!expDate,
       expiresAt: safeIso(expDate),
       startDate: safeIso(sDate)
     });
     setShowForm(true);
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.title || !form.content) return;
-    
+    if (inFlight.current) return;
+    if (!form.title.trim() || !form.content.trim()) { flash('Title and content are required.', 'error'); return; }
+    if (form.hasExpiry && !form.expiresAt) { flash('Choose an expiry date and time.', 'error'); return; }
+
     // Scheduled Start Validation
     if (!form.isActive && !form.startDate) {
       flash("Please select a start date and time to schedule this announcement.", "error");
@@ -105,22 +113,48 @@ export function AdminAnnouncements() {
       }
     }
 
-    const payload = { 
-      title: form.title, content: form.content, type: form.type, 
-      isActive: form.isActive, 
+    const payload = {
+      title: form.title.trim(), content: form.content.trim(), type: form.type,
+      isActive: form.isActive,
       expiresAt: form.hasExpiry && form.expiresAt ? new Date(form.expiresAt) : null,
-      startDate: !form.isActive && form.startDate ? new Date(form.startDate) : null 
+      startDate: !form.isActive && form.startDate ? new Date(form.startDate) : null
     };
-    
-    if (editingId) { 
-      updateAnnouncement(editingId, payload); 
-      flash('Announcement updated successfully!', 'success'); 
-    } else { 
-      addAnnouncement(payload as any); 
-      flash('Announcement posted successfully!', 'success'); 
+
+    inFlight.current = true; setIsSaving(true);
+    try {
+      if (editingId) await updateAnnouncement(editingId, payload);
+      else await addAnnouncement(payload as any);
+      flash(editingId ? 'Announcement updated locally.' : 'Announcement saved locally.', 'success');
+      setShowForm(false); setEditingId(null); setForm(blank);
+    } catch (error) {
+      if ((error as any)?.code === 'CONTENT_CREATE_RECONCILE') setShowForm(false);
+      flash(error instanceof Error ? error.message : 'Announcement could not be saved. Please retry.', 'error');
     }
-    
-    setShowForm(false); setEditingId(null); setForm(blank);
+    finally { inFlight.current = false; setIsSaving(false); }
+  };
+
+  const recoverAnnouncementCreate = async () => {
+    try {
+      const saved = await retryContentCreate('announcement');
+      setShowForm(false); setEditingId(null); setForm(blank);
+      flash('Original announcement create confirmed locally.'); return saved;
+    } catch (error) {
+      if ((error as any)?.code === 'CONTENT_CREATE_RECONCILE') setShowForm(false);
+      flash(error instanceof Error ? error.message : 'Original announcement could not be confirmed.', 'error'); throw error;
+    }
+  };
+
+  const mutateAnnouncement = async (id: string, action: 'toggle' | 'expire' | 'restore' | 'delete') => {
+    if (inFlight.current) return;
+    inFlight.current = true; setIsSaving(true);
+    try {
+      if (action === 'toggle') await toggleAnnouncement(id);
+      else if (action === 'delete') await deleteAnnouncement(id);
+      else await updateAnnouncement(id, action === 'expire' ? { isActive: false, expiresAt: new Date(), startDate: null } as any : { isActive: false, expiresAt: null, startDate: null } as any);
+      setDeleteConfirm(null); setClock(Date.now());
+      flash(action === 'expire' ? 'Moved to local history.' : action === 'restore' ? 'Restored locally as draft.' : action === 'delete' ? 'Deleted locally.' : 'Visibility saved locally.', 'success');
+    } catch (error) { flash(error instanceof Error ? error.message : 'Announcement action failed. Please retry.', 'error'); }
+    finally { inFlight.current = false; setIsSaving(false); }
   };
 
   // 🟢 Categorize & Sort Announcements
@@ -133,12 +167,12 @@ export function AdminAnnouncements() {
     const exp = a.expiresAt || (a as any).expiresat;
     if (!exp) return false;
     const d = new Date(exp);
-    return !isNaN(d.getTime()) && new Date() > d;
+    return !isNaN(d.getTime()) && new Date(clock) >= d;
   };
-  
+
   const activeList = sortedAnnouncements.filter(a => !checkIsExpired(a));
   const historyList = sortedAnnouncements.filter(a => checkIsExpired(a));
-  
+
   const displayedAnnouncements = viewTab === 'active' ? activeList : historyList;
 
   const CharCount = ({ current, max }: { current?: string, max: number }) => {
@@ -152,6 +186,7 @@ export function AdminAnnouncements() {
 
   return (
     <div className="space-y-5">
+      <PendingContentCreate kind="announcement" pending={pendingContentCreates.find((item: any) => item.kind === 'announcement')} storageError={contentCreateError} onRetry={recoverAnnouncementCreate} />
       {/* 🟢 TOP-RIGHT FLOATING TOAST */}
       {toast && (
         <div className="fixed top-6 right-6 z-[9999] animate-in slide-in-from-top-4 fade-in duration-300" style={{ animation: 'toast-fade-out 5s forwards' }}>
@@ -176,7 +211,7 @@ export function AdminAnnouncements() {
       <div className="bg-amber-950/20 border border-amber-900/30 rounded-xl p-4 flex items-start gap-3">
         <Megaphone size={15} className="text-amber-500 flex-shrink-0 mt-0.5" />
         <p className="text-xs text-amber-400/80 leading-relaxed">
-          <strong>Customer Broadcasts:</strong> Announcements appear prominently at the top of the customer-facing homepage. Use this tool to highlight active promos, upcoming tournaments, or critical venue updates. Scheduled announcements will automatically go live on their start date.
+          <strong>Local announcement records:</strong> These records are saved on this POS. Publishing updates to the customer website requires secure hosted publishing, which is not configured here.
         </p>
       </div>
 
@@ -203,13 +238,13 @@ export function AdminAnnouncements() {
       {/* 🟢 Toolbar & Tabs */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div className="flex gap-1 bg-neutral-950 border border-neutral-800 rounded-xl p-1 w-full sm:w-auto">
-          <button 
+          <button
             onClick={() => { setViewTab('active'); setDeleteConfirm(null); }}
             className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-semibold transition-all ${viewTab === 'active' ? 'bg-amber-500/15 text-amber-400 border border-amber-500/20' : 'text-neutral-500 hover:text-neutral-300'}`}
           >
             Active & Drafts
           </button>
-          <button 
+          <button
             onClick={() => { setViewTab('history'); setDeleteConfirm(null); }}
             className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold transition-all ${viewTab === 'history' ? 'bg-amber-500/15 text-amber-400 border border-amber-500/20' : 'text-neutral-500 hover:text-neutral-300'}`}
           >
@@ -217,7 +252,7 @@ export function AdminAnnouncements() {
           </button>
         </div>
 
-        <button onClick={openAdd} className="flex items-center justify-center w-full sm:w-auto gap-2 bg-amber-600 hover:bg-amber-500 text-white text-sm px-4 py-2 rounded-xl font-semibold transition-all shadow-lg shadow-amber-900/30">
+        <button disabled={isSaving} onClick={openAdd} className="flex items-center justify-center w-full sm:w-auto gap-2 bg-amber-600 hover:bg-amber-500 text-white text-sm px-4 py-2 rounded-xl font-semibold transition-all shadow-lg shadow-amber-900/30">
           <Plus size={15} /> New Announcement
         </button>
       </div>
@@ -233,12 +268,12 @@ export function AdminAnnouncements() {
               {viewTab === 'active' ? 'No Active Announcements' : 'No Announcement History'}
             </h3>
             <p className="text-xs text-neutral-500 max-w-sm mb-6">
-              {viewTab === 'active' 
-                ? 'Keep your customers engaged by posting updates, promos, and upcoming events.' 
+              {viewTab === 'active'
+                ? 'Keep your customers engaged by posting updates, promos, and upcoming events.'
                 : 'Expired and removed announcements will automatically be stored here for your records.'}
             </p>
             {viewTab === 'active' && (
-              <button onClick={openAdd} className="flex items-center gap-2 bg-amber-600 hover:bg-amber-500 text-white text-xs px-4 py-2 rounded-lg font-semibold transition-colors">
+              <button disabled={isSaving} onClick={openAdd} className="flex items-center gap-2 bg-amber-600 hover:bg-amber-500 text-white text-xs px-4 py-2 rounded-lg font-semibold transition-colors">
                 <Plus size={14} /> Create First Announcement
               </button>
             )}
@@ -263,7 +298,7 @@ export function AdminAnnouncements() {
                   <div className="flex items-center gap-2 flex-wrap mb-1">
                     <p className="text-sm font-bold text-neutral-100">{a.title}</p>
                     <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${cfg.bg} ${cfg.color} ${cfg.border}`}>{cfg.label}</span>
-                    
+
                     {/* Status Badges */}
                     {isLive && (
                       <span className="flex items-center gap-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
@@ -274,9 +309,9 @@ export function AdminAnnouncements() {
                     {!a.isActive && !isExpired && !isScheduled && <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-neutral-800 text-neutral-500 border border-neutral-700">Draft</span>}
                     {isScheduled && !a.isActive && <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">Scheduled</span>}
                   </div>
-                  
+
                   <p className="text-xs text-neutral-400 leading-relaxed mt-1">{a.content}</p>
-                  
+
                   {/* Structured Timeline */}
                   <div className="flex flex-wrap items-center gap-4 mt-3 text-[10px] text-neutral-500">
                     <div className="flex items-center gap-1.5">
@@ -297,23 +332,19 @@ export function AdminAnnouncements() {
                     )}
                   </div>
                 </div>
-                
+
                 {/* 🟢 Contextual Actions (Active vs History) */}
                 <div className="flex items-center gap-1 flex-shrink-0">
                   {viewTab === 'active' ? (
                     <>
-                      <button onClick={() => openEdit(a)} className="p-1.5 text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 rounded-lg transition-colors"><Pencil size={13} /></button>
-                      <button onClick={() => toggleAnnouncement(a.id)} title={a.isActive ? 'Deactivate' : 'Activate'}
+                      <button disabled={isSaving} onClick={() => openEdit(a)} className="p-1.5 text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 rounded-lg transition-colors"><Pencil size={13} /></button>
+                      <button disabled={isSaving} onClick={() => mutateAnnouncement(a.id, 'toggle')} title={a.isActive ? 'Deactivate' : 'Activate'}
                         className="p-1.5 text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 rounded-lg transition-colors">
                         {a.isActive ? <ToggleRight size={18} className="text-emerald-400" /> : <ToggleLeft size={18} />}
                       </button>
                       {deleteConfirm === a.id ? (
                         <div className="flex items-center gap-1">
-                          <button onClick={() => { 
-                              updateAnnouncement(a.id, { isActive: false, expiresAt: new Date(), startDate: null } as any); 
-                              setDeleteConfirm(null); 
-                              flash('Moved to History.', 'success'); 
-                            }}
+                          <button disabled={isSaving} onClick={() => mutateAnnouncement(a.id, 'expire')}
                             className="px-2 py-1 text-[10px] bg-amber-700 hover:bg-amber-600 text-white rounded-lg font-semibold">Move</button>
                           <button onClick={() => setDeleteConfirm(null)} className="px-2 py-1 text-[10px] bg-neutral-800 text-neutral-400 rounded-lg">Cancel</button>
                         </div>
@@ -323,15 +354,12 @@ export function AdminAnnouncements() {
                     </>
                   ) : (
                     <>
-                      <button onClick={() => {
-                          updateAnnouncement(a.id, { isActive: false, expiresAt: null, startDate: null } as any);
-                          flash('Restored to active tab as draft.', 'success');
-                        }} title="Restore to Drafts" className="p-1.5 text-neutral-500 hover:text-sky-400 hover:bg-sky-950/20 rounded-lg transition-colors">
+                      <button disabled={isSaving} onClick={() => mutateAnnouncement(a.id, 'restore')} title="Restore to Drafts" className="p-1.5 text-neutral-500 hover:text-sky-400 hover:bg-sky-950/20 rounded-lg transition-colors">
                         <RotateCcw size={13} />
                       </button>
                       {deleteConfirm === a.id ? (
                         <div className="flex items-center gap-1">
-                          <button onClick={() => { deleteAnnouncement(a.id); setDeleteConfirm(null); flash('Permanently deleted.', 'success'); }}
+                          <button disabled={isSaving} onClick={() => mutateAnnouncement(a.id, 'delete')}
                             className="px-2 py-1 text-[10px] bg-rose-700 hover:bg-rose-600 text-white rounded-lg font-semibold">Delete Forever</button>
                           <button onClick={() => setDeleteConfirm(null)} className="px-2 py-1 text-[10px] bg-neutral-800 text-neutral-400 rounded-lg">Cancel</button>
                         </div>
@@ -353,9 +381,9 @@ export function AdminAnnouncements() {
           <div className="bg-neutral-950 border border-amber-900/30 rounded-2xl w-full max-w-md shadow-2xl flex flex-col max-h-[92vh]">
             <div className="px-6 py-4 border-b border-neutral-800 flex justify-between items-center flex-none">
               <h2 className="text-base font-bold text-neutral-100">{editingId ? 'Edit Announcement' : 'New Announcement'}</h2>
-              <button onClick={() => setShowForm(false)} className="p-2 text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 rounded-lg"><X size={16} /></button>
+              <button disabled={isSaving} onClick={() => setShowForm(false)} className="p-2 text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 rounded-lg"><X size={16} /></button>
             </div>
-            <form onSubmit={handleSave} className="overflow-y-auto flex-1 p-6 space-y-4">
+            <form onSubmit={handleSave} className="overflow-y-auto flex-1"><fieldset disabled={isSaving} className="p-6 space-y-4">
               <div>
                 <div className="flex justify-between items-center mb-1.5">
                   <label className="text-xs text-neutral-400 font-medium">Title *</label>
@@ -402,12 +430,12 @@ export function AdminAnnouncements() {
                     <label className="text-[10px] text-neutral-400 uppercase tracking-wider font-semibold block mb-1.5 flex items-center gap-1.5">
                       <Calendar size={10} /> Schedule Start Time *
                     </label>
-                    <input 
-                      type="datetime-local" 
+                    <input
+                      type="datetime-local"
                       min={getMinDateTime()}
-                      value={form.startDate} 
+                      value={form.startDate}
                       onChange={e => setForm(f=>({...f, startDate: e.target.value}))}
-                      className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-amber-500 transition-colors" 
+                      className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-amber-500 transition-colors"
                     />
                   </div>
                 )}
@@ -423,26 +451,26 @@ export function AdminAnnouncements() {
                 </label>
                 {form.hasExpiry && (
                   <div className="pl-11 animate-in fade-in slide-in-from-top-1">
-                    <input 
-                      type="datetime-local" 
-                      min={!form.isActive && form.startDate ? form.startDate : getMinDateTime()} 
-                      value={form.expiresAt} 
+                    <input
+                      type="datetime-local"
+                      min={!form.isActive && form.startDate ? form.startDate : getMinDateTime()}
+                      value={form.expiresAt}
                       onChange={e => setForm(f=>({...f, expiresAt: e.target.value}))}
-                      className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-amber-500 transition-colors" 
+                      className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-amber-500 transition-colors"
                     />
                   </div>
                 )}
               </div>
 
               <div className="flex gap-3 pt-4 border-t border-neutral-800">
-                <button type="button" onClick={() => setShowForm(false)}
+                <button type="button" disabled={isSaving} onClick={() => setShowForm(false)}
                   className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors">Cancel</button>
                 <button type="submit"
                   className="flex-1 bg-amber-600 hover:bg-amber-500 text-white text-sm rounded-xl font-semibold py-2.5 flex items-center justify-center gap-2 shadow-lg shadow-amber-900/20">
-                  {editingId ? <><Pencil size={14} /> Update</> : <><Plus size={14} /> {form.isActive ? 'Post Now' : 'Schedule'}</>}
+                  {editingId ? <><Pencil size={14} /> Update</> : <><Plus size={14} /> {form.isActive ? 'Save Locally' : 'Save Local Schedule'}</>}
                 </button>
               </div>
-            </form>
+            </fieldset></form>
           </div>
         </div>
       )}

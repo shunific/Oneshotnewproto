@@ -16,7 +16,7 @@ const COMMON_MAINTENANCE_REASONS = [
 ];
 
 export function AdminTableManagement() {
-  const { tables, addTable, updateTable, setTableMaintenance, freeTable } = useAppContext() as any;
+  const { tables, addTable, updateTable, updateTableState } = useAppContext() as any;
 
   const [newName, setNewName]               = useState('');
   const [showAddForm, setShowAddForm]       = useState(false);
@@ -62,6 +62,7 @@ export function AdminTableManagement() {
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     const trimmedName = newName.trim();
     if (!trimmedName) return;
 
@@ -76,111 +77,91 @@ export function AdminTableManagement() {
     setIsSubmitting(true);
     setLoadingMsg('ADDING NEW TABLE...');
     setIsLoading(true);
-    addTable(trimmedName);
-
-    setNewName('');
-    setShowAddForm(false);
-    setIsSubmitting(false);
-
-    setTimeout(() => {
-      setIsLoading(false);
+    try {
+      await addTable(trimmedName);
+      setNewName('');
+      setShowAddForm(false);
       flash(`Table "${trimmedName}" added!`);
-    }, 800);
+    } catch (error: any) {
+      flash(error.message || 'Table could not be added.', 'error');
+    } finally {
+      setIsSubmitting(false);
+      setIsLoading(false);
+    }
   };
 
-  const handleUpdateName = (id: string) => {
+  const handleUpdateName = async (id: string) => {
+    if (isLoading) return;
     const trimmedName = editName.trim();
     if (!trimmedName) return;
-
-    const isDuplicate = tables.some(
-      (t: any) => t.id !== id && t.name.trim().toLowerCase() === trimmedName.toLowerCase()
-    );
-    if (isDuplicate) {
+    if (tables.some((table: any) => table.id !== id && table.name.trim().toLowerCase() === trimmedName.toLowerCase())) {
       flash(`A table named "${trimmedName}" already exists.`, 'error');
       return;
     }
-
-    updateTable(id, trimmedName);
-    setEditingId(null);
-    flash('Table renamed successfully.');
+    setIsLoading(true);
+    setLoadingMsg('RENAMING TABLE...');
+    try {
+      await updateTable(id, trimmedName);
+      setEditingId(null);
+      flash('Table renamed successfully.');
+    } catch (error: any) {
+      flash(error.message || 'Table could not be renamed.', 'error');
+    } finally { setIsLoading(false); }
   };
 
   const handleConfirmMaintenance = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!maintenanceModal) return;
-
-    const finalReason = selectedReason === 'Others (Specify below)'
-      ? customReason.trim()
-      : selectedReason;
-
-    if (!finalReason) {
-      flash('Please specify a maintenance reason.', 'error');
+    if (!maintenanceModal || isConfirming) return;
+    const finalReason = selectedReason === 'Others (Specify below)' ? customReason.trim() : selectedReason;
+    if (!finalReason) { flash('Please specify a maintenance reason.', 'error'); return; }
+    const table = tables.find((table: any) => table.id === maintenanceModal.tableId);
+    if (!table || table.session || table.status === 'occupied') {
+      flash('End the active session in the Staff Table Monitor, using checkout or the authorized session-void action, before maintenance.', 'error');
       return;
     }
-
     setIsConfirming(true);
     setLoadingMsg('UPDATING TABLE STATUS...');
     setIsLoading(true);
-
-    setTableMaintenance(maintenanceModal.tableId, finalReason);
-
-    await fetch(`http://localhost:3001/api/tables/${maintenanceModal.tableId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        status: 'maintenance',
-        maintenanceReason: finalReason,
-        isActive: maintenanceModal.targetActive ? 1 : 0
-      })
-    });
-
-    setIsConfirming(false);
-    setMaintenanceModal(null);
-    setCustomReason('');
-
-    setTimeout(() => {
-      setIsLoading(false);
+    try {
+      await updateTableState(table.id, { status: 'maintenance', maintenanceReason: finalReason, isActive: maintenanceModal.targetActive });
+      setMaintenanceModal(null);
+      setCustomReason('');
       flash(`"${maintenanceModal.tableName}" has been set to maintenance: ${finalReason}`);
-    }, 800);
+    } catch (error: any) {
+      flash(error.message || 'Table status could not be saved.', 'error');
+    } finally { setIsConfirming(false); setIsLoading(false); }
   };
 
   const handleReactivateTable = async (table: any) => {
     setOpenDropdownId(null);
+    if (table.session || table.status === 'occupied') {
+      flash('End the active session in the Staff Table Monitor before reactivating this table.', 'error');
+      return;
+    }
     setLoadingMsg('REACTIVATING TABLE...');
     setIsLoading(true);
-
-    freeTable(table.id);
-    await fetch(`http://localhost:3001/api/tables/${table.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'available', maintenanceReason: '', isActive: 1 })
-    });
-
-    setTimeout(() => {
-      setIsLoading(false);
+    try {
+      await updateTableState(table.id, { status: 'available', session: null, maintenanceReason: '', isActive: true });
       flash(`"${table.name}" is now active and available for guests.`);
-    }, 800);
+    } catch (error: any) {
+      flash(error.message || 'Table could not be reactivated.', 'error');
+    } finally { setIsLoading(false); }
   };
 
-  // 🟢 NEW: Admin Force Clear Action
   const handleForceClear = async (table: any) => {
     setOpenDropdownId(null);
-    if (window.confirm(`⚠️ WARNING: Are you sure you want to forcefully clear ${table.name}? This will wipe any active sessions without saving to history.`)) {
-      setLoadingMsg('CLEARING TABLE...');
-      setIsLoading(true);
-      
-      freeTable(table.id);
-      await fetch(`http://localhost:3001/api/tables/${table.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'available', sessionData: null, maintenanceReason: null })
-      });
-
-      setTimeout(() => {
-        setIsLoading(false);
-        flash(`"${table.name}" forcefully cleared and reset to available.`);
-      }, 800);
+    if (table.session || table.status === 'occupied') {
+      flash('End this session in the Staff Table Monitor using checkout or the authorized session-void action. Its history must be preserved.', 'error');
+      return;
     }
+    setLoadingMsg('RESETTING EMPTY TABLE...');
+    setIsLoading(true);
+    try {
+      await updateTableState(table.id, { status: 'available', session: null, maintenanceReason: null });
+      flash(`"${table.name}" reset to available.`);
+    } catch (error: any) {
+      flash(error.message || 'Empty table could not be reset.', 'error');
+    } finally { setIsLoading(false); }
   };
 
   const STATUS_COLOR: Record<string, string> = {
@@ -378,14 +359,14 @@ export function AdminTableManagement() {
                             <span>Rename Table</span>
                           </button>
 
-                          {/* 🟢 Force Clear Action */}
+                          {/* 🟢 Reset Empty Table Action */}
                           {(t.status === 'occupied' || t.status === 'reserved' || t.status === 'event') && (
                             <button
                               onClick={() => handleForceClear(t)}
                               className="w-full px-4 py-2.5 text-left text-xs text-rose-400 hover:bg-rose-950/20 transition-colors flex items-center gap-2 border-t border-neutral-800/60"
                             >
                               <ShieldAlert size={13} />
-                              <span>Force Clear Table</span>
+                              <span>Reset Empty Table</span>
                             </button>
                           )}
 
@@ -394,7 +375,7 @@ export function AdminTableManagement() {
                               onClick={() => {
                                 setOpenDropdownId(null);
                                 if (t.status === 'occupied') {
-                                  flash('Cannot set an occupied table to maintenance. Force Clear it first if necessary.', 'error');
+                                  flash('End the occupied session in the Staff Table Monitor using checkout or the authorized session-void action before maintenance.', 'error');
                                   return;
                                 }
                                 setMaintenanceModal({ tableId: t.id, tableName: t.name, targetActive: false });

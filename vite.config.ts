@@ -17,7 +17,8 @@ function figmaAssetResolver() {
 }
 
 export default defineConfig({
-  base: './', // 🟢 CRITICAL FIX: Must be './' for Electron file:// protocol to load assets
+  envPrefix: 'ONESHOT_PUBLIC_', // Legacy VITE service settings must never enter a shipped renderer.
+  base: '/', // The packaged app serves its renderer over local HTTP, including nested routes.
 
   plugins: [
     figmaAssetResolver(),
