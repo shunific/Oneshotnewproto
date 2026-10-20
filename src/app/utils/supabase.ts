@@ -9,6 +9,7 @@ export const supabase = createClient(supabaseUrl, supabaseKey);
 // Public data client that ALWAYS uses the anon/public role (never blocked by user JWT RLS)
 export const publicSupabase = createClient(supabaseUrl, supabaseKey, {
   auth: {
+    storageKey: 'oneshot-public-display',
     persistSession: false,
     autoRefreshToken: false,
     detectSessionInUrl: false

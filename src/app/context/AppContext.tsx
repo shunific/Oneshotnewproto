@@ -1,5 +1,9 @@
-import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
+import { createContext, useContext, useState, useEffect, ReactNode, Fragment, useCallback, useRef } from 'react';
 import { supabase, publicSupabase } from "../utils/supabase";
+import { createOwnedReservationLoader, clearPendingBookings, readPendingBooking, submitTrustedBooking } from '../utils/trustedBookings';
+import { parseSystemSettings, hasBookingSettings } from '../utils/systemSettings';
+import { submitFeedback, clearPendingFeedback, readPendingFeedback } from '../utils/feedbackSubmission';
+import { clearPendingReceiptUploads } from '../utils/privateReceipts';
 
 // ── Types (Pruned for Customer App) ────────────────────────────
 export type TableStatus = 'available' | 'occupied' | 'reserved' | 'maintenance' | 'event';
@@ -40,7 +44,7 @@ export type QueueItem = {
 export type ReservationStatus = 'pending' | 'confirmed' | 'checked-in' | 'completed' | 'cancelled';
 
 export type Reservation = {
-  id: string; customerName: string; contactNumber: string; email?: string; date: Date; timeSlot: string; durationHours: number; partySize: number; tableId?: string; status: ReservationStatus; totalAmount: number; downPaymentAmount: number; downPaymentPaid: boolean; balancePaid: boolean; createdAt: Date; cancellationReason?: string; promoCode?: string; discountAmount?: number; paymentRef?: string; receiptImg?: string;
+  id: string; customer_user_id: string; revision: number; customerName: string; contactNumber: string; email?: string; date: Date; timeSlot: string; durationHours: number; partySize: number; tableId?: string; status: ReservationStatus; totalAmount: number; downPaymentAmount: number; downPaymentPaid: boolean; balancePaid: boolean; createdAt: Date; cancellationReason?: string; promoCode?: string; discountAmount?: number; paymentRef?: string; receiptImg?: string;
   refundStatus?: 'pending' | 'processing' | 'sent' | 'in_person' | 'remediated' | 'acknowledged' | 'expired';
   refundMethod?: 'gcash' | 'cash' | 'session_credit';
   refundNotes?: string;
@@ -62,6 +66,7 @@ export type Event = {
 };
 
 export type RatesConfig = {
+  bookingCapacityMode?: 'tables';
   hourlyRate: number; overtimeRate: number; downPaymentPercent: number;
   bookingCutoffMinutes: number; weekdayStartTime: string; weekdayEndTime: string; isWeekdayHappyHourActive: boolean; weekdayHappyHourRate: number; weekdayHappyHourStart: string; weekdayHappyHourEnd: string; weekdayOnlineCapacityLimit: number;
   weekendStartTime: string; weekendEndTime: string; isWeekendHappyHourActive: boolean; weekendHappyHourRate: number; weekendHappyHourStart: string; weekendHappyHourEnd: string; weekendOnlineCapacityLimit: number;
@@ -95,7 +100,18 @@ export const generateRandomPromoCode = () => {
 };
 
 type AppContextType = {
-  tables: Table[]; 
+  tables: Table[];
+  bookingBusy: any[];
+  customerUser: { id: string; name: string; email: string } | null;
+  pendingBooking: any;
+  pendingFeedback: any;
+  retryPendingFeedback: () => Promise<{ id: string }>;
+  ownedBookingsError: string;
+  refreshOwnedBookings: () => Promise<void>;
+  retryPendingBooking: () => Promise<Reservation>;
+  changeBooking: (kind: 'reschedule' | 'cancel', input: any) => Promise<Reservation>;
+  bookingDataReady: boolean;
+  queueWaitingCount: number;
   queue: QueueItem[]; 
   reservations: Reservation[]; 
   promoCodes: PromoCode[]; 
@@ -110,34 +126,33 @@ type AppContextType = {
   
   updateWeatherLocation: (lat: string, lon: string, name: string) => void;
   updateActiveAnnouncement: (msg: string) => void;
-  addReservation: (i: Omit<Reservation, 'id'|'createdAt'>) => Promise<string>; 
-  addFeedback: (i: Omit<Feedback, 'id'|'date'>) => void; 
+  addReservation: (input: any) => Promise<Reservation>;
+  applySavedReservation: (saved: Pick<Reservation, 'id'> & Partial<Reservation>) => void;
+  addFeedback: (input: { customerName: string; contactInfo: string; feedbackType: string; comment: string; reservationId?: string }, options?: { allowEmail?: boolean }) => Promise<{ id: string }>;
   applyPromoCode: (c: string) => PromoCode | null;
   refreshLiveMonitor: () => Promise<void>;
-  acknowledgeRefund: (id: string) => void;
-  validateBookingPreflight: (date: Date, timeSlot: string, durationHours: number) => Promise<boolean>;
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [isInitializing, setIsInitializing] = useState(true);
+  const [bookingDataReady, setBookingDataReady] = useState(false);
+  const [bookingBusy, setBookingBusy] = useState<any[]>([]);
+  const [customerUser, setCustomerUser] = useState<{id: string; name: string; email: string} | null>(null);
+  const ownerRef = useRef<string | null>(null);
+  const authEpoch = useRef(0);
+  const [pendingBooking, setPendingBooking] = useState<any>(null);
+  const [pendingFeedback, setPendingFeedback] = useState<any>(null);
+  const [ownedBookingsError, setOwnedBookingsError] = useState('');
 
-  const [tables, setTables] = useState<Table[]>([
-    { id: 't1', name: 'Table 1', status: 'available', isActive: true },
-    { id: 't2', name: 'Table 2', status: 'available', isActive: true },
-    { id: 't3', name: 'Table 3', status: 'available', isActive: true },
-    { id: 't4', name: 'Table 4', status: 'available', isActive: true },
-    { id: 't5', name: 'Table 5', status: 'available', isActive: true },
-    { id: 't6', name: 'Table 6', status: 'available', isActive: true },
-    { id: 't7', name: 'Table 7', status: 'available', isActive: true },
-    { id: 't8', name: 'Table 8', status: 'available', isActive: true },
-    { id: 't9', name: 'Table 9', status: 'available', isActive: true },
-    { id: 't10', name: 'Table 10', status: 'available', isActive: true },
-  ]);
+  const [tables, setTables] = useState<Table[]>([]);
+  const [queueWaitingCount, setQueueWaitingCount] = useState(0);
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
-  const [events, setEvents] = useState<Event[]>([]);
+  const [serverEvents, setServerEvents] = useState<Event[]>([]);
+  const [holidays, setHolidays] = useState<Event[]>([]);
+  const events = [...serverEvents, ...holidays];
   const [promoCodes, setPromoCodes] = useState<PromoCode[]>([]);
   const [rates, setRates] = useState<RatesConfig>({
     hourlyRate: 150,
@@ -179,350 +194,106 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const updateActiveAnnouncement = (msg: string) => setActiveAnnouncement(msg);
   const [siteConfig, setSiteConfig] = useState<any>(null);
   const updateWeatherLocation = useCallback((lat: string, lon: string, name: string) => { setWeatherConfig({ lat, lon, name }); }, []);
-  const [feedback, setFeedback] = useState<Feedback[]>([]);
 
-  // 🟢 FIXED: Proper mapping of sessionData to avoid Ghost Sessions using publicSupabase
+  const ownerLoader = useRef(createOwnedReservationLoader(supabase, setReservations));
+  const refreshOwnedBookings = async () => {
+    try { await ownerLoader.current.refresh(); setOwnedBookingsError(''); }
+    catch (error: any) { setOwnedBookingsError(error.message || 'Your bookings could not be loaded.'); }
+  };
+
+  const availabilitySequence = useRef(0);
   const refreshLiveMonitor = async () => {
+    const sequence = ++availabilitySequence.current;
     try {
-      const [ { data: newTables }, { data: newQueue } ] = await Promise.all([
-        publicSupabase.from('tables').select('*'),
-        publicSupabase.from('queue').select('*')
-      ]);
-      
-      if (newTables) {
-        const mappedTables = newTables.map((t: any) => ({
-          ...t,
-          session: t.sessionData ? (typeof t.sessionData === 'string' ? JSON.parse(t.sessionData) : t.sessionData) : undefined,
-          isActive: t.isActive === 1 || t.isActive === true
-        }));
-        setTables(prev => JSON.stringify(prev) !== JSON.stringify(mappedTables) ? mappedTables as Table[] : prev);
-      }
-      if (newQueue) {
-        const mappedQueue = newQueue.map((q: any) => ({
-          ...q,
-          customerName: q.customerName || q.customer_name,
-          partySize: q.partySize || q.party_size,
-          arrivalTime: q.arrivalTime || q.arrival_time,
-          queueNumber: q.queueNumber || q.queue_number,
-        }));
-        setQueue(prev => JSON.stringify(prev) !== JSON.stringify(mappedQueue) ? mappedQueue as QueueItem[] : prev);
-      }
-    } catch (error) {
-      console.error("Live Monitor Refresh Error:", error);
-    }
-  };
-
-  // 🟢 NEW: Auto-refresh loop so the customer website stays in sync
-  // 🟢 SMART POLLING: Checks Supabase only when tab is active, every 45s (Saves massive bandwidth)
-  useEffect(() => {
-    if (isInitializing) return;
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') refreshLiveMonitor();
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    const interval = setInterval(() => {
-      if (document.visibilityState === 'visible') refreshLiveMonitor();
-    }, 45000);
-
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      clearInterval(interval);
-    };
-  }, [isInitializing]);
-
-  // 🟢 PRE-FLIGHT CHECK: Prevents simultaneous double-booking deadlocks
-  const validateBookingPreflight = async (date: Date, timeSlot: string, durationHours: number): Promise<boolean> => {
-    const requestedStart = new Date(date);
-    const [h, m] = timeSlot.split(':').map(Number);
-    requestedStart.setHours(h, m, 0, 0);
-    const requestedEnd = addMinutes(requestedStart, durationHours * 60);
-
-    try {
-      const { data } = await publicSupabase
-        .from('reservations')
-        .select('date, durationHours')
-        .in('status', ['pending', 'confirmed', 'checked-in']);
-
-      if (!data) return true; 
-
-      let overlapCount = 0;
-      data.forEach((r: any) => {
-        if (isSameDay(new Date(r.date), requestedStart)) {
-           const rStart = new Date(r.date);
-           const rEnd = addMinutes(rStart, r.durationHours * 60);
-           if (requestedStart < rEnd && requestedEnd > rStart) overlapCount++;
-        }
-      });
-
-      const capacityLimit = Number(rates?.onlineCapacityLimit ?? 70);
-      const maxOnlineCapacity = Math.max(1, Math.floor((tables.length || 10) * (capacityLimit / 100)));
-
-      return overlapCount < maxOnlineCapacity;
-    } catch (err) {
-      return true; // Failsafe fallback
+      const from = new Date();
+      const to = new Date(from); to.setDate(to.getDate() + 31);
+      const localDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+      const { data, error } = await publicSupabase.rpc('oneshot_booking_availability', { p_from: localDate(from), p_to: localDate(to) });
+      if (sequence !== availabilitySequence.current) return;
+      if (error) throw error;
+      if (!data || !Array.isArray(data.tables) || !Array.isArray(data.busy) || !Array.isArray(data.settings) || !Array.isArray(data.closedDates)) throw new Error('Booking availability is unavailable.');
+      const settings = parseSystemSettings(data.settings);
+      setTables(data.tables.map((table: any) => ({
+        id: table.id, name: table.name, status: table.status, isActive: table.isActive === true,
+        session: table.session ? { startTime: table.session.startTime, durationMinutes: table.session.durationMinutes, isOpenTime: table.session.isOpenTime } : undefined,
+      })));
+      setBookingBusy(data.busy.map((busy: any, index: number) => ({ id: `busy-${index}`, tableId: busy.tableId, date: busy.date, timeSlot: busy.timeSlot, durationHours: busy.durationHours, status: 'confirmed' })));
+      if (!Number.isSafeInteger(data.queueSummary?.waitingCount) || data.queueSummary.waitingCount < 0) throw new Error('Queue availability could not be verified.');
+      setQueueWaitingCount(data.queueSummary.waitingCount);
+      setQueue([]);
+      setClosedDates(data.closedDates);
+      setPromoCodes((data.promos || []).map((promo: any) => ({
+        id: promo.id || promo.code, code: promo.code, discountPercent: Number(promo.discountPercent), description: promo.description || '',
+        isActive: promo.isActive === true && promo.exhausted !== true, isLimitedUses: false,
+        maxUsage: 0, usageCount: 0, startDate: promo.startDate ? new Date(promo.startDate) : undefined,
+        expiresAt: promo.expiresAt ? new Date(promo.expiresAt) : undefined, createdAt: new Date(),
+      })));
+      setServerEvents(data.events || []);
+      setAnnouncements((data.announcements || []).map((announcement: any) => ({
+        id: announcement.id, title: announcement.title, content: announcement.content,
+        type: announcement.type || 'info', isActive: announcement.isActive === true,
+        createdAt: new Date(announcement.createdAt), expiresAt: announcement.expiresAt ? new Date(announcement.expiresAt) : undefined,
+      })));
+      setSiteConfig({ heroImages: data.cms?.heroImages, aboutImage: data.cms?.aboutImage });
+      setRates(prev => ({ ...prev, ...settings }));
+      setReservationTerms(prev => ({ ...prev, ...settings }));
+      setBookingDataReady(data.bookingReady === true && hasBookingSettings(settings));
+    } catch {
+      if (sequence === availabilitySequence.current) setBookingDataReady(false);
     }
   };
 
   useEffect(() => {
-    const fetchSupabaseData = async (isInitial: boolean = false) => {
-      try {
-        const [
-          { data: tablesData },
-          { data: resData },
-          { data: queueData },
-          { data: annData },
-          { data: cmsData },
-          { data: settingsData }, 
-          { data: closedDatesData },
-          { data: promoData },
-          { data: eventsData },
-          { data: feedbackData }
-        ] = await Promise.all([
-          publicSupabase.from('tables').select('*'),
-          publicSupabase.from('reservations').select('*'),
-          publicSupabase.from('queue').select('*'),
-          publicSupabase.from('announcements').select('*'),
-          publicSupabase.from('cms').select('*'),
-          publicSupabase.from('system_settings').select('*'), 
-          publicSupabase.from('closed_dates').select('*'),
-          publicSupabase.from('promo_codes').select('*'),
-          publicSupabase.from('events').select('*'),
-          publicSupabase.from('feedback').select('*')
-        ]);
-        
-        if (tablesData) {
-          setTables(tablesData.map((t: any) => {
-            const rawActive = t.isActive ?? t.is_active ?? t.isactive;
-            const isTableActive = rawActive === 1 || rawActive === true || rawActive === 'true' || (rawActive === undefined ? true : false);
-            return {
-              ...t,
-              session: t.sessionData ? (typeof t.sessionData === 'string' ? JSON.parse(t.sessionData) : t.sessionData) : undefined,
-              isActive: isTableActive
-            };
-          }) as Table[]);
+    let stopped = false;
+    let observedAuth = false;
+    let recoveryStorage: Storage | undefined;
+    try { recoveryStorage = sessionStorage; } catch { /* Adoption below remains signed out without recovery storage. */ }
+    const adopt = (user: any) => {
+      const next = user && !user.is_anonymous && user.email_confirmed_at ? user.id : null;
+      if (ownerRef.current !== next) {
+        const previousOwner = ownerRef.current;
+        authEpoch.current++;
+        // Invalidate private in-memory state before fallible browser storage access.
+        ownerRef.current = null;
+        ownerLoader.current.changeOwner(null);
+        setCustomerUser(null);
+        setPendingBooking(null);
+        setPendingFeedback(null);
+        setOwnedBookingsError('');
+        try {
+          clearPendingReceiptUploads(recoveryStorage, previousOwner === null ? next : null);
+          clearPendingBookings(recoveryStorage, previousOwner === null ? next : null);
+          clearPendingFeedback(recoveryStorage, previousOwner === null ? next : null);
+        } catch {
+          setOwnedBookingsError('Private recovery storage is unavailable. Keep this tab open and restore browser session storage before signing in again. Contact staff to check any unconfirmed request.');
+          return;
         }
-
-        if (resData) setReservations(resData as Reservation[]);
-
-        if (queueData) {
-          setQueue(queueData.map((q: any) => ({
-            ...q,
-            customerName: q.customerName || q.customer_name,
-            partySize: q.partySize || q.party_size,
-            arrivalTime: q.arrivalTime || q.arrival_time,
-            queueNumber: q.queueNumber || q.queue_number,
-          })) as QueueItem[]);
+        ownerRef.current = next;
+        ownerLoader.current.changeOwner(next);
+      }
+      setCustomerUser(next ? { id: next, name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Customer', email: user.email || '' } : null);
+      if (next) {
+        try { setPendingBooking(readPendingBooking(sessionStorage, next)); setPendingFeedback(readPendingFeedback(sessionStorage, next)); }
+        catch (error: any) {
+          ownerRef.current = null;
+          ownerLoader.current.changeOwner(null);
+          setCustomerUser(null); setPendingBooking(null); setPendingFeedback(null);
+          setOwnedBookingsError(error.message);
+          return;
         }
-
-        if (annData && annData.length > 0) {
-          setAnnouncements(annData.map((a: any) => ({
-            ...a,
-            id: a.id,
-            title: a.title,
-            content: a.content,
-            type: a.type || 'info',
-            isActive: a.isactive !== undefined ? (a.isactive === 1 || a.isactive === true || a.isactive === 'true') : (a.isActive === 1 || a.isActive === true || a.isActive === 'true'),
-            createdAt: a.createdat ? new Date(a.createdat) : (a.createdAt ? new Date(a.createdAt) : new Date()),
-            expiresAt: a.expiresat ? new Date(a.expiresat) : (a.expiresAt ? new Date(a.expiresAt) : undefined)
-          })) as Announcement[]);
-        }
-
-        if (closedDatesData && closedDatesData.length > 0) {
-          setClosedDates(closedDatesData.map((cd: any) => ({
-            ...cd,
-            id: cd.id,
-            date: cd.date,
-            reason: cd.reason,
-            isFullDay: cd.isfullday !== undefined ? (cd.isfullday === 1 || cd.isfullday === true) : (cd.is_full_day !== undefined ? (cd.is_full_day === 1 || cd.is_full_day === true) : cd.isFullDay),
-            openTime: cd.opentime || cd.open_time || cd.openTime,
-            closeTime: cd.closetime || cd.close_time || cd.closeTime,
-            dayOfWeek: cd.dayofweek ?? cd.day_of_week ?? cd.dayOfWeek,
-            type: cd.type || 'specific'
-          })) as ClosedDate[]);
-        }
-
-        if (promoData && promoData.length > 0) {
-          setPromoCodes(promoData.map((p: any) => {
-            const codeUpper = (p.code || '').trim().toUpperCase();
-            const usedInReservations = (resData || []).filter((r: any) => r.promoCode && r.promoCode.trim().toUpperCase() === codeUpper).length;
-            const currentUsage = Math.max(Number(p.usage_count ?? p.usagecount ?? p.usageCount ?? 0), usedInReservations);
-            const rawActive = p.is_active ?? p.isActive ?? p.isactive;
-            const isPromoActive = rawActive === 1 || rawActive === true || rawActive === 'true' || rawActive === undefined;
-            const rawLimited = p.is_limited_uses ?? p.isLimitedUses ?? p.islimiteduses;
-            const isLimited = rawLimited === 1 || rawLimited === true || rawLimited === 'true';
-            return {
-              ...p,
-              id: p.id,
-              code: codeUpper,
-              discountPercent: Number(p.discount_percent ?? p.discountpercent ?? p.discountPercent ?? 0),
-              description: p.description || '',
-              isActive: isPromoActive,
-              isLimitedUses: isLimited,
-              maxUsage: Number(p.max_usage ?? p.maxusage ?? p.maxUsage ?? 100),
-              usageCount: currentUsage,
-              startDate: p.start_date || p.startdate || p.startDate ? new Date(p.start_date || p.startdate || p.startDate) : undefined,
-              expiresAt: p.expires_at || p.expiresat || p.expiresAt ? new Date(p.expires_at || p.expiresat || p.expiresAt) : undefined,
-              createdAt: p.created_at || p.createdat || p.createdAt ? new Date(p.created_at || p.createdat || p.createdAt) : new Date()
-            };
-          }) as PromoCode[]);
-        }
-        
-        if (eventsData && eventsData.length > 0) {
-          const mappedEvents = eventsData.map((e: any) => ({
-            ...e,
-            id: e.id,
-            title: e.title,
-            date: e.date,
-            type: e.type,
-            description: e.description,
-            registrationLink: e.registrationlink || e.registration_link || e.registrationLink,
-            maxParticipants: e.maxparticipants ?? e.max_participants ?? e.maxParticipants,
-            slotsFull: e.slotsfull !== undefined ? (e.slotsfull === 1 || e.slotsfull === true) : e.slotsFull,
-            allowReservations: e.allowreservations !== undefined ? (e.allowreservations === 1 || e.allowreservations === true) : e.allowReservations,
-            caterWalkIns: e.caterwalkins !== undefined ? (e.caterwalkins === 1 || e.caterwalkins === true) : e.caterWalkIns,
-            walkInTableCount: e.walkintablecount ?? e.walk_in_table_count ?? e.walkInTableCount,
-            promoCodeId: e.promocodeid || e.promo_code_id || e.promoCodeId
-          }));
-          setEvents(prev => {
-            const existingIds = new Set(prev.map(ev => ev.id));
-            const newEvents = mappedEvents.filter((ev: any) => !existingIds.has(ev.id));
-            return [...prev, ...newEvents];
-          });
-        }
-
-        if (cmsData && cmsData.length > 0) {
-          const configObj = cmsData.reduce((acc: any, curr: any) => {
-            const key = curr.keyname || curr.key_name || curr.keyName;
-            const val = curr.settingvalue !== undefined ? curr.settingvalue : (curr.setting_value !== undefined ? curr.setting_value : (curr.content_value !== undefined ? curr.content_value : curr.settingValue));
-            if (key) acc[key] = val;
-            return acc;
-          }, {});
-          setSiteConfig((prev: any) => ({ ...prev, ...configObj }));
-        }
-
-        if (settingsData && settingsData.length > 0) {
-          const settingsObj = settingsData.reduce((acc: any, curr: any) => { 
-            const rawKey = curr.keyname || curr.key_name || curr.keyName;
-            if (!rawKey) return acc;
-            let val = curr.settingvalue !== undefined ? curr.settingvalue : (curr.setting_value !== undefined ? curr.setting_value : (curr.content_value !== undefined ? curr.content_value : curr.settingValue));
-            if (val === 'true' || val === true || val === '1' || val === 1) val = true;
-            else if (val === 'false' || val === false || val === '0' || val === 0) val = false;
-            else if (val !== null && val !== undefined && !isNaN(val) && String(val).trim() !== '' && !String(val).includes(':')) val = Number(val);
-            
-            acc[rawKey] = val;
-            const camelKey = rawKey.replace(/_([a-z])/g, (_: string, letter: string) => letter.toUpperCase());
-            acc[camelKey] = val;
-            const lower = rawKey.toLowerCase();
-            if (lower === 'isweekdayhappyhouractive') acc.isWeekdayHappyHourActive = Boolean(val);
-            if (lower === 'weekdayhappyhourrate') acc.weekdayHappyHourRate = Number(val) || 0;
-            if (lower === 'weekdayhappyhourstart') acc.weekdayHappyHourStart = String(val);
-            if (lower === 'weekdayhappyhourend') acc.weekdayHappyHourEnd = String(val);
-            if (lower === 'isweekendhappyhouractive') acc.isWeekendHappyHourActive = Boolean(val);
-            if (lower === 'weekendhappyhourrate') acc.weekendHappyHourRate = Number(val) || 0;
-            if (lower === 'weekendhappyhourstart') acc.weekendHappyHourStart = String(val);
-            if (lower === 'weekendhappyhourend') acc.weekendHappyHourEnd = String(val);
-            return acc; 
-          }, {});
-          
-          setRates(prev => ({ ...prev, ...settingsObj }));
-          setReservationTerms(prev => ({ ...prev, ...settingsObj }));
-        }
-
-        if (feedbackData && feedbackData.length > 0) {
-          setFeedback(feedbackData.map((f: any) => ({
-            id: f.id,
-            customerName: f.customerName || f.customer_name || 'Guest',
-            contactInfo: f.contactInfo || f.contact_info || '',
-            rating: Number(f.rating || 0),
-            feedbackType: f.feedbackType || f.feedback_type || 'suggestion',
-            comment: f.comment || '',
-            date: f.date ? new Date(f.date) : new Date(),
-            reservationId: f.reservationId || f.reservation_id,
-            tags: Array.isArray(f.tags) ? f.tags : (typeof f.tags === 'string' ? JSON.parse(f.tags || '[]') : [])
-          })) as Feedback[]);
-        }
-
-      } catch (err) {
-        console.error("Failed to sync with Supabase:", err);
-      } finally { 
-        if (isInitial) {
-          setTimeout(() => setIsInitializing(false), 800); 
-        }
+        setTimeout(() => { if (!stopped && ownerRef.current === next) void refreshOwnedBookings(); }, 0);
       }
     };
-    
-    // Initial fetch
-    fetchSupabaseData(true);
-
-    // 🟢 Realtime sync across all live tables (tables, reservations, queue, promo_codes, settings, announcements)
-    const channelName = `realtime_site_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    const realtimeChannel = supabase.channel(channelName);
-
-    realtimeChannel
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'system_settings' }, (payload: any) => {
-        if (payload.new) {
-          const row = payload.new;
-          const rawKey = row.key_name || row.keyname || row.keyName;
-          if (!rawKey) return;
-          let val = row.setting_value !== undefined ? row.setting_value : row.settingvalue;
-          if (val === 'true' || val === true || val === '1' || val === 1) val = true;
-          else if (val === 'false' || val === false || val === '0' || val === 0) val = false;
-          else if (val !== null && val !== undefined && !isNaN(val) && String(val).trim() !== '' && !String(val).includes(':')) val = Number(val);
-
-          const updates: Record<string, any> = { [rawKey]: val };
-          const camelKey = rawKey.replace(/_([a-z])/g, (_: string, letter: string) => letter.toUpperCase());
-          updates[camelKey] = val;
-
-          const lower = rawKey.toLowerCase();
-          if (lower === 'isweekdayhappyhouractive') updates.isWeekdayHappyHourActive = Boolean(val);
-          if (lower === 'weekdayhappyhourrate') updates.weekdayHappyHourRate = Number(val) || 0;
-          if (lower === 'weekdayhappyhourstart') updates.weekdayHappyHourStart = String(val);
-          if (lower === 'weekdayhappyhourend') updates.weekdayHappyHourEnd = String(val);
-          if (lower === 'isweekendhappyhouractive') updates.isWeekendHappyHourActive = Boolean(val);
-          if (lower === 'weekendhappyhourrate') updates.weekendHappyHourRate = Number(val) || 0;
-          if (lower === 'weekendhappyhourstart') updates.weekendHappyHourStart = String(val);
-          if (lower === 'weekendhappyhourend') updates.weekendHappyHourEnd = String(val);
-
-          setRates(prev => ({ ...prev, ...updates }));
-          setReservationTerms(prev => ({ ...prev, ...updates }));
-        }
-        fetchSupabaseData(false);
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tables' }, () => {
-        fetchSupabaseData(false);
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'reservations' }, () => {
-        fetchSupabaseData(false);
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'queue' }, () => {
-        fetchSupabaseData(false);
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'promo_codes' }, () => {
-        fetchSupabaseData(false);
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'announcements' }, () => {
-        fetchSupabaseData(false);
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'closed_dates' }, () => {
-        fetchSupabaseData(false);
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'events' }, () => {
-        fetchSupabaseData(false);
-      })
-      .subscribe();
-
-    // 🟢 Silent periodic background polling fallback (every 7 seconds) so site never misses any local/remote state updates
-    const pollInterval = setInterval(() => {
-      fetchSupabaseData(false);
-    }, 7000);
-
-    return () => {
-      clearInterval(pollInterval);
-      supabase.removeChannel(realtimeChannel);
-    };
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      observedAuth = true;
+      if (!stopped) adopt(session?.user);
+    });
+    supabase.auth.getUser().then(({ data, error }) => { if (!stopped && !observedAuth) adopt(error ? null : data.user); });
+    void refreshLiveMonitor().finally(() => { if (!stopped) setIsInitializing(false); });
+    const refresh = () => { if (document.visibilityState === 'visible') { void refreshLiveMonitor(); void refreshOwnedBookings(); } };
+    const interval = setInterval(refresh, 15000);
+    document.addEventListener('visibilitychange', refresh);
+    return () => { stopped = true; availabilitySequence.current++; ownerLoader.current.changeOwner(null); clearInterval(interval); document.removeEventListener('visibilitychange', refresh); listener.subscription.unsubscribe(); };
   }, []);
 
   useEffect(() => {
@@ -556,132 +327,52 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const fetchedHolidays: Event[] = data.map((item: any) => ({
           id: `hol_${item.date}`, title: item.name, date: item.date, type: 'Holiday', description: `Nationwide Public Holiday. ML predicts high walk-in traffic and extended play duration.`,
         }));
-        setEvents(prev => {
-          const existingIds = new Set(prev.map(e => e.id));
-          const newHolidays = fetchedHolidays.filter(h => !existingIds.has(h.id));
-          return [...prev, ...newHolidays];
-        });
+        setHolidays(fetchedHolidays);
       } catch (err) {}
     };
     fetchHolidays();
   }, []);
 
-  const addReservation = async (i: Omit<Reservation, 'id'|'createdAt'>): Promise<string> => {
-    const id = Math.random().toString(36).substring(2, 8).toUpperCase();
-    const newRes = { ...i, id, createdAt: new Date() };
-    
-    setReservations(prev => [...prev, newRes as Reservation]);
-    
-    const dateFormatted = typeof newRes.date === 'string'
-      ? newRes.date.split('T')[0]
-      : `${newRes.date.getFullYear()}-${String(newRes.date.getMonth() + 1).padStart(2, '0')}-${String(newRes.date.getDate()).padStart(2, '0')}`;
-
-    // 🟢 Map payload to match the Supabase schema using publicSupabase to bypass user-token RLS
-    const supabasePayload = {
-      id: newRes.id,
-      customerName: newRes.customerName,
-      contactNumber: newRes.contactNumber,
-      email: newRes.email ? newRes.email.trim() : null,
-      date: dateFormatted,
-      timeSlot: newRes.timeSlot,
-      durationHours: newRes.durationHours,
-      partySize: newRes.partySize,
-      tableId: newRes.tableId || null,
-      status: newRes.status,
-      totalAmount: newRes.totalAmount,
-      downPaymentAmount: newRes.downPaymentAmount,
-      downPaymentPaid: newRes.downPaymentPaid ? 1 : 0,
-      balancePaid: newRes.balancePaid ? 1 : 0,
-      paymentRef: newRes.paymentRef || null,
-      receiptImg: newRes.receiptImg || null,
-      promoCode: newRes.promoCode || null,
-      discountAmount: newRes.discountAmount || 0,
-      createdAt: newRes.createdAt.toISOString()
-    };
-    
-    try {
-      const { error } = await publicSupabase.from('reservations').insert([supabasePayload]);
-      if (error) {
-        console.warn("Primary Supabase reservation insert note:", error.message);
-        // Fallback with minimal columns if an optional column constraint failed
-        await publicSupabase.from('reservations').insert([{
-          id: newRes.id,
-          customerName: newRes.customerName,
-          contactNumber: newRes.contactNumber,
-          email: newRes.email ? newRes.email.trim() : null,
-          date: dateFormatted,
-          timeSlot: newRes.timeSlot,
-          durationHours: newRes.durationHours,
-          partySize: newRes.partySize,
-          status: newRes.status,
-          totalAmount: newRes.totalAmount,
-          downPaymentAmount: newRes.downPaymentAmount,
-          downPaymentPaid: newRes.downPaymentPaid ? 1 : 0,
-          balancePaid: 0,
-          createdAt: new Date().toISOString()
-        }]);
-      }
-    } catch (insertErr) {
-      console.error("Supabase insert exception:", insertErr);
-    }
-
-    // 🟢 Increment promo code redemption usage count
-    if (newRes.promoCode) {
-      const pCode = newRes.promoCode.trim().toUpperCase();
-      const targetPromo = promoCodes.find(p => p.code.trim().toUpperCase() === pCode);
-      if (targetPromo) {
-        const nextCount = (targetPromo.usageCount || 0) + 1;
-        setPromoCodes(prev => prev.map(p => p.id === targetPromo.id ? { ...p, usageCount: nextCount } : p));
-        publicSupabase
-          .from('promo_codes')
-          .update({ usage_count: nextCount })
-          .eq('id', targetPromo.id)
-          .then(({ error }) => {
-            if (error) {
-              publicSupabase.from('promo_codes').update({ usageCount: nextCount }).eq('id', targetPromo.id);
-            }
-          });
-      }
-    }
-    
-    return id;
+  const applySavedReservation = (saved: Pick<Reservation, 'id'> & Partial<Reservation>) => {
+    setReservations(prev => prev.map(r => r.id === saved.id ? { ...r, ...saved } : r));
   };
 
-  const addFeedback = (i: Omit<Feedback, 'id'|'date'>) => {
-    const newFeedback = { ...i, id: `f${Date.now()}`, date: new Date() };
-    setFeedback(prev => [newFeedback as Feedback, ...prev]);
-    
+  const executeBooking = async (kind: 'create' | 'reschedule' | 'cancel', input: any, retry = false): Promise<Reservation> => {
+    const expectedOwner = ownerRef.current;
+    const expectedEpoch = authEpoch.current;
+    if (!expectedOwner) throw new Error('Sign in with a verified customer account before booking.');
     try {
-      const stored = JSON.parse(localStorage.getItem('oneshot_local_feedback') || '[]');
-      stored.unshift(newFeedback);
-      localStorage.setItem('oneshot_local_feedback', JSON.stringify(stored.slice(0, 50)));
-    } catch (e) {}
+      const saved = await submitTrustedBooking(supabase, kind, input, sessionStorage, { retry, expectedOwnerId: expectedOwner, isCurrentOwner: () => ownerRef.current === expectedOwner && authEpoch.current === expectedEpoch });
+      if (ownerRef.current !== expectedOwner || authEpoch.current !== expectedEpoch) throw new Error('Your account changed. Sign in again to review the booking result.');
+      setReservations(prev => [saved, ...prev.filter(row => row.id !== saved.id)]);
+      await refreshLiveMonitor();
+      return saved;
+    } finally {
+      if (ownerRef.current === expectedOwner && authEpoch.current === expectedEpoch) setPendingBooking(readPendingBooking(sessionStorage, expectedOwner));
+    }
+  };
+  const addReservation = (input: any) => executeBooking('create', input);
+  const changeBooking = (kind: 'reschedule' | 'cancel', input: any) => executeBooking(kind, input);
+  const retryPendingBooking = async () => {
+    const pending = readPendingBooking(sessionStorage, ownerRef.current);
+    if (!pending) throw new Error('No pending booking request.');
+    return executeBooking(pending.kind, pending.input, true);
+  };
 
-    const supabasePayload = {
-      id: newFeedback.id,
-      customerName: newFeedback.customerName,
-      contactInfo: newFeedback.contactInfo || '',
-      feedbackType: newFeedback.feedbackType || 'suggestion',
-      comment: newFeedback.comment,
-      reservationId: newFeedback.reservationId || null,
-      tags: Array.isArray(newFeedback.tags) ? newFeedback.tags : [],
-      status: 'pending',
-      date: new Date().toISOString()
-    };
-
-    // 1. Sync to Cloud Supabase
-    publicSupabase.from('feedback').insert([supabasePayload]).then(({ error }) => {
-      if (error) console.warn("Feedback cloud sync info:", error.message);
-    }).catch(e => console.warn("Feedback network note:", e));
-
-    // 2. Direct sync to local POS / machine edge server if available
+  const addFeedback = async (input: any, options: { allowEmail?: boolean; retry?: boolean } = {}) => {
+    const expectedOwner = ownerRef.current;
+    const expectedEpoch = authEpoch.current;
+    if (!expectedOwner) throw new Error('Sign in with a verified customer account to send feedback.');
     try {
-      fetch('/api/feedback', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(supabasePayload)
-      }).catch(() => {});
-    } catch (e) {}
+      return await submitFeedback(supabase, input, { ...options, storage: sessionStorage, expectedOwnerId: expectedOwner, isCurrentOwner: () => ownerRef.current === expectedOwner && authEpoch.current === expectedEpoch });
+    } finally {
+      if (ownerRef.current === expectedOwner && authEpoch.current === expectedEpoch) setPendingFeedback(readPendingFeedback(sessionStorage, expectedOwner));
+    }
+  };
+  const retryPendingFeedback = async () => {
+    const pending = readPendingFeedback(sessionStorage, ownerRef.current);
+    if (!pending) throw new Error('No pending feedback request.');
+    return addFeedback(pending.input, { allowEmail: true, retry: true });
   };
 
   const applyPromoCode = (code: string) => {
@@ -689,19 +380,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const now = new Date().getTime();
     return promoCodes.find(p => {
       if (!p.code || p.code.trim().toUpperCase() !== cleanCode) return false;
-      if (!p.isActive) return false;
-      if (p.startDate && new Date(p.startDate).getTime() > now + 86400000) return false; 
+      if (!p.isActive || !Number.isFinite(p.discountPercent) || p.discountPercent < 0 || p.discountPercent > 100) return false;
+      if (p.startDate && new Date(p.startDate).getTime() > now) return false;
       if (p.expiresAt && new Date(p.expiresAt).getTime() < now) return false; 
       if (p.isLimitedUses && p.usageCount >= p.maxUsage) return false; 
       return true;
     }) || null;
-  };
-
-  const acknowledgeRefund = (id: string) => {
-    setReservations(prev => prev.map(r => r.id === id ? { ...r, refundStatus: 'acknowledged' } as Reservation : r));
-    publicSupabase.from('reservations').update({ refundStatus: 'acknowledged' }).eq('id', id).then(({ error }) => {
-      if (error) console.error("Error updating refund status:", error);
-    });
   };
 
   if (isInitializing) {
@@ -719,12 +403,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   return (
     <AppContext.Provider value={{
-      tables, queue, reservations, promoCodes, rates, reservationTerms, announcements, closedDates, weather, updateWeatherLocation,
+      tables, bookingBusy, customerUser, pendingBooking, pendingFeedback, retryPendingFeedback, ownedBookingsError, refreshOwnedBookings, retryPendingBooking, changeBooking, bookingDataReady, queueWaitingCount, queue, reservations, promoCodes, rates, reservationTerms, announcements, closedDates, weather, updateWeatherLocation,
       activeAnnouncement, updateActiveAnnouncement, siteConfig, events,
-      addReservation, addFeedback, applyPromoCode, refreshLiveMonitor,
-      acknowledgeRefund, validateBookingPreflight
+      addReservation, applySavedReservation, addFeedback, applyPromoCode, refreshLiveMonitor
     }}>
-      {children}
+      <Fragment key={customerUser?.id || 'guest'}>{children}</Fragment>
     </AppContext.Provider>
   );
 }
