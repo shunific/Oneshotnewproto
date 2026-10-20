@@ -3,3 +3,6 @@ node_modules
 oneshot.db
 *.db
 .env.tester*
+
+# Local browser automation may contain private session data.
+.playwright-cli/

@@ -1,0 +1,83 @@
+{
+  "receipts": [
+    {
+      "claimId": "6530c189-bdfe-49be-b56d-a389e52d23de",
+      "eventId": "44c1e192-2420-40f2-9486-08cdddc57f47",
+      "history": {
+        "id": "610c3d03-1e88-4899-bc8e-1868ecf5dccd",
+        "orders": [
+          {
+            "id": "qa-proof-drink",
+            "qty": 1,
+            "name": "QA proof drink",
+            "price": 25
+          }
+        ],
+        "status": "ended_early",
+        "endTime": "2026-10-19T14:16:49.506Z",
+        "tableId": "LOCAL-1",
+        "partySize": 2,
+        "startTime": "2026-10-19T14:16:49.362Z",
+        "tableName": "QA proof table",
+        "amountPaid": 226,
+        "totalAmount": 226,
+        "customerName": "QA Lifecycle",
+        "closureReason": "Checkout committed with payment and receipt.",
+        "durationMinutes": 0
+      },
+      "receipt": {
+        "id": "610c3d03-1e88-4899-bc8e-1868ecf5dccd",
+        "subtotal": 326.01,
+        "table_id": "LOCAL-1",
+        "created_at": "2026-10-19T14:16:49.506Z",
+        "fnb_charge": 25,
+        "receipt_no": "REC-610c3d03-1e88-4899-bc8e-1868ecf5dccd",
+        "refund_due": 0,
+        "table_name": "QA proof table",
+        "table_rate": null,
+        "amount_paid": 226,
+        "balance_due": 0,
+        "void_reason": null,
+        "table_charge": 301.01,
+        "total_amount": 226,
+        "customer_name": "QA Lifecycle",
+        "overtime_rate": 300,
+        "owner_user_id": "33333333-3333-4333-8333-333333333333",
+        "play_end_time": "2026-10-19T14:16:49.506Z",
+        "refund_status": "none",
+        "void_actor_id": null,
+        "customer_email": "owner@example.invalid",
+        "customer_phone": "09123456789",
+        "payment_method": "cash",
+        "payment_status": "paid",
+        "reservation_id": "QA-LIFECYCLE-1",
+        "discount_amount": 100.01,
+        "original_amount": 226,
+        "overtime_charge": 0,
+        "play_start_time": "2026-10-19T14:16:49.362Z",
+        "pricing_version": 2,
+        "void_actor_name": null,
+        "duration_minutes": 0,
+        "overtime_minutes": 0,
+        "payment_reference": null,
+        "reservation_claim_id": "6530c189-bdfe-49be-b56d-a389e52d23de",
+        "booking_discount_amount": 100.01
+      },
+      "receiptId": "610c3d03-1e88-4899-bc8e-1868ecf5dccd",
+      "acceptedAt": "2026-10-19T14:16:55.228Z",
+      "settlement": {
+        "allocation": "full-bill-settled",
+        "refundDueCents": 0,
+        "remainingCents": 0,
+        "grandTotalCents": 22600,
+        "bookingFullyCovered": true,
+        "nativeCollectedNowCents": 18580,
+        "originalVerifiedBookingCreditCents": 4020
+      },
+      "ownerUserId": "33333333-3333-4333-8333-333333333333",
+      "reservationId": "QA-LIFECYCLE-1"
+    }
+  ],
+  "recordType": "owner-linked-final-receipt",
+  "fundsTransferred": false
+}
