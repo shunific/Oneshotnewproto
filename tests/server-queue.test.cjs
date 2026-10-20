@@ -119,17 +119,17 @@ test('successful add/call/remove save filter-compatible actor activities atomica
  // Exercise the actual Activity Log's existing module and actor extractors.
  const fs=require('node:fs'),vm=require('node:vm');const source=fs.readFileSync(path.resolve(__dirname,'../src/app/pages/ActivityLog.tsx'),'utf8');
  const category=source.slice(source.indexOf('  const categoryMap:'),source.indexOf('  const cleanDescription')).replace(': Record<string, ActivityType[]>','').replace('(description: string)','(description)');
- const filters=vm.runInNewContext(category+';({categoryMap,getActor})');
+ const filters=vm.runInNewContext(require('esbuild').transformSync(category+';({categoryMap,getActor})',{loader:'ts'}).code);
  for(const [index,row]of activities.entries()){
-  assert.ok(filters.categoryMap['Queue System'].includes(row.type));assert.equal(filters.getActor(row.description),'QA Cashier');assert.equal(row.timestamp,'2026-10-19T06:00:00.000Z');
-  assert.deepEqual(JSON.parse(row.metadata),{actorId:'qa_staff_a',requestId:[add,call,remove][index].requestId,queueId:queue.id});assert.equal(row.id,`act_queue_${[add,call,remove][index].requestId}_${row.type}`);
+  assert.ok(filters.categoryMap['Queue System'].includes(row.type));assert.equal(filters.getActor({...row,metadata:JSON.parse(row.metadata)}),'QA Cashier');assert.equal(row.timestamp,'2026-10-19T06:00:00.000Z');
+  assert.deepEqual(JSON.parse(row.metadata),{actorId:'qa_staff_a',actorName:'QA Cashier',requestId:[add,call,remove][index].requestId,queueId:queue.id});assert.equal(row.id,`act_queue_${[add,call,remove][index].requestId}_${row.type}`);
  }
  const rejected=await f.call({requestId:'qa_activity_stale',kind:'remove',queueId:queue.id,expectedQueue:queue});assert.equal(rejected.status,409);await f.call({requestId:'qa_activity_stale',kind:'remove',queueId:queue.id,expectedQueue:queue});assert.equal((await f.all('activities')).length,3);
 });
 test('seating saves queue removal and table assignment once with original actor and timestamp despite lost response and restart',async t=>{
  const f=await fixture(t),queue=await f.newRow(),command=f.seat(queue);f.auth.failAfterCommit=true;assert.equal((await f.call(command)).status,503);await f.restart();const replay=await f.call(command);assert.equal(replay.status,200);assert.equal(replay.body.replayed,true);
  const activities=(await f.all('activities')).filter(row=>JSON.parse(row.metadata).requestId===command.requestId);assert.deepEqual(activities.map(row=>row.type),['queue_removed','table_assigned']);
- for(const row of activities){assert.deepEqual(JSON.parse(row.metadata),{actorId:'qa_staff_a',requestId:command.requestId,queueId:queue.id,tableId:'a'});assert.equal(row.timestamp,replay.body.table.session.startTime);assert.match(row.description,/QA queue customer/);assert.match(row.description,/\(Action by: QA Cashier\)$/);}
+ for(const row of activities){assert.deepEqual(JSON.parse(row.metadata),{actorId:'qa_staff_a',actorName:'QA Cashier',requestId:command.requestId,queueId:queue.id,tableId:'a'});assert.equal(row.timestamp,replay.body.table.session.startTime);assert.match(row.description,/QA queue customer/);assert.match(row.description,/\(Action by: QA Cashier\)$/);}
  f.auth.id='qa_staff_b';assert.equal((await f.call(command)).status,403);assert.equal((await f.all('activities')).length,3);
 });
 test('activity insertion and later journal failures roll back queue, table, payment and activity writes together',async t=>{

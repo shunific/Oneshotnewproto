@@ -189,8 +189,8 @@ type AppContextType = {
   siteConfig: any; updateSiteConfig: (config: any) => Promise<any>; pendingCmsSave: any; cmsSaveError: string; retryCmsSave: () => Promise<any>; refreshCmsConfig: () => Promise<any>; refreshLiveMonitor: () => void;
   lostItems: LostItem[];
   addLostItem: (i: Omit<LostItem, 'id'>) => Promise<void>;
-  updateLostItem: (id: string, u: Partial<LostItem>) => void;
-  deleteLostItem: (id: string) => void;
+  updateLostItem: (id: string, u: Partial<LostItem>) => Promise<void>;
+  deleteLostItem: (id: string) => Promise<void>;
   watchlist: WatchlistItem[];
   addWatchlistItem: (i: Omit<WatchlistItem, 'id'>) => Promise<void>;
   updateWatchlistItem: (id: string, u: Partial<WatchlistItem>) => Promise<void>;
@@ -461,7 +461,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       throw localRequestError(res.status,json);
   };
 
-  const addActivity = (type: ActivityType, description: string, metadata?: Record<string, any>) => {
+  const addActivity = async (type: ActivityType, description: string, metadata?: Record<string, any>) => {
+    const owner=identityRef.current,epoch=identityGeneration.current;
+    const isCurrent=()=>!!owner&&!authMutationInFlight.current&&identityRef.current===owner&&identityGeneration.current===epoch;
+    if(!isCurrent())return;
     const actor = staffProfile?.fullName || 'System / Customer';
     const actorId = staffProfile?.id || 'system';
     const detailedDescription = `${description} (Action by: ${actor})`;
@@ -472,8 +475,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       timestamp: new Date(),
       metadata: { ...metadata, actorId }
     };
-    setActivities(prev => [newActivity, ...prev]);
-    syncToDB('/api/activities', 'POST', newActivity, "Activity logged").then(runCloudBackup).catch(()=>{});
+    try {
+      const saved=await syncToDB('/api/activities','POST',newActivity,'Activity logged');
+      if(!isCurrent())return;
+      if(saved?.id!==newActivity.id||saved.type!==type||typeof saved.description!=='string'||!Number.isFinite(Date.parse(saved.timestamp))||saved.metadata?.actorId!==owner)throw new Error('Activity save acknowledgement is invalid.');
+      setActivities(prev=>isCurrent()?[saved,...prev.filter(item=>item.id!==saved.id)]:prev);
+    } catch {
+      if(isCurrent())toast.warning('Activity log save was not confirmed. Refresh the Activity Log to check it.');
+    }
   };
 
   const updateTableState = async (tableId: string, updates: any) => {
@@ -606,20 +615,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const isCurrent=()=>!!owner&&!authMutationInFlight.current&&identityRef.current===owner&&identityGeneration.current===epoch;
     if(!isCurrent()) throw new Error('Sign in before saving a lost item.');
     const newItem = { ...i, id: `lf_${crypto.randomUUID()}` };
-    await syncToDB('/api/lost-and-found', 'POST', newItem, `Added lost item`);
+    const saved=await syncToDB('/api/lost-and-found', 'POST', newItem, `Added lost item`);
     if(!isCurrent()) throw new Error('Account changed. Refresh lost and found to check the saved item.');
-    setLostItems(prev => [newItem, ...prev]);
+    if(saved?.id!==newItem.id||saved.record?.id!==newItem.id||Object.entries(JSON.parse(JSON.stringify(newItem))).some(([key,value])=>JSON.stringify(saved.record[key])!==JSON.stringify(value)))throw new Error('Lost-item save was not confirmed. Refresh before creating another item.');
+    setLostItems(prev => isCurrent()?[saved.record, ...prev]:prev);
     addActivity('admin_action', `Added lost item: ${i.itemName}`);
     runCloudBackup();
   };
-  const updateLostItem = (id: string, u: Partial<LostItem>) => {
-    setLostItems(prev => prev.map(i => i.id === id ? { ...i, ...u } : i));
-    syncToDB(`/api/lost-and-found/${id}`, 'PUT', u, `Updated lost item`).then(runCloudBackup).catch(()=>{});
+  const saveLostTransition = async (id: string, patch: Partial<LostItem> | null) => {
+    const owner=identityRef.current,epoch=identityGeneration.current;
+    const isCurrent=()=>!!owner&&!authMutationInFlight.current&&identityRef.current===owner&&identityGeneration.current===epoch;
+    if(!isCurrent())throw new Error('Sign in before changing a lost item.');
+    const original=lostItems.find(item=>item.id===id);
+    if(!original)throw new Error('Lost item is missing. Refresh before changing it.');
+    const expectedRecord=JSON.parse(JSON.stringify(original)),reviewedPatch=patch?JSON.parse(JSON.stringify(patch)):null;
+    try {
+      const saved=await syncToDB(`/api/lost-and-found/${encodeURIComponent(id)}`,patch?'PUT':'DELETE',{expectedRecord,...(patch?{patch:reviewedPatch}:{})},'Lost-item change saved');
+      if(!isCurrent())throw new Error('Account changed. Reload lost and found.');
+      const expected={...expectedRecord,...(reviewedPatch||{isArchived:true})};
+      if(saved?.id!==id||!saved.record||Object.keys(expected).some(key=>JSON.stringify(saved.record[key])!==JSON.stringify(expected[key])))throw new Error('Saved lost-item details did not match the reviewed action.');
+      setLostItems(prev=>isCurrent()?prev.map(item=>item.id===id?saved.record:item):prev);
+    } catch(error) {
+      if(isCurrent())try{const response=await localFetch('http://localhost:3001/api/lost-and-found');if(response.ok){const rows=await response.json();if(Array.isArray(rows)&&isCurrent())setLostItems(prev=>isCurrent()?rows:prev);}}catch{/* The error below keeps the action unconfirmed. */}
+      throw new Error((error instanceof Error?error.message:'Lost-item change was not confirmed.')+' Review the saved record before retrying.');
+    }
   };
-  const deleteLostItem = (id: string) => {
-    setLostItems(prev => prev.map(i => i.id === id ? { ...i, isArchived: true } : i));
-    syncToDB(`/api/lost-and-found/${id}`, 'DELETE', {}, `Archived lost item`).then(runCloudBackup).catch(()=>{});
-  };
+  const updateLostItem = (id: string, u: Partial<LostItem>) => saveLostTransition(id,u);
+  const deleteLostItem = (id: string) => saveLostTransition(id,null);
 
   const addWatchlistItem = async (i: Omit<WatchlistItem, 'id'>) => {
     const owner=identityRef.current,epoch=identityGeneration.current;

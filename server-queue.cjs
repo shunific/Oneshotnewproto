@@ -86,11 +86,11 @@ async function saveOperation(db,actor,command,response,status,createdAt){
 }
 async function saveQueueActivities(db,actor,staff,command,response,createdAt){
  const actorName=staff?.id===actor.localStaffId&&(staff.fullName||staff.username)||actor.localStaffId;
- // Keep the Activity Log's existing actor filter syntax, including for unusual staff names.
+ // Metadata carries authoritative attribution; descriptions remain human-readable.
  const display=value=>String(value).replace(/[()\r\n]/g,' ').trim();
  const displayActor=display(actorName),guest=display(response.queue?.customerName||command.expectedQueue?.customerName),tableId=display(command.tableId);
  const events=command.kind==='add'?[['queue_added',`Added ${guest} to the queue.`]]:command.kind==='call'?[['queue_called',`Called ${guest} from the queue.`]]:command.kind==='remove'?[['queue_removed',`Removed ${guest} from the queue.`]]:[['queue_removed',`Seated ${guest} from the queue at table ${tableId}.`],['table_assigned',`Assigned table ${tableId} to ${guest} from the queue.`]];
- const metadata=JSON.stringify({actorId:actor.localStaffId,requestId:command.requestId,queueId:response.queueId,...(command.kind==='seat'?{tableId:command.tableId}:{})});
+ const metadata=JSON.stringify({actorId:actor.localStaffId,actorName,requestId:command.requestId,queueId:response.queueId,...(command.kind==='seat'?{tableId:command.tableId}:{})});
  for(const [type,description]of events)await one(db,'INSERT INTO activities (id,type,description,timestamp,metadata) VALUES(?,?,?,?,?)',[`act_queue_${command.requestId}_${type}`,type,`${description} (Action by: ${displayActor})`,createdAt,metadata]);
 }
 function registerQueueRoutes(app,dbPath,{requireAuth,resolveActor,isActorCurrent,now=Date.now,readyBefore=Promise.resolve()}={}){

@@ -258,7 +258,7 @@ app.use('/api', (req, res, next) => {
 });
 const editableColumns = {
   watchlist: ['name', 'reason', 'description', 'status', 'evidenceLink', 'resolvedDate', 'isArchived'],
-  'lost-and-found': ['itemName', 'description', 'foundDate', 'status', 'image', 'claimedBy', 'claimedDate', 'isArchived'],
+  'lost-and-found': ['expectedRecord', 'patch'],
   announcements: ['title', 'content', 'type', 'isActive', 'expiresAt', 'startDate'],
   feedback: ['status', 'notes', 'expectedActorId'],
   reservations: ['customerName', 'contactNumber', 'email', 'date', 'timeSlot', 'durationHours', 'partySize', 'tableId', 'status', 'totalAmount', 'downPaymentAmount', 'downPaymentPaid', 'balancePaid', 'paymentRef', 'receiptImg', 'cancellationReason', 'refundStatus', 'refundMethod', 'refundNotes', 'promoCode', 'discountAmount', 'closureReason', 'closureId', 'originalReservationId', 'rescheduleCount', 'lastNotificationId'],
@@ -512,10 +512,10 @@ app.post('/api/cache-reservations', (req, res) => {
 
 app.post('/api/lost-and-found', (req, res) => {
   const { id, itemName, description, foundDate, status, image, claimedBy, claimedDate } = req.body;
-  db.run(`INSERT INTO lost_and_found (id, itemName, description, foundDate, status, image, claimedBy, claimedDate, isArchived) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`,
-  [id, itemName, description, foundDate, status, image, claimedBy, claimedDate], function(err) {
+  db.get(`INSERT INTO lost_and_found (id, itemName, description, foundDate, status, image, claimedBy, claimedDate, isArchived) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0) RETURNING *`,
+  [id, itemName, description, foundDate, status, image, claimedBy, claimedDate], function(err,row) {
     if (err) return res.status(500).json({ error: err.message });
-    res.status(201).json({ message: "Lost item added." });
+    res.status(201).json({id:row.id,record:{...row,isArchived:row.isArchived===1}});
   });
 });
 
@@ -652,31 +652,36 @@ app.delete('/api/watchlist/:id', (req, res) => {
   });
 });
 
-app.put('/api/lost-and-found/:id', (req, res) => {
-  const updates = req.body;
-  const keys = Object.keys(updates);
-  if (keys.length === 0) return res.json({ message: "Nothing to update" });
-
-  const setClause = keys.map((k) => `${k} = ?`).join(', ');
-  const values = keys.map((k) => {
-    const val = updates[k];
-    if (typeof val === 'boolean') return val ? 1 : 0;
-    return val;
+const lostRecordFields = ['id','itemName','description','foundDate','status','image','claimedBy','claimedDate','isArchived'];
+const lostRecord = row => ({ ...row, isArchived: row.isArchived === 1 });
+const validLostOriginal = (record, id) => record && typeof record === 'object' && !Array.isArray(record) &&
+  Object.keys(record).length === lostRecordFields.length && lostRecordFields.every(key => Object.hasOwn(record,key)) &&
+  record.id === id && typeof record.isArchived === 'boolean' && ['found','claimed'].includes(record.status) &&
+  ['itemName','description','foundDate'].every(key => typeof record[key] === 'string') &&
+  ['image','claimedBy','claimedDate'].every(key => record[key] === null || typeof record[key] === 'string');
+function saveLostTransition(req,res,archive) {
+  const original = req.body?.expectedRecord, patch = req.body?.patch;
+  if (!validLostOriginal(original,req.params.id) || Object.keys(req.body).some(key => !(archive ? ['expectedRecord'] : ['expectedRecord','patch']).includes(key))) return res.status(400).json({error:'Reload the original lost-item record before changing it.'});
+  let next;
+  if (archive) {
+    if (original.status !== 'found' || original.isArchived) return res.status(409).json({error:'Only an unclaimed, active item can be archived.'});
+    next = {...original,isArchived:true};
+  } else {
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch) || Object.keys(patch).length !== 4 || !['status','claimedBy','claimedDate','isArchived'].every(key=>Object.hasOwn(patch,key))) return res.status(400).json({error:'Review the complete claim or revert action.'});
+    const claim = patch.status === 'claimed' && original.status === 'found' && !original.isArchived && patch.isArchived === true && typeof patch.claimedBy === 'string' && patch.claimedBy.trim().length > 0 && patch.claimedBy.length <= 200 && typeof patch.claimedDate === 'string' && Number.isFinite(Date.parse(patch.claimedDate)) && new Date(patch.claimedDate).toISOString() === patch.claimedDate;
+    const revert = patch.status === 'found' && original.status === 'claimed' && patch.isArchived === false && patch.claimedBy === null && patch.claimedDate === null;
+    if (!claim && !revert) return res.status(400).json({error:'The claim or revert details are invalid.'});
+    next = {...original,...patch,...(claim ? {claimedBy:patch.claimedBy.trim()} : {})};
+  }
+  const parameters = [next.status,next.claimedBy,next.claimedDate,next.isArchived?1:0,...lostRecordFields.map(key=>key==='isArchived'?(original[key]?1:0):original[key])];
+  db.get(`UPDATE lost_and_found SET status=?,claimedBy=?,claimedDate=?,isArchived=? WHERE id IS ? AND itemName IS ? AND description IS ? AND foundDate IS ? AND status IS ? AND image IS ? AND claimedBy IS ? AND claimedDate IS ? AND isArchived IS ? RETURNING *`,parameters,(error,row)=>{
+    if (error) return res.status(503).json({error:'Lost-item change was not confirmed. Reload the record before retrying.'});
+    if (row) return res.json({id:row.id,record:lostRecord(row)});
+    db.get('SELECT id FROM lost_and_found WHERE id=?',[req.params.id],(_error,existing)=>res.status(_error?503:existing?409:404).json({error:'Lost-item record changed or is missing. Reload it before trying again.'}));
   });
-  values.push(req.params.id);
-
-  db.run(`UPDATE lost_and_found SET ${setClause} WHERE id = ?`, values, function(err) {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json({ message: "Lost and found updated." });
-  });
-});
-
-app.delete('/api/lost-and-found/:id', (req, res) => {
-  db.run(`UPDATE lost_and_found SET isArchived = 1 WHERE id = ?`, [req.params.id], function(err) {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json({ message: "Lost and found item archived." });
-  });
-});
+}
+app.put('/api/lost-and-found/:id', (req,res)=>saveLostTransition(req,res,false));
+app.delete('/api/lost-and-found/:id', (req,res)=>saveLostTransition(req,res,true));
 
 app.post('/api/reservations', (req, res) => {
   const { id, customerName, contactNumber, email, date, timeSlot, durationHours, partySize, status, totalAmount, downPaymentAmount, downPaymentPaid, balancePaid, paymentRef, receiptImg } = req.body;
@@ -782,16 +787,26 @@ app.delete('/api/promo-codes/:id', (req, res) => {
 
 app.post('/api/activities', (req, res) => {
   const { id, type } = req.body;
+  const inputMetadata = req.body.metadata;
+  if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(id) || typeof type !== 'string' || !/^[a-z][a-z0-9_]{0,79}$/.test(type) || typeof req.body.description !== 'string' || !req.body.description.trim() || req.body.description.length > 4000 || (inputMetadata !== undefined && (!inputMetadata || typeof inputMetadata !== 'object' || Array.isArray(inputMetadata))) || JSON.stringify(inputMetadata || {}).length > 20000) return res.status(400).json({error:'Activity details are invalid.'});
   const timestamp = new Date().toISOString();
   const description = String(req.body.description || '').replace(/ \(Action by:.*\)$/, '') + ` (Action by: ${req.staff.fullName})`;
   const metadata = { ...(req.body.metadata || {}), actorId: req.staff.id, actorName: req.staff.fullName };
   const metaStr = metadata ? JSON.stringify(metadata) : null;
-  db.run(
-    `INSERT OR IGNORE INTO activities (id, type, description, timestamp, metadata) VALUES (?, ?, ?, ?, ?)`,
+  db.get(
+    `INSERT INTO activities (id, type, description, timestamp, metadata) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING RETURNING *`,
     [id, type, description, timestamp, metaStr],
-    function (err) {
-      if (err) return res.status(500).json({ error: err.message });
-      res.status(201).json({ message: "Activity logged." });
+    function (err,row) {
+      if (err) return res.status(503).json({error:'Activity log save was not confirmed.'});
+      const respond = (saved,status) => res.status(status).json({...saved,metadata:JSON.parse(saved.metadata)});
+      if (row) return respond(row,201);
+      db.get('SELECT * FROM activities WHERE id=?',[id],(readError,saved)=>{
+        if (readError || !saved) return res.status(503).json({error:'Activity log save was not confirmed.'});
+        let previous; try { previous=JSON.parse(saved.metadata); } catch { return res.status(409).json({error:'The existing activity needs review.'}); }
+        const canonical = value => JSON.stringify(value,(_key,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.keys(item).sort().map(key=>[key,item[key]])):item);
+        if (saved.type !== type || saved.description !== description || canonical(previous) !== canonical(metadata)) return res.status(409).json({error:'Activity ID already belongs to different details.'});
+        respond(saved,200);
+      });
     }
   );
 });
