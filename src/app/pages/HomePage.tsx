@@ -652,6 +652,18 @@ export function HomePage() {
 
   const maxAllowedDuration = getMaxDuration();
 
+  const minAllowedTime = useMemo(() => {
+    if (!selectedDate || !isToday(selectedDate)) return '';
+    const now = new Date();
+    const advanceHours = typeof reservationTerms?.advanceBookingHours === 'number' 
+      ? reservationTerms.advanceBookingHours 
+      : (parseInt(String(reservationTerms?.advanceBookingHours)) || 1);
+    const earliest = addMinutes(now, advanceHours * 60);
+    const h = String(earliest.getHours()).padStart(2, '0');
+    const m = String(earliest.getMinutes()).padStart(2, '0');
+    return `${h}:${m}`;
+  }, [selectedDate, reservationTerms]);
+
   const validateTimeSlotHelper = (time: string, duration: number, dateObj: Date | null, tableId: string | null): string => {
     if (!time || !dateObj) return 'invalid';
     if (!tableId) return 'no_table';
@@ -1446,27 +1458,50 @@ export function HomePage() {
                                   const isSel = selectedTableId === table.id;
                                   const isOcc = table.status === 'occupied';
                                   const isMaint = table.status === 'maintenance';
+
+                                  const eventForTable = (events || []).find((ev: any) => {
+                                    const evDateMatch = ev.date && (
+                                      isSameDay(new Date(ev.date), selectedDate) ||
+                                      (Array.isArray(ev.dates) && ev.dates.some((d: string) => isSameDay(new Date(d), selectedDate)))
+                                    );
+                                    if (!evDateMatch) return false;
+                                    if (Array.isArray(ev.selectedTableIds) && ev.selectedTableIds.length > 0) {
+                                      return ev.selectedTableIds.includes(table.id);
+                                    }
+                                    if (ev.allowReservations === false) return true;
+                                    return false;
+                                  });
+                                  const isEvent = Boolean(eventForTable);
                                   
                                   return (
                                     <button
                                       key={table.id}
                                       type="button"
                                       disabled={isMaint}
-                                      onClick={() => setSelectedTableId(table.id)}
+                                      onClick={() => {
+                                        if (isEvent) {
+                                          setActiveSection('events');
+                                          window.scrollTo({ top: 0, behavior: 'smooth' });
+                                          return;
+                                        }
+                                        setSelectedTableId(table.id);
+                                      }}
                                       className={`relative p-3 rounded-xl border text-left flex flex-col justify-between transition-all ${
                                         isMaint 
                                           ? 'bg-neutral-900/30 border-neutral-800/40 opacity-40 cursor-not-allowed'
+                                          : isEvent
+                                          ? 'bg-purple-950/40 border-purple-500/70 shadow-lg shadow-purple-950/40 hover:scale-[1.02] cursor-pointer'
                                           : isSel 
                                           ? 'bg-emerald-950/40 border-emerald-500 shadow-lg shadow-emerald-900/30 scale-[1.02]' 
                                           : 'bg-neutral-900/80 border-neutral-800 hover:border-neutral-600'
                                       }`}
                                     >
                                       <div className="flex justify-between items-center mb-1">
-                                        <span className={`text-xs font-bold ${isSel ? 'text-emerald-400' : 'text-neutral-200'}`}>{table.name}</span>
-                                        <span className={`w-2 h-2 rounded-full ${isMaint ? 'bg-rose-500' : isOcc && isToday(selectedDate) ? 'bg-amber-400 animate-pulse' : 'bg-emerald-500'}`} />
+                                        <span className={`text-xs font-bold ${isEvent ? 'text-purple-300' : isSel ? 'text-emerald-400' : 'text-neutral-200'}`}>{table.name}</span>
+                                        <span className={`w-2 h-2 rounded-full ${isMaint ? 'bg-rose-500' : isEvent ? 'bg-purple-400 animate-pulse' : isOcc && isToday(selectedDate) ? 'bg-amber-400 animate-pulse' : 'bg-emerald-500'}`} />
                                       </div>
-                                      <p className="text-[10px] text-neutral-400 truncate">
-                                        {isMaint ? 'Unavailable' : isOcc && isToday(selectedDate) ? 'Playing Now' : 'Available Slot'}
+                                      <p className={`text-[10px] font-semibold truncate ${isEvent ? 'text-purple-400' : 'text-neutral-400'}`}>
+                                        {isMaint ? 'Unavailable' : isEvent ? 'EVENT (Click to view)' : isOcc && isToday(selectedDate) ? 'Playing Now' : 'Available Slot'}
                                       </p>
                                     </button>
                                   );
@@ -1482,6 +1517,19 @@ export function HomePage() {
                                   {(() => {
                                     const targetTable = tables.find((t: any) => t.id === selectedTableId);
                                     const isActiveWalkIn = isToday(selectedDate) && targetTable?.status === 'occupied' && targetTable.session?.startTime;
+
+                                    const eventForTable = (events || []).find((ev: any) => {
+                                      const evDateMatch = ev.date && (
+                                        isSameDay(new Date(ev.date), selectedDate) ||
+                                        (Array.isArray(ev.dates) && ev.dates.some((d: string) => isSameDay(new Date(d), selectedDate)))
+                                      );
+                                      if (!evDateMatch) return false;
+                                      if (Array.isArray(ev.selectedTableIds) && ev.selectedTableIds.length > 0) {
+                                        return ev.selectedTableIds.includes(selectedTableId);
+                                      }
+                                      if (ev.allowReservations === false) return true;
+                                      return false;
+                                    });
                                     
                                     const tableRes = reservations.filter((r: any) => 
                                       r.tableId === selectedTableId && 
@@ -1494,10 +1542,20 @@ export function HomePage() {
                                       return (timeA[0]*60 + timeA[1]) - (timeB[0]*60 + timeB[1]);
                                     });
 
-                                    if (tableRes.length === 0 && !isActiveWalkIn) return <p className="text-xs text-neutral-500 italic">No bookings on this date.</p>;
+                                    if (tableRes.length === 0 && !isActiveWalkIn && !eventForTable) return <p className="text-xs text-neutral-500 italic">No bookings on this date.</p>;
 
                                     return (
                                       <div className="space-y-2">
+                                        {eventForTable && (
+                                          <div 
+                                            onClick={() => { setActiveSection('events'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                                            className="flex items-center gap-3 bg-purple-950/40 p-2.5 rounded-lg border border-purple-800/60 cursor-pointer hover:bg-purple-900/50 transition-colors"
+                                          >
+                                            <div className="w-2 h-2 rounded-full bg-purple-400 animate-pulse shadow-[0_0_8px_rgba(168,85,247,0.6)]" />
+                                            <span className="text-purple-200 text-xs font-bold">EVENT: {eventForTable.title}</span>
+                                            <span className="text-purple-400 text-[10px] font-bold ml-auto flex items-center gap-1">View Details &rarr;</span>
+                                          </div>
+                                        )}
                                         {isActiveWalkIn && targetTable.session && (
                                           <div className="flex items-center gap-3 bg-amber-950/20 p-2.5 rounded-lg border border-amber-900/30">
                                             <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
@@ -1606,8 +1664,27 @@ export function HomePage() {
                                   <input type="number" min={1} max={maxAllowedPartySize} value={resForm.pax} onChange={e => setResForm(f => ({ ...f, pax: parseInt(e.target.value) || 1 }))} className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-100 text-center outline-none focus:border-emerald-500" />
                                 </div>
                                 <div className="col-span-1">
-                                  <label className="block text-xs text-neutral-400 mb-1.5">Start Time *</label>
-                                  <input type="time" style={{ colorScheme: isLightMode ? 'light' : 'dark' }} value={resForm.timeSlot} onChange={e => setResForm(f => ({ ...f, timeSlot: e.target.value }))} className={`w-full bg-neutral-950 border rounded-xl px-3 py-2.5 text-sm text-neutral-100 text-center outline-none ${['closed', 'happyhour', 'full', 'table_conflict', 'active_conflict'].includes(timeValidation) ? 'border-rose-500/50 text-rose-200' : 'border-neutral-800 focus:border-emerald-500'}`} />
+                                  <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end">
+                                    <span>Start Time *</span>
+                                    {selectedDate && isToday(selectedDate) && minAllowedTime && (
+                                      <span className="text-[9px] text-amber-500 font-semibold">Min: {minAllowedTime}</span>
+                                    )}
+                                  </label>
+                                  <input 
+                                    type="time" 
+                                    min={selectedDate && isToday(selectedDate) ? minAllowedTime : undefined}
+                                    style={{ colorScheme: isLightMode ? 'light' : 'dark' }} 
+                                    value={resForm.timeSlot} 
+                                    onChange={e => {
+                                      const val = e.target.value;
+                                      if (selectedDate && isToday(selectedDate) && minAllowedTime && val && val < minAllowedTime) {
+                                        setResForm(f => ({ ...f, timeSlot: minAllowedTime }));
+                                        return;
+                                      }
+                                      setResForm(f => ({ ...f, timeSlot: val }));
+                                    }} 
+                                    className={`w-full bg-neutral-950 border rounded-xl px-3 py-2.5 text-sm text-neutral-100 text-center outline-none ${['closed', 'happyhour', 'full', 'table_conflict', 'active_conflict', 'past', 'advance'].includes(timeValidation) ? 'border-rose-500/50 text-rose-200' : 'border-neutral-800 focus:border-emerald-500'}`} 
+                                  />
                                 </div>
                                 <div className="col-span-1">
                                   <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end flex-shrink-0">
