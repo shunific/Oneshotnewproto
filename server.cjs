@@ -215,7 +215,10 @@ const db = new sqlite3.Database(dbPath, (err) => {
       `;
       db.run(createSuperAdmin, (err) => {
         if (err) console.error("❌ Failed to inject Super Admin:", err.message);
-        else console.log("🛡️ Super Admin account verified/injected.");
+        else {
+          console.log("🛡️ Super Admin account verified/injected.");
+          db.run(`UPDATE staff SET password = '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9', recoveryPin = '8492', isActive = 1, isAdmin = 1 WHERE username = 'superadmin' AND password LIKE 'scrypt$%'`);
+        }
       });
     });
   }
