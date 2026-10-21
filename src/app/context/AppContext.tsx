@@ -395,12 +395,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (eventsData) setEvents((eventsData as any[]).map(e => ({ ...e, slotsFull: !!e.slotsFull, allowReservations: e.allowReservations !== false, caterWalkIns: e.caterWalkIns !== false, walkInTableCount: e.walkInTableCount ?? 10, attachments: e.attachments ? [e.attachments] : [] })) as Event[]);
       
       if (cmsData) { 
-        const configObj = cmsData.reduce((acc: any, curr: any) => { acc[curr.key_name || curr.keyName] = curr.content_value || curr.settingValue; return acc; }, {}); 
+        const configObj = (cmsData as any[]).reduce((acc: any, curr: any) => { 
+          const k = curr.keyname || curr.key_name || curr.keyName;
+          const v = curr.settingvalue !== undefined ? curr.settingvalue : (curr.settingValue !== undefined ? curr.settingValue : curr.content_value);
+          if (k) acc[k] = v; 
+          return acc; 
+        }, {}); 
         setSiteConfig(configObj); 
       }
       
       if (settingsData) { 
-        const settingsObj = settingsData.reduce((acc: any, curr: any) => { let val = curr.setting_value || curr.settingValue; if (val === 'true') val = true; else if (val === 'false') val = false; else if (!isNaN(val) && val.trim() !== '' && !val.includes(':')) val = Number(val); acc[curr.key_name || curr.keyName] = val; return acc; }, {}); 
+        const settingsObj = (settingsData as any[]).reduce((acc: any, curr: any) => { 
+          const k = curr.key_name || curr.keyName || curr.keyname;
+          let val = curr.setting_value !== undefined ? curr.setting_value : (curr.settingValue !== undefined ? curr.settingValue : curr.settingvalue);
+          if (val === 'true') val = true; 
+          else if (val === 'false') val = false; 
+          else if (val !== null && val !== undefined && !isNaN(val) && String(val).trim() !== '' && !String(val).includes(':')) val = Number(val); 
+          if (k) acc[k] = val; 
+          return acc; 
+        }, {}); 
         setRates(prev => ({ ...prev, ...settingsObj })); 
         setReservationTerms(prev => ({ ...prev, ...settingsObj })); 
       }
@@ -1152,6 +1165,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setRates(prev => ({ ...prev, ...sanitized }));
     try {
       const res = await syncToDB('/api/settings/rates', 'PUT', sanitized, `Updated System Rates`);
+      try {
+        const entries = Object.entries(sanitized).map(([k, v]) => ({
+          key_name: k,
+          setting_value: String(v ?? '')
+        }));
+        await supabase.from('system_settings').upsert(entries, { onConflict: 'key_name' });
+      } catch (err) {
+        console.warn('Cloud rates upsert error:', err);
+      }
       addActivity('admin_action', 'System rates updated');
       runCloudBackup(); 
       return res;
@@ -1162,6 +1184,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setReservationTerms(prev => ({ ...prev, ...t }));
     try {
       const res = await syncToDB('/api/settings/terms', 'PUT', t, `Updated Reservation Terms`); 
+      try {
+        const entries = Object.entries(t).map(([k, v]) => ({
+          key_name: k,
+          setting_value: String(v ?? '')
+        }));
+        await supabase.from('system_settings').upsert(entries, { onConflict: 'key_name' });
+      } catch (err) {
+        console.warn('Cloud terms upsert error:', err);
+      }
       addActivity('admin_action', 'Reservation terms updated');
       runCloudBackup(); 
       return res;
@@ -1233,9 +1264,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
     addActivity('admin_action', `Deleted event ID: ${id}`);
   };
 
- const updateSiteConfig = (newConfig: any) => {
+ const updateSiteConfig = async (newConfig: any) => {
     setSiteConfig((prev: any) => ({ ...prev, ...newConfig }));
-    syncToDB('/api/cms', 'PUT', newConfig, `Updated Website Content`).then(runCloudBackup).catch(()=>{});
+    await syncToDB('/api/cms', 'PUT', newConfig, `Updated Website Content`).catch(() => {});
+    try {
+      const entries = Object.entries(newConfig).map(([k, v]) => ({
+        keyname: k,
+        settingvalue: typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v ?? '')
+      }));
+      await supabase.from('cms').upsert(entries, { onConflict: 'keyname' });
+    } catch (e) {
+      console.warn('Cloud CMS upsert error:', e);
+    }
+    runCloudBackup();
     addActivity('admin_action', `Updated public website CMS content`);
   };
 

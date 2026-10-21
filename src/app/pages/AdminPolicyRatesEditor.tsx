@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useNavigate } from 'react-router';
 import { useAppContext } from '../context/AppContext';
 import { PesoSign } from '../components/PesoSign';
 import { 
@@ -9,6 +10,7 @@ import {
 import { supabase } from '../utils/supabase';
 
 export default function AdminPolicyRatesEditor() {
+  const navigate = useNavigate();
   const { rates, reservationTerms, updateRates, updateReservationTerms, theme, isSystemOffline, tables } = useAppContext() as any;
 
   const [isLoading, setIsLoading] = useState(true);
@@ -168,14 +170,18 @@ export default function AdminPolicyRatesEditor() {
   const handleHourInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     const cleanDigits = value.replace(/\D/g, '').slice(0, 3);
-    const numericValue = cleanDigits === '' ? 0 : Number(cleanDigits);
+    let numericValue = cleanDigits === '' ? 0 : Number(cleanDigits);
+    if (name === 'cancellationHours') numericValue = Math.min(24, Math.max(0, numericValue));
     setTermsForm(prev => ({ ...prev, [name]: numericValue }));
   };
 
   const handlePartySizeInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     const cleanDigits = value.replace(/\D/g, '').slice(0, 2);
-    setTermsForm(prev => ({ ...prev, [name]: cleanDigits === '' ? 0 : Number(cleanDigits) }));
+    let numericValue = cleanDigits === '' ? 0 : Number(cleanDigits);
+    if (name.includes('MaxPartySize')) numericValue = Math.min(30, Math.max(1, numericValue));
+    if (name.includes('MinPartySize')) numericValue = Math.min(30, Math.max(1, numericValue));
+    setTermsForm(prev => ({ ...prev, [name]: numericValue }));
   };
 
   const handleDownPaymentInput = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -235,7 +241,7 @@ export default function AdminPolicyRatesEditor() {
     if (minWkEnd <= 0 || maxWkEnd <= 0) { flash('Weekend party sizes must be at least 1 person.', 'error'); return; }
     if (minWkEnd > maxWkEnd) { flash(`Weekend Min party size (${minWkEnd}) cannot exceed Max (${maxWkEnd}).`, 'error'); return; }
 
-    if (cancelHrs > 168) { flash('Cancellation grace period cannot exceed 7 days (168 hours).', 'error'); return; }
+    if (cancelHrs > 24) { flash('Cancellation grace period cannot exceed 24 hours.', 'error'); return; }
 
     setShowSummaryModal(true);
   };
@@ -446,12 +452,13 @@ export default function AdminPolicyRatesEditor() {
                   <p className="text-[11px] text-neutral-500">Opening & closing schedules have been moved to Site Settings.</p>
                 </div>
               </div>
-              <a 
-                href="/admin/site-settings"
-                className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold rounded-lg transition-colors border border-neutral-700"
+              <button 
+                type="button"
+                onClick={() => navigate('/admin/site-settings')}
+                className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold rounded-lg transition-colors border border-neutral-700 cursor-pointer"
               >
                 Configure in Site Settings &rarr;
-              </a>
+              </button>
             </div>
 
             <div className="mt-4">

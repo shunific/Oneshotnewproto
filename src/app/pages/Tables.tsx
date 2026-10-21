@@ -47,13 +47,20 @@ type CustomerSource =
   | { kind: 'reservation'; id: string; name: string; partySize: number; contact: string; durationHours: number; timeSlot: string };
 
 export function Tables() {
+  const { 
+    tables = [], queue, reservations, assignTable, extendSession, migrateSession, freeTable, 
+    inventory, submitTableOrders, voidTableOrder, addInventoryItem, updateInventoryItem, 
+    staffProfile, rates, reservationTerms, staffUsers, hashPassword,
+    addSessionHistory, addActivity, addWatchlistItem,
+    removeFromQueue, updateReservationStatus, forceFullSync
+  } = useAppContext() as any;
 
   // 🟢 Audio alert when any table session ends
   const notifiedSessionsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     const interval = setInterval(() => {
       const now = new Date();
-      tables.forEach((t: any) => {
+      (tables || []).forEach((t: any) => {
         if (t.status === "occupied" && t.session && !t.session.isOpenTime && t.session.startTime && t.session.durationMinutes) {
           const endTime = addMinutes(new Date(t.session.startTime), t.session.durationMinutes);
           const secsLeft = differenceInSeconds(endTime, now);
@@ -67,14 +74,6 @@ export function Tables() {
     }, 2000);
     return () => clearInterval(interval);
   }, [tables]);
-
-  const { 
-    tables, queue, reservations, assignTable, extendSession, migrateSession, freeTable, 
-    inventory, submitTableOrders, voidTableOrder, addInventoryItem, updateInventoryItem, 
-    staffProfile, rates, reservationTerms, staffUsers, hashPassword,
-    addSessionHistory, addActivity, addWatchlistItem,
-    removeFromQueue, updateReservationStatus, forceFullSync
-  } = useAppContext() as any;
   
   const [filter, setFilter]       = useState<FilterStatus>('all');
   const [search, setSearch]       = useState('');
