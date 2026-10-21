@@ -1350,12 +1350,13 @@ export function Reservations() {
                   {showDenyInput && (
                     <div className="bg-rose-950/20 border border-rose-900/40 p-4 rounded-xl space-y-3 mt-4 animate-in slide-in-from-top-2">
                       <label className="text-xs text-rose-400 font-bold uppercase tracking-wider block">Reason for Cancellation</label>
-                      <Input 
+                      <input 
+                        type="text"
                         autoFocus
                         value={callSummary} 
                         onChange={e => setCallSummary(e.target.value)} 
                         placeholder="e.g. Invalid receipt, amount mismatch" 
-                        className="bg-neutral-950 border-rose-800 text-neutral-200 text-xs h-10" 
+                        className="w-full bg-neutral-950 border border-rose-800 rounded-lg px-3 py-2 text-neutral-200 text-xs outline-none focus:border-rose-500 h-10" 
                       />
                       <div className="flex gap-2">
                         <button onClick={() => setShowDenyInput(false)} className="flex-1 py-2 bg-neutral-900 text-neutral-400 rounded-lg text-xs font-semibold hover:bg-neutral-800 transition-colors">Back</button>

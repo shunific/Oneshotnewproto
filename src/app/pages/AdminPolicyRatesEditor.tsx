@@ -435,29 +435,23 @@ export default function AdminPolicyRatesEditor() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-6 p-4 bg-neutral-950 rounded-lg border border-neutral-800/50 mb-4">
-              <div className="space-y-3">
-                <h3 className="text-sm font-bold text-emerald-500 border-b border-neutral-800 pb-2">WEEKDAYS (Mon-Thu)</h3>
-                <div>
-                  <label className="block text-xs text-neutral-400 mb-1 uppercase tracking-wider">Store Opens</label>
-                  <input type="time" style={{ colorScheme: theme === 'light' ? 'light' : 'dark' }} name="weekdayStartTime" value={ratesForm.weekdayStartTime} onChange={handleRatesChange} className="w-full bg-neutral-900 border border-neutral-800 rounded p-3 text-neutral-100 focus:border-emerald-500 outline-none" />
+            {/* Weekday & Weekend Operating Hours Link Notice */}
+            <div className="p-4 bg-neutral-950/80 rounded-xl border border-neutral-800/60 mb-4 flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400">
+                  <Clock size={16} />
                 </div>
                 <div>
-                  <label className="block text-xs text-neutral-400 mb-1 uppercase tracking-wider">Store Closes</label>
-                  <input type="time" style={{ colorScheme: theme === 'light' ? 'light' : 'dark' }} name="weekdayEndTime" value={ratesForm.weekdayEndTime} onChange={handleRatesChange} className="w-full bg-neutral-900 border border-neutral-800 rounded p-3 text-neutral-100 focus:border-emerald-500 outline-none" />
-                </div>
-              </div>
-              <div className="space-y-3">
-                <h3 className="text-sm font-bold text-emerald-500 border-b border-neutral-800 pb-2">WEEKENDS (Fri-Sun)</h3>
-                <div>
-                  <label className="block text-xs text-neutral-400 mb-1 uppercase tracking-wider">Store Opens</label>
-                  <input type="time" style={{ colorScheme: theme === 'light' ? 'light' : 'dark' }} name="weekendStartTime" value={ratesForm.weekendStartTime} onChange={handleRatesChange} className="w-full bg-neutral-900 border border-neutral-800 rounded p-3 text-neutral-100 focus:border-emerald-500 outline-none" />
-                </div>
-                <div>
-                  <label className="block text-xs text-neutral-400 mb-1 uppercase tracking-wider">Store Closes</label>
-                  <input type="time" style={{ colorScheme: theme === 'light' ? 'light' : 'dark' }} name="weekendEndTime" value={ratesForm.weekendEndTime} onChange={handleRatesChange} className="w-full bg-neutral-900 border border-neutral-800 rounded p-3 text-neutral-100 focus:border-emerald-500 outline-none" />
+                  <p className="text-xs font-bold text-neutral-200">Daily Store Operating Hours</p>
+                  <p className="text-[11px] text-neutral-500">Opening & closing schedules have been moved to Site Settings.</p>
                 </div>
               </div>
+              <a 
+                href="/admin/site-settings"
+                className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold rounded-lg transition-colors border border-neutral-700"
+              >
+                Configure in Site Settings &rarr;
+              </a>
             </div>
 
             <div className="mt-4">
