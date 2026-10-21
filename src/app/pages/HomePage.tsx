@@ -330,19 +330,22 @@ export function HomePage() {
     ? (siteConfig.aboutImage.startsWith('http') ? siteConfig.aboutImage : `http://localhost:3001${siteConfig.aboutImage}`)
     : "https://images.unsplash.com/photo-1761335633357-04fab36b333f?q=80";
 
-  // 🟢 HARDCODED TEXT (Replaces dynamic admin text)
+  // 🟢 DYNAMIC CMS CONTENT (Pulls from Site Settings, fallback to defaults)
   const cms = {
-    heroTitle: 'ONE SHOT',
-    heroSubtitle: 'Bar & Billiards',
-    heroDescription: 'Your premier billiard destination at Autobase OAX, Cainta, Rizal.',
+    heroTitle: siteConfig?.venueName || 'ONE SHOT',
+    heroSubtitle: siteConfig?.venueName ? '' : 'Bar & Billiards',
+    heroDescription: siteConfig?.tagline || 'Your premier billiard destination at Autobase OAX, Cainta, Rizal.',
     aboutTitle: 'A Passion for the Game',
-    aboutP1: 'One Shot Bar & Billiards was founded with a simple mission: to create the ultimate billiard experience in Cainta, Rizal.',
-    aboutP2: 'Our tournament-grade tables are maintained with precision, and our staff are passionate players themselves.',
-    aboutP3: 'Whether you are a seasoned champion or picking up a cue for the first time, One Shot welcomes you.',
+    aboutP1: siteConfig?.description || 'One Shot Bar & Billiards was founded with a simple mission: to create the ultimate billiard experience in Cainta, Rizal.',
+    aboutP2: siteConfig?.description ? '' : 'Our tournament-grade tables are maintained with precision, and our staff are passionate players themselves.',
+    aboutP3: siteConfig?.description ? '' : 'Whether you are a seasoned champion or picking up a cue for the first time, One Shot welcomes you.',
     aboutImage: cmsAboutImage,
-    address: 'Autobase OAX, San Juan, Cainta, Rizal 1900',
-    phone: '0917-123-4567 | 0998-765-4321',
-    email: 'oneshot.billiards@gmail.com',
+    address: siteConfig?.address || 'Autobase OAX, San Juan, Cainta, Rizal 1900',
+    phone: siteConfig?.contactNumber || siteConfig?.phone || '0917-123-4567 | 0998-765-4321',
+    email: siteConfig?.contactEmail || siteConfig?.email || 'oneshot.billiards@gmail.com',
+    latitude: siteConfig?.latitude || '14.5995',
+    longitude: siteConfig?.longitude || '120.9842',
+    googleMapsEmbedUrl: siteConfig?.googleMapsEmbedUrl || '',
   };
 
   useEffect(() => {
@@ -625,13 +628,20 @@ export function HomePage() {
     }
   })();
 
+  const isWeekendDay = (d: Date) => d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
+
+  const minAllowedPartySize = (() => {
+    const wDayMin = Number(reservationTerms?.weekdayMinPartySize) || 1;
+    const wEndMin = Number(reservationTerms?.weekendMinPartySize) || 1;
+    if (!selectedDate) return Math.min(wDayMin, wEndMin);
+    return isWeekendDay(new Date(selectedDate)) ? wEndMin : wDayMin;
+  })();
+
   const maxAllowedPartySize = (() => {
-    const wDayMax = Number(reservationTerms?.weekdayMaxPartySize) || 20;
-    const wEndMax = Number(reservationTerms?.weekendMaxPartySize) || 20;
+    const wDayMax = Number(reservationTerms?.weekdayMaxPartySize) || 10;
+    const wEndMax = Number(reservationTerms?.weekendMaxPartySize) || 10;
     if (!selectedDate) return Math.max(wDayMax, wEndMax);
-    const d = new Date(selectedDate);
-    const isWeekend = d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
-    return isWeekend ? wEndMax : wDayMax;
+    return isWeekendDay(new Date(selectedDate)) ? wEndMax : wDayMax;
   })();
 
   const getMaxDuration = () => {
@@ -679,8 +689,9 @@ export function HomePage() {
 
     if (isToday(requestedStart)) {
       const nowMins = new Date().getHours() * 60 + new Date().getMinutes();
+      const advanceNoticeMins = (Number(reservationTerms?.advanceBookingHours) || 1) * 60;
       if (slotMins <= nowMins) return 'past'; 
-      if (slotMins < nowMins + 60) return 'advance';
+      if (slotMins < nowMins + advanceNoticeMins) return 'advance';
     }
 
     const startReserveMins = parseToMins(rates?.reservationStartTime || '12:00');
@@ -725,6 +736,11 @@ export function HomePage() {
     e.preventDefault();
     if (!resForm.name || !resForm.phone || !selectedDate || !selectedTableId || !resForm.timeSlot || timeValidation !== 'valid') return;
     
+    if (resForm.pax < minAllowedPartySize || resForm.pax > maxAllowedPartySize) {
+      alert(`Party size must be between ${minAllowedPartySize} and ${maxAllowedPartySize} guests for the selected date.`);
+      return;
+    }
+
     if (!isDownPaymentWaived && resForm.paymentMethod === 'gcash') {
       const hasRef = resForm.paymentRef.trim().length > 0;
       const hasImg = receiptFile !== null;
@@ -1270,10 +1286,15 @@ export function HomePage() {
                 </div>
                 
                 <div className="mb-12">
-                  <h3 className="text-center text-xl font-bold text-white mb-6">Autobase OAX, Cainta</h3>
+                  <h3 className="text-center text-xl font-bold text-white mb-6">{cms.address || "Autobase OAX, Cainta"}</h3>
                   <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden h-96 relative group">
                     <iframe 
-                      src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3861.6425983794347!2d121.12493947585098!3d14.581333485888201!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3397c70049cd2efb%3A0x4b8fd5634abcd6cc!2sOne%20Shot%20Bar%20and%20Billiards!5e0!3m2!1sen!2sph!4v1700000000000!5m2!1sen!2sph" 
+                      src={
+                        cms.googleMapsEmbedUrl ||
+                        (cms.latitude && cms.longitude
+                          ? `https://maps.google.com/maps?q=${cms.latitude},${cms.longitude}&t=&z=15&ie=UTF8&iwloc=&output=embed`
+                          : `https://maps.google.com/maps?q=${encodeURIComponent(cms.address)}&t=&z=15&ie=UTF8&iwloc=&output=embed`)
+                      } 
                       className="absolute inset-0 w-full h-full border-0 grayscale hover:grayscale-0 transition-all duration-700"
                       allowFullScreen={false} 
                       loading="lazy" 
@@ -1408,6 +1429,12 @@ export function HomePage() {
                                   setClosureAlert(null); // Clear any closure alert when a valid date is picked
                                   setIsCalendarExpanded(false);
                                   setIsTableSelectorExpanded(true);
+                                  if (d) {
+                                    const isWEnd = d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
+                                    const minP = isWEnd ? (Number(reservationTerms?.weekendMinPartySize) || 1) : (Number(reservationTerms?.weekdayMinPartySize) || 1);
+                                    const maxP = isWEnd ? (Number(reservationTerms?.weekendMaxPartySize) || 10) : (Number(reservationTerms?.weekdayMaxPartySize) || 10);
+                                    setResForm(f => ({ ...f, pax: Math.max(minP, Math.min(maxP, f.pax)) }));
+                                  }
                                 }}
                                 reservedDates={reservedDates}
                                 closedDates={closedDates || []}
@@ -1659,9 +1686,16 @@ export function HomePage() {
                                 <div className="col-span-1">
                                   <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end">
                                     <span>Pax</span>
-                                    <span className="text-[9px] text-emerald-500 font-bold ml-1">Max {maxAllowedPartySize}</span>
+                                    <span className="text-[9px] text-emerald-500 font-bold ml-1">{minAllowedPartySize}–{maxAllowedPartySize} pax</span>
                                   </label>
-                                  <input type="number" min={1} max={maxAllowedPartySize} value={resForm.pax} onChange={e => setResForm(f => ({ ...f, pax: parseInt(e.target.value) || 1 }))} className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-100 text-center outline-none focus:border-emerald-500" />
+                                  <input 
+                                    type="number" 
+                                    min={minAllowedPartySize} 
+                                    max={maxAllowedPartySize} 
+                                    value={resForm.pax} 
+                                    onChange={e => setResForm(f => ({ ...f, pax: parseInt(e.target.value) || minAllowedPartySize }))} 
+                                    className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-100 text-center outline-none focus:border-emerald-500" 
+                                  />
                                 </div>
                                 <div className="col-span-1">
                                   <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end">

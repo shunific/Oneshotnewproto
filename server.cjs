@@ -48,8 +48,8 @@ const sanitizeDate = (val) => {
   const str = String(val).trim();
   if (!str) return null;
   // If comma-separated dates (e.g. "2026-10-12,2026-10-13"), take the first date
-  const first = str.includes(',') ? str.split(',')[0].trim() : str;
-  const clean = first.split(' ')[0].trim();
+  const first = str.includes(",") ? str.split(",")[0].trim() : str;
+  const clean = first.split(" ")[0].trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) return clean;
   const parsed = new Date(clean);
   if (!isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
@@ -326,47 +326,7 @@ app.get('/api/tables', (req, res) => {
   });
 });
 
-app.get('/api/reservations', async (req, res) => {
-  try {
-    const { data: cloudRes, error: cloudErr } = await supabase.from('reservations').select('*');
-    if (!cloudErr && Array.isArray(cloudRes) && cloudRes.length > 0) {
-      db.serialize(() => {
-        const stmt = db.prepare(`
-          INSERT OR REPLACE INTO reservations (id, customerName, contactNumber, email, date, timeSlot, durationHours, partySize, tableId, status, totalAmount, downPaymentAmount, downPaymentPaid, balancePaid, paymentRef, receiptImg, cancellationReason, refundStatus, refundMethod, refundNotes, createdAt) 
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `);
-        cloudRes.forEach(r => {
-          stmt.run([
-            r.id,
-            r.customerName || r.customer_name || 'Guest',
-            r.contactNumber || r.contact_number || '',
-            r.email || null,
-            r.date || r.reservation_date,
-            r.timeSlot || r.time_slot || '',
-            r.durationHours || r.duration_hours || 1,
-            r.partySize || r.party_size || 1,
-            r.tableId || r.table_id || null,
-            r.status || 'pending',
-            r.totalAmount || r.total_amount || 0,
-            r.downPaymentAmount || r.down_payment_amount || 0,
-            (r.downPaymentPaid === 1 || r.down_payment_paid === 1 || r.downPaymentPaid === true) ? 1 : 0,
-            (r.balancePaid === 1 || r.balance_paid === 1 || r.balancePaid === true) ? 1 : 0,
-            r.paymentRef || r.payment_ref || null,
-            r.receiptImg || r.receipt_img || null,
-            r.cancellationReason || r.cancellation_reason || null,
-            r.refundStatus || r.refund_status || null,
-            r.refundMethod || r.refund_method || null,
-            r.refundNotes || r.refund_notes || null,
-            r.createdAt || r.created_at || new Date().toISOString()
-          ]);
-        });
-        stmt.finalize();
-      });
-    }
-  } catch (syncEx) {
-    // Non-blocking fallback to local SQLite
-  }
-
+app.get('/api/reservations', (req, res) => {
   db.all(`SELECT * FROM reservations ORDER BY rowid DESC`, [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
     const normalized = rows.map(r => ({
@@ -375,7 +335,7 @@ app.get('/api/reservations', async (req, res) => {
       customerName: r.customerName || r.customer_name || 'Guest',
       contactNumber: r.contactNumber || r.contact_number || '',
       email: r.email || null,
-      date: r.date || r.reservation_date,
+      date: sanitizeDate(r.date || r.reservation_date),
       timeSlot: r.timeSlot || r.time_slot || '',
       durationHours: r.durationHours || r.duration_hours || 1,
       partySize: r.partySize || r.party_size || 1,
@@ -442,37 +402,7 @@ app.get('/api/events', (req, res) => {
   });
 });
 
-app.get('/api/feedback', async (req, res) => {
-  try {
-    const { data: cloudFeedback, error: cloudErr } = await supabase.from('feedback').select('*');
-    if (!cloudErr && Array.isArray(cloudFeedback) && cloudFeedback.length > 0) {
-      db.serialize(() => {
-        const stmt = db.prepare(`
-          INSERT OR REPLACE INTO feedback (id, customerName, contactInfo, feedbackType, comment, reservationId, tags, date, status, notes)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `);
-        cloudFeedback.forEach(f => {
-          const tagsStr = Array.isArray(f.tags) ? JSON.stringify(f.tags) : (typeof f.tags === 'string' ? f.tags : '[]');
-          stmt.run([
-            f.id,
-            f.customerName || f.customer_name || 'Guest',
-            f.contactInfo || f.contact_info || '',
-            f.feedbackType || f.feedback_type || 'suggestion',
-            f.comment || '',
-            f.reservationId || f.reservation_id || null,
-            tagsStr,
-            f.date || new Date().toISOString(),
-            f.status || 'pending',
-            f.notes || null
-          ]);
-        });
-        stmt.finalize();
-      });
-    }
-  } catch (syncEx) {
-    // Non-blocking fallback to SQLite
-  }
-
+app.get('/api/feedback', (req, res) => {
   db.all(`SELECT * FROM feedback ORDER BY date DESC`, [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json(rows.map(f => ({ ...f, tags: safeParseJSON(f.tags, []) })));
@@ -620,15 +550,26 @@ app.post('/api/cache-reservations', (req, res) => {
   db.serialize(() => {
     db.run('BEGIN TRANSACTION');
     const stmt = db.prepare(`
-      INSERT OR REPLACE INTO reservations (id, customerName, contactNumber, email, date, timeSlot, durationHours, partySize, tableId, status, totalAmount, downPaymentAmount, downPaymentPaid, balancePaid, paymentRef, receiptImg, cancellationReason, refundStatus, refundMethod, refundNotes, createdAt) 
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT OR REPLACE INTO reservations (id, customerName, contactNumber, email, date, timeSlot, durationHours, partySize, tableId, status, totalAmount, downPaymentAmount, downPaymentPaid, balancePaid, paymentRef, receiptImg, cancellationReason, refundStatus, refundMethod, refundNotes, createdAt, promoCode, discountAmount) 
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     reservations.forEach(r => {
-      stmt.run([r.id, r.customerName, r.contactNumber, r.email||null, typeof r.date === 'string' ? r.date : new Date(r.date).toISOString(), r.timeSlot, r.durationHours, r.partySize, r.tableId||null, r.status, r.totalAmount, r.downPaymentAmount, r.downPaymentPaid?1:0, r.balancePaid?1:0, r.paymentRef||null, r.receiptImg||null, r.cancellationReason||null, r.refundStatus||null, r.refundMethod||null, r.refundNotes||null, typeof r.createdAt === 'string' ? r.createdAt : new Date(r.createdAt).toISOString()]);
+      stmt.run([r.id, r.customerName, r.contactNumber, r.email||null, typeof r.date === 'string' ? r.date : new Date(r.date).toISOString(), r.timeSlot, r.durationHours, r.partySize, r.tableId||null, r.status, r.totalAmount, r.downPaymentAmount, r.downPaymentPaid?1:0, r.balancePaid?1:0, r.paymentRef||null, r.receiptImg||null, r.cancellationReason||null, r.refundStatus||null, r.refundMethod||null, r.refundNotes||null, typeof r.createdAt === 'string' ? r.createdAt : new Date(r.createdAt).toISOString(), r.promoCode||null, r.discountAmount||0]);
     });
     stmt.finalize();
     db.run('COMMIT', (err) => {
       if (err) return res.status(500).json({ error: err.message });
+      
+      // 🟢 Recalculate local promo_codes usage count from cached reservations
+      db.run(`
+        UPDATE promo_codes 
+        SET usage_count = (
+          SELECT COUNT(*) FROM reservations 
+          WHERE UPPER(TRIM(reservations.promoCode)) = UPPER(TRIM(promo_codes.code))
+        )
+        WHERE code IN (SELECT DISTINCT promoCode FROM reservations WHERE promoCode IS NOT NULL)
+      `);
+      
       res.json({ message: "Successfully cached cloud reservations to local SQLite." });
     });
   });
@@ -637,6 +578,7 @@ app.post('/api/cache-reservations', (req, res) => {
 app.post('/api/sync-to-cloud', async (req, res) => {
   let syncErrors = [];
   try {
+
     const syncTable = (localTable, cloudTable, mapFn, conflictKey = 'id') => {
       return new Promise((resolve) => {
         db.all(`SELECT * FROM ${localTable}`, [], async (err, rows) => {
@@ -665,30 +607,8 @@ if (error) {
     };
 
    await Promise.all([
-      syncTable('reservations', 'reservations', r => ({
-        id: r.id,
-        customerName: r.customerName || r.customer_name || 'Guest',
-        contactNumber: r.contactNumber || r.contact_number || '',
-        email: r.email || null,
-        date: sanitizeDate(r.date || r.reservation_date),
-        timeSlot: r.timeSlot || r.time_slot || '',
-        durationHours: r.durationHours || r.duration_hours || 1,
-        partySize: r.partySize || r.party_size || 1,
-        tableId: r.tableId || r.table_id || null,
-        status: r.status || 'pending',
-        totalAmount: r.totalAmount || r.total_amount || 0,
-        downPaymentAmount: r.downPaymentAmount || r.down_payment_amount || 0,
-        downPaymentPaid: (r.downPaymentPaid === 1 || r.down_payment_paid === 1 || r.downPaymentPaid === true) ? 1 : 0,
-        balancePaid: (r.balancePaid === 1 || r.balance_paid === 1 || r.balancePaid === true) ? 1 : 0,
-        paymentRef: r.paymentRef || r.payment_ref || null,
-        receiptImg: r.receiptImg || r.receipt_img || null,
-        cancellationReason: r.cancellationReason || r.cancellation_reason || null,
-        refundStatus: r.refundStatus || r.refund_status || null,
-        refundMethod: r.refundMethod || r.refund_method || null,
-        refundNotes: r.refundNotes || r.refund_notes || null,
-        createdAt: r.createdAt || r.created_at || new Date().toISOString()
-      }), 'id'),
       syncTable('cms', 'cms', r => ({ keyname: r.keyName || r.keyname, settingvalue: r.settingValue || r.settingvalue }), 'keyname'),
+      syncTable('cms', 'system_settings', r => ({ key_name: r.keyName || r.keyname, setting_value: r.settingValue || r.settingvalue }), 'key_name'),
       syncTable('systemSettings', 'system_settings', r => ({ key_name: r.keyName, setting_value: r.settingValue }), 'key_name'),
       syncTable('tables', 'tables', r => ({ id: r.id, name: r.name, status: r.status, isActive: r.isActive ? 1 : 0, maintenanceReason: r.maintenanceReason, sessionData: r.sessionData }), 'id'),
       
@@ -1147,6 +1067,7 @@ app.put('/api/promo-codes/:id', (req, res) => {
   const values = keys.map((k) => {
     const val = updates[k];
     if (typeof val === 'boolean') return val ? 1 : 0;
+    if (k === 'startDate' || k === 'expiresAt') return val ? new Date(val).toISOString() : null;
     return val;
   });
   values.push(req.params.id);

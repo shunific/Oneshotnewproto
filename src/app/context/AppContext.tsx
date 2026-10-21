@@ -1,7 +1,10 @@
-import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
-import { supabase, publicSupabase } from "../utils/supabase";
+import { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef } from 'react';
+import { toast } from 'sonner';
+import { supabase } from '../utils/supabase';
+import { motion, AnimatePresence } from 'motion/react';
+import { KeyRound, CheckCircle2, Copy, Download } from 'lucide-react';
 
-// ── Types (Pruned for Customer App) ────────────────────────────
+// ── Types ──────────────────────────────────────────────────────
 export type TableStatus = 'available' | 'occupied' | 'reserved' | 'maintenance' | 'event';
 
 export type SessionOrder = {
@@ -9,6 +12,9 @@ export type SessionOrder = {
   name: string;
   price: number;
   qty: number;
+};
+export type SessionHistoryItem = {
+  id: string; customerName: string; tableId: string; tableName: string; startTime: Date; endTime: Date; durationMinutes: number; totalAmount: number; amountPaid: number; orders: SessionOrder[];
 };
 
 export type Session = {
@@ -32,6 +38,16 @@ export type Table = {
   isActive: boolean;
   maintenanceReason?: string;
 };
+export type LostItem = {
+  id: string; itemName: string; description: string; foundDate: Date; status: 'found' | 'claimed'; image?: string; claimedBy?: string; claimedDate?: Date; isArchived?: boolean;
+};
+export type WatchlistItem = {
+  id: string; name: string; reason: 'debt' | 'theft' | 'banned' | 'other'; description: string; status: 'active' | 'resolved'; evidenceLink?: string; dateAdded: Date; resolvedDate?: Date; isArchived?: boolean;
+};
+
+export type InventoryItem = {
+  id: string; name: string; category: string; price: number; stock: number; isActive: boolean;
+};
 
 export type QueueItem = {
   id: string; customerName: string; contactNumber: string; partySize: number; arrivalTime: Date; notes?: string; status: 'waiting' | 'called' | 'seated'; queueNumber: number; prioritySource?: 'reservation';
@@ -48,10 +64,22 @@ export type Reservation = {
 
 export type Feedback = {
   id: string; customerName: string; contactInfo?: string; rating: number; feedbackType?: 'suggestion' | 'complaint' | 'lost_item' | 'compliment' | 'other'; comment: string; date: Date; reservationId?: string; tags: string[];
+  status?: 'pending' | 'resolved'; notes?: string;
+};
+
+export type ActivityType =
+  | 'table_assigned' | 'table_freed' | 'table_reserved' | 'session_extended'
+  | 'queue_added' | 'queue_removed' | 'queue_called'
+  | 'reservation_created' | 'reservation_updated' | 'payment_received' | 'reservation_cancelled'
+  | 'feedback_received' | 'promo_created'
+  | 'admin_action' | 'tako_action' | 'pos_order';
+
+export type Activity = {
+  id: string; type: ActivityType; description: string; timestamp: Date; metadata?: Record<string, any>;
 };
 
 export type PromoCode = {
-  id: string; code: string; discountPercent: number; description: string; isActive: boolean; maxUsage: number; usageCount: number; startDate?: Date; expiresAt?: Date; createdAt: Date;
+  id: string; code: string; discountPercent: number; description: string; isActive: boolean; isLimitedUses: boolean; maxUsage: number; usageCount: number; startDate?: Date; expiresAt?: Date; createdAt: Date;
 };
 
 export type Event = {
@@ -59,6 +87,20 @@ export type Event = {
   allowReservations?: boolean;
   caterWalkIns?: boolean;
   walkInTableCount?: number;
+};
+
+export type StaffProfile = {
+  id?: string;
+  username: string; password: string; fullName: string; role: string; phone: string; joinedDate: string; avatarImg?: string; 
+  isAdmin?: boolean; 
+  email?: string;
+};
+
+export type StaffUser = {
+  id: string; username: string; password: string; fullName: string; role: 'manager' | 'cashier'; isAdmin: boolean; phone: string; isActive: boolean; createdAt: Date;
+  recoveryPin?: string; 
+  avatarImg?: string;
+  email?: string;
 };
 
 export type RatesConfig = {
@@ -76,8 +118,8 @@ export type ReservationTerms = {
 export type AnnouncementType = 'info' | 'warning' | 'promo' | 'event';
 export type Announcement = {
   id: string; title: string; content: string; type: AnnouncementType; isActive: boolean; createdAt: Date; expiresAt?: Date;
+  startDate?: Date | string;
 };
-
 export type ClosedDate = {
   id: string; date: string; reason: string; isFullDay: boolean; openTime?: string; closeTime?: string; type?: 'specific' | 'weekly'; dayOfWeek?: number; 
 };
@@ -86,8 +128,8 @@ export type WeatherData = {
   temp: number; condition: string; isRaining: boolean; code: number; locationName: string;
 };
 
-export const HOURLY_RATE = 150;
-export const DOWN_PAYMENT_RATE = 0.25;
+export const HOURLY_RATE = 0;
+export const DOWN_PAYMENT_RATE = 0;
 
 export const generateRandomPromoCode = () => {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -95,27 +137,43 @@ export const generateRandomPromoCode = () => {
 };
 
 type AppContextType = {
-  tables: Table[]; 
-  queue: QueueItem[]; 
-  reservations: Reservation[]; 
-  promoCodes: PromoCode[]; 
-  rates: RatesConfig; 
-  reservationTerms: ReservationTerms; 
-  announcements: Announcement[]; 
-  closedDates: ClosedDate[]; 
-  weather: WeatherData | null; 
-  events: Event[];
-  siteConfig: any;
-  activeAnnouncement: string; 
-  
-  updateWeatherLocation: (lat: string, lon: string, name: string) => void;
-  updateActiveAnnouncement: (msg: string) => void;
-  addReservation: (i: Omit<Reservation, 'id'|'createdAt'>) => Promise<string>; 
-  addFeedback: (i: Omit<Feedback, 'id'|'date'>) => void; 
-  applyPromoCode: (c: string) => PromoCode | null;
-  refreshLiveMonitor: () => Promise<void>;
+  tables: Table[]; queue: QueueItem[]; reservations: Reservation[]; feedback: Feedback[]; activities: Activity[]; promoCodes: PromoCode[]; staffUsers: StaffUser[]; inventory: InventoryItem[]; rates: RatesConfig; reservationTerms: ReservationTerms; announcements: Announcement[]; closedDates: ClosedDate[]; weather: WeatherData | null; updateWeatherLocation: (lat: string, lon: string, name: string) => void;
+  activeAnnouncement: string; updateActiveAnnouncement: (msg: string) => void;
+  staffLoggedIn: boolean; adminLoggedIn: boolean; staffProfile: StaffProfile;
+  staffLogin: (u: string, p: string) => Promise<boolean>; staffLogout: () => void; adminLogin: (u: string, p: string) => Promise<boolean>; adminLogout: () => void; updateStaffProfile: (profile: Partial<StaffProfile>) => void;
+  assignTable: (id: string, s: Session) => void; freeTable: (id: string) => void; reserveTable: (id: string) => void; extendSession: (id: string, mins: number, pay: number) => void; migrateSession: (fromTableId: string, toTableId: string) => void; setTableMaintenance: (id: string, reason: string) => void; setTableEvent: (id: string, eventName: string) => void; addTable: (n: string) => void; updateTable: (id: string, n: string) => void; toggleTableActive: (id: string) => void; deleteTable: (id: string) => void;
+  addInventoryItem: (i: Omit<InventoryItem, 'id'>) => void; updateInventoryItem: (id: string, i: Partial<InventoryItem>) => void; deleteInventoryItem: (id: string) => void; submitTableOrders: (tableId: string, cart: SessionOrder[]) => void; voidTableOrder: (tableId: string, orderIndex: number, order: SessionOrder) => void;
+  addToQueue: (i: Omit<QueueItem, 'id'|'arrivalTime'|'status'|'queueNumber'>) => void; removeFromQueue: (id: string) => void; callQueueItem: (id: string) => void;
+  addReservation: (i: Omit<Reservation, 'id'|'createdAt'>) => string; updateReservationStatus: (id: string, s: ReservationStatus) => void; updateReservation: (id: string, u: Partial<Reservation>) => void; cancelReservation: (id: string, r: string) => void; updateDownPayment: (id: string, p: boolean) => void; updateBalance: (id: string, p: boolean) => void;
+  addFeedback: (i: Omit<Feedback, 'id'|'date'>) => void; resolveFeedback: (id: string, notes: string) => void; addActivity: (t: ActivityType, d: string, m?: Record<string, any>) => void;  
+  addPromoCode: (i: Omit<PromoCode, 'id'|'createdAt'|'usageCount'>) => string; updatePromoCode: (id: string, u: Partial<Omit<PromoCode, 'id'|'createdAt'|'usageCount'>>) => void; togglePromoCode: (id: string) => void; deletePromoCode: (id: string) => void; applyPromoCode: (c: string) => PromoCode | null;
+  events: Event[]; addEvent: (e: Omit<Event, 'id'>) => void; updateEvent: (id: string, updates: Partial<Omit<Event, 'id'>>) => void; deleteEvent: (id: string) => void;
+  addStaffUser: (u: Omit<StaffUser, 'id'|'createdAt'>) => void; updateStaffUser: (id: string, u: Partial<StaffUser>) => void; resetStaffUserPassword: (id: string) => Promise<void>; toggleStaffUserActive: (id: string) => void;
+  updateRates: (r: Partial<RatesConfig>) => Promise<void>; updateReservationTerms: (t: Partial<ReservationTerms>) => Promise<void>; addAnnouncement: (a: Omit<Announcement, 'id'|'createdAt'>) => void; updateAnnouncement: (id: string, u: Partial<Announcement>) => void; deleteAnnouncement: (id: string) => void; toggleAnnouncement: (id: string) => void; addClosedDate: (c: Omit<ClosedDate, 'id'>) => void; removeClosedDate: (id: string) => void; updateClosedDate: (id: string, u: Partial<ClosedDate>) => void;
+  siteConfig: any; updateSiteConfig: (config: any) => void; refreshLiveMonitor: () => void;
+  lostItems: LostItem[];
+  addLostItem: (i: Omit<LostItem, 'id'>) => void;
+  updateLostItem: (id: string, u: Partial<LostItem>) => void;
+  deleteLostItem: (id: string) => void;
+  watchlist: WatchlistItem[];
+  addWatchlistItem: (i: Omit<WatchlistItem, 'id'>) => void;
+  updateWatchlistItem: (id: string, u: Partial<WatchlistItem>) => void;
+  deleteWatchlistItem: (id: string) => void;
+  sessionHistory: SessionHistoryItem[];
+  addSessionHistory: (i: Omit<SessionHistoryItem, 'id'>) => void;
+  resetPasswordWithPin: (username: string, pin: string, newPassword: string) => Promise<{ success: boolean; message: string }>;
+  isSystemOffline: boolean;
+  hashPassword: (p: string) => Promise<string>;
+  theme: 'dark' | 'light';
+  primaryColor: string;
+  updateTheme: (theme: 'dark' | 'light') => void;
+  updatePrimaryColor: (color: string) => void;
+  updateRefundStatus: (id: string, refundStatus: string, method?: string, notes?: string) => void;
   acknowledgeRefund: (id: string) => void;
-  validateBookingPreflight: (date: Date, timeSlot: string, durationHours: number) => Promise<boolean>;
+  isLoggingOut: boolean;
+  logoutStep: string;
+  lastSynced: Date | null;
+  forceFullSync: () => Promise<void>;
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -123,406 +181,291 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 export function AppProvider({ children }: { children: ReactNode }) {
   const [isInitializing, setIsInitializing] = useState(true);
 
-  const [tables, setTables] = useState<Table[]>([
-    { id: 't1', name: 'Table 1', status: 'available', isActive: true },
-    { id: 't2', name: 'Table 2', status: 'available', isActive: true },
-    { id: 't3', name: 'Table 3', status: 'available', isActive: true },
-    { id: 't4', name: 'Table 4', status: 'available', isActive: true },
-    { id: 't5', name: 'Table 5', status: 'available', isActive: true },
-    { id: 't6', name: 'Table 6', status: 'available', isActive: true },
-    { id: 't7', name: 'Table 7', status: 'available', isActive: true },
-    { id: 't8', name: 'Table 8', status: 'available', isActive: true },
-    { id: 't9', name: 'Table 9', status: 'available', isActive: true },
-    { id: 't10', name: 'Table 10', status: 'available', isActive: true },
-  ]);
+  // States
+  const [tables, setTables] = useState<Table[]>([]);
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
+  const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
+  const [feedback, setFeedback] = useState<Feedback[]>([]);
+  const [activities, setActivities] = useState<Activity[]>([]);
   const [promoCodes, setPromoCodes] = useState<PromoCode[]>([]);
-  const [rates, setRates] = useState<RatesConfig>({
-    hourlyRate: 150,
-    overtimeRate: 100,
-    downPaymentPercent: 25,
-    weekdayStartTime: '12:00',
-    weekdayEndTime: '00:00',
-    isWeekdayHappyHourActive: true,
-    weekdayHappyHourRate: 100,
-    weekdayHappyHourStart: '15:00',
-    weekdayHappyHourEnd: '18:00',
-    weekdayOnlineCapacityLimit: 90,
-    weekendStartTime: '12:00',
-    weekendEndTime: '00:00',
-    isWeekendHappyHourActive: false,
-    weekendHappyHourRate: 100,
-    weekendHappyHourStart: '15:00',
-    weekendHappyHourEnd: '18:00',
-    weekendOnlineCapacityLimit: 40,
-    bookingCutoffMinutes: 60
-  });
-  const [reservationTerms, setReservationTerms] = useState<ReservationTerms>({
-    minHours: 1,
-    maxHours: 8,
-    cancellationHours: 23,
-    advanceBookingHours: 1,
-    cancellationPolicy: 'Booking Policy',
-    termsAndConditions: 'Terms & Conditions',
-    weekdayMinPartySize: 1,
-    weekdayMaxPartySize: 10,
-    weekendMinPartySize: 1,
-    weekendMaxPartySize: 10
-  });
+  const [staffUsers, setStaffUsers] = useState<StaffUser[]>([]);
+  const [rates, setRates] = useState<RatesConfig>({ hourlyRate: 0, overtimeRate: 0, downPaymentPercent: 0, weekdayStartTime: '', weekdayEndTime: '', isWeekdayHappyHourActive: false, weekdayHappyHourRate: 0, weekdayHappyHourStart: '', weekdayHappyHourEnd: '', weekdayOnlineCapacityLimit: 0, weekendStartTime: '', weekendEndTime: '', isWeekendHappyHourActive: false, weekendHappyHourRate: 0, weekendHappyHourStart: '', weekendHappyHourEnd: '', weekendOnlineCapacityLimit: 0, bookingCutoffMinutes: 60 });
+  const [reservationTerms, setReservationTerms] = useState<ReservationTerms>({ minHours: 0, maxHours: 0, cancellationHours: 0, advanceBookingHours: 1, cancellationPolicy: '', termsAndConditions: '', weekdayMinPartySize: 0, weekdayMaxPartySize: 0, weekendMinPartySize: 0, weekendMaxPartySize: 0 });
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [closedDates, setClosedDates] = useState<ClosedDate[]>([]);
   const [weather, setWeather] = useState<WeatherData | null>(null);
   const [weatherConfig, setWeatherConfig] = useState({ lat: '', lon: '', name: '' });
   const [activeAnnouncement, setActiveAnnouncement] = useState("");
   const updateActiveAnnouncement = (msg: string) => setActiveAnnouncement(msg);
+
+  // 🟢 Global Recovery PIN State
+  const [showRecoveryModal, setShowRecoveryModal] = useState(false);
+  const [pinCopied, setPinCopied] = useState(false);
+  const [hasInteractedWithPin, setHasInteractedWithPin] = useState(false);
+  const [pinSaved, setPinSaved] = useState(false);
+
+  const [staffLoggedIn, setStaffLoggedIn] = useState(() => sessionStorage.getItem('oneshot_staff_auth') === 'true');
+  const [adminLoggedIn, setAdminLoggedIn] = useState(() => sessionStorage.getItem('oneshot_admin_auth') === 'true');
+  
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [logoutStep, setLogoutStep] = useState('');
+  const [lastSynced, setLastSynced] = useState<Date | null>(null);
+
+  // 🎨 Global Theme State
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => (localStorage.getItem('oneshot_theme') as 'dark' | 'light') || 'dark');
+  const [primaryColor, setPrimaryColor] = useState(() => localStorage.getItem('oneshot_color') || 'emerald');
+
+  const [staffProfile, setStaffProfile] = useState<StaffProfile>(() => {
+    const saved = sessionStorage.getItem('oneshot_staff_profile');
+    return saved ? JSON.parse(saved) : { 
+      id: '', username: '', password: '', fullName: '', role: '', phone: '', joinedDate: '', isAdmin: false 
+    };
+  });
+
+  useEffect(() => {
+    if ((staffLoggedIn || adminLoggedIn) && staffProfile?.username) {
+      const isBackedUp = localStorage.getItem(`oneshot_pin_backed_up_${staffProfile.username}`);
+      if (!isBackedUp) {
+        setShowRecoveryModal(true);
+      }
+    }
+  }, [staffLoggedIn, adminLoggedIn, staffProfile]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.setAttribute('data-theme', theme);
+    root.setAttribute('data-color', primaryColor);
+  }, [theme, primaryColor]);
+
+  const updateTheme = (newTheme: 'dark' | 'light') => {
+    setTheme(newTheme);
+    localStorage.setItem('oneshot_theme', newTheme);
+  };
+
+  const updatePrimaryColor = (color: string) => {
+    setPrimaryColor(color);
+    localStorage.setItem('oneshot_color', color);
+  };
+  
+  const handleDownloadPin = () => {
+    const targetUser = staffUsers.find((u: any) => u.username === staffProfile?.username);
+    if (!targetUser?.recoveryPin) return;
+    
+    const text = `ONE SHOT BAR & BILLIARDS\n=================================\nACCOUNT RECOVERY CREDENTIALS\n=================================\n\nAccount Name : ${targetUser.fullName}\nUsername     : ${targetUser.username}\nRole         : ${targetUser.role.toUpperCase()}\n\nOFFLINE RECOVERY PIN: ${targetUser.recoveryPin}\n\n=================================\nIMPORTANT: Keep this file secure. Because this system operates offline, if you forget your password, you will strictly need this 4-digit PIN to recover your account without a Super Admin.\n`;
+    const blob = new Blob([text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `oneshot-recovery-pin-${targetUser.username}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    toast.success("Recovery PIN downloaded successfully!");
+    setHasInteractedWithPin(true);
+  };
+
+  const handleAcknowledgePin = () => {
+    if (staffProfile?.username) {
+      localStorage.setItem(`oneshot_pin_backed_up_${staffProfile.username}`, 'true');
+      setShowRecoveryModal(false);
+      toast.success("Recovery PIN safely backed up.");
+    }
+  };
+
   const [siteConfig, setSiteConfig] = useState<any>(null);
   const updateWeatherLocation = useCallback((lat: string, lon: string, name: string) => { setWeatherConfig({ lat, lon, name }); }, []);
-  const [feedback, setFeedback] = useState<Feedback[]>([]);
+  const [lostItems, setLostItems] = useState<LostItem[]>([]);
+  const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
+  const [sessionHistory, setSessionHistory] = useState<SessionHistoryItem[]>([]);
+  const [isSystemOffline, setIsSystemOffline] = useState(false);
 
-  // 🟢 FIXED: Proper mapping of sessionData to avoid Ghost Sessions using publicSupabase
+  useEffect(() => {
+    const checkHeartbeat = async () => {
+      const { data } = await supabase.from('system_status').select('last_seen_at').eq('id', 1).maybeSingle();
+      if (data) {
+        const lastSeen = new Date(data.last_seen_at);
+        const timeDiffMs = new Date().getTime() - lastSeen.getTime();
+        setIsSystemOffline(timeDiffMs > 300000); 
+      }
+    };
+    checkHeartbeat();
+    const interval = setInterval(checkHeartbeat, 60000); 
+    return () => clearInterval(interval);
+  }, []);
+
   const refreshLiveMonitor = async () => {
     try {
-      const [ { data: newTables }, { data: newQueue } ] = await Promise.all([
-        publicSupabase.from('tables').select('*'),
-        publicSupabase.from('queue').select('*')
+      const [tablesRes, queueRes, resRes] = await Promise.all([ 
+        fetch('http://localhost:3001/api/tables').catch(() => null), 
+        fetch('http://localhost:3001/api/queue').catch(() => null),
+        fetch('http://localhost:3001/api/reservations').catch(() => null)
       ]);
-      
-      if (newTables) {
-        const mappedTables = newTables.map((t: any) => ({
-          ...t,
-          session: t.sessionData ? (typeof t.sessionData === 'string' ? JSON.parse(t.sessionData) : t.sessionData) : undefined,
-          isActive: t.isActive === 1 || t.isActive === true
-        }));
-        setTables(prev => JSON.stringify(prev) !== JSON.stringify(mappedTables) ? mappedTables as Table[] : prev);
-      }
-      if (newQueue) {
-        const mappedQueue = newQueue.map((q: any) => ({
-          ...q,
-          customerName: q.customerName || q.customer_name,
-          partySize: q.partySize || q.party_size,
-          arrivalTime: q.arrivalTime || q.arrival_time,
-          queueNumber: q.queueNumber || q.queue_number,
-        }));
-        setQueue(prev => JSON.stringify(prev) !== JSON.stringify(mappedQueue) ? mappedQueue as QueueItem[] : prev);
-      }
-    } catch (error) {
-      console.error("Live Monitor Refresh Error:", error);
-    }
+      if (tablesRes && tablesRes.ok) { const newTables = await tablesRes.json(); setTables(prev => JSON.stringify(prev) !== JSON.stringify(newTables) ? newTables : prev); }
+      if (queueRes && queueRes.ok) { const newQueue = await queueRes.json(); setQueue(prev => JSON.stringify(prev) !== JSON.stringify(newQueue) ? newQueue : prev); }
+      if (resRes && resRes.ok) { const newRes = await resRes.json(); setReservations(prev => JSON.stringify(prev) !== JSON.stringify(newRes) ? newRes : prev); }
+    } catch (error) {}
   };
 
-  // 🟢 NEW: Auto-refresh loop so the customer website stays in sync
-  // 🟢 SMART POLLING: Checks Supabase only when tab is active, every 45s (Saves massive bandwidth)
-  useEffect(() => {
-    if (isInitializing) return;
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') refreshLiveMonitor();
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    const interval = setInterval(() => {
-      if (document.visibilityState === 'visible') refreshLiveMonitor();
-    }, 45000);
-
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      clearInterval(interval);
-    };
-  }, [isInitializing]);
-
-  // 🟢 PRE-FLIGHT CHECK: Prevents simultaneous double-booking deadlocks
-  const validateBookingPreflight = async (date: Date, timeSlot: string, durationHours: number): Promise<boolean> => {
-    const requestedStart = new Date(date);
-    const [h, m] = timeSlot.split(':').map(Number);
-    requestedStart.setHours(h, m, 0, 0);
-    const requestedEnd = addMinutes(requestedStart, durationHours * 60);
-
+  const forceFullSync = async () => {
     try {
-      const { data } = await publicSupabase
-        .from('reservations')
-        .select('date, durationHours')
-        .in('status', ['pending', 'confirmed', 'checked-in']);
+      // 1. FETCH FLOOR DATA (Local Machine is Absolute Source of Truth for physical operations)
+      const [tablesRes, invRes, queueRes, staffRes, historyRes, activitiesRes, feedRes, lostRes, watchRes] = await Promise.all([
+        fetch('http://localhost:3001/api/tables').catch(() => null),
+        fetch('http://localhost:3001/api/inventory').catch(() => null),
+        fetch('http://localhost:3001/api/queue').catch(() => null),
+        fetch('http://localhost:3001/api/staff').catch(() => null),
+        fetch('http://localhost:3001/api/session-history').catch(() => null),
+        fetch('http://localhost:3001/api/activities').catch(() => null),
+        fetch('http://localhost:3001/api/feedback').catch(() => null),
+        fetch('http://localhost:3001/api/lost-and-found').catch(() => null),
+        fetch('http://localhost:3001/api/watchlist').catch(() => null)
+      ]);
 
-      if (!data) return true; 
+      if (tablesRes && tablesRes.ok) setTables(await tablesRes.json());
+      if (invRes && invRes.ok) setInventory(await invRes.json());
+      if (queueRes && queueRes.ok) setQueue(await queueRes.json());
+      if (staffRes && staffRes.ok) setStaffUsers(await staffRes.json());
+      if (historyRes && historyRes.ok) setSessionHistory(await historyRes.json()); // 🟢 Local History is King
+      if (activitiesRes && activitiesRes.ok) setActivities(await activitiesRes.json());
+      if (feedRes && feedRes.ok) setFeedback(await feedRes.json());
+      if (lostRes && lostRes.ok) setLostItems(await lostRes.json());
+      if (watchRes && watchRes.ok) setWatchlist(await watchRes.json());
 
-      let overlapCount = 0;
-      data.forEach((r: any) => {
-        if (isSameDay(new Date(r.date), requestedStart)) {
-           const rStart = new Date(r.date);
-           const rEnd = addMinutes(rStart, r.durationHours * 60);
-           if (requestedStart < rEnd && requestedEnd > rStart) overlapCount++;
-        }
-      });
+      // 2. FETCH CLOUD DATA (Supabase is Source of Truth for Online Reservations & CMS)
+      // 🟢 NOTICE: We are NO LONGER fetching session_history from the cloud to prevent local data erasure!
+      const [
+        { data: resData, error: resErr }, { data: annData }, { data: cmsData }, 
+        { data: settingsData }, { data: closedDatesData }, { data: promoData }, { data: eventsData }, { data: feedData }
+      ] = await Promise.all([
+        supabase.from('reservations').select('*'), supabase.from('announcements').select('*'), 
+        supabase.from('cms').select('*'), supabase.from('system_settings').select('*'), 
+        supabase.from('closed_dates').select('*'), supabase.from('promo_codes').select('*'), 
+        supabase.from('events').select('*'), supabase.from('feedback').select('*')
+      ]);
 
-      const capacityLimit = Number(rates?.onlineCapacityLimit ?? 70);
-      const maxOnlineCapacity = Math.max(1, Math.floor((tables.length || 10) * (capacityLimit / 100)));
+      if (resErr) throw new Error("Supabase is unreachable.");
 
-      return overlapCount < maxOnlineCapacity;
-    } catch (err) {
-      return true; // Failsafe fallback
-    }
-  };
-
-  useEffect(() => {
-    const fetchSupabaseData = async (isInitial: boolean = false) => {
-      try {
-        const [
-          { data: tablesData },
-          { data: resData },
-          { data: queueData },
-          { data: annData },
-          { data: cmsData },
-          { data: settingsData }, 
-          { data: closedDatesData },
-          { data: promoData },
-          { data: eventsData },
-          { data: feedbackData }
-        ] = await Promise.all([
-          publicSupabase.from('tables').select('*'),
-          publicSupabase.from('reservations').select('*'),
-          publicSupabase.from('queue').select('*'),
-          publicSupabase.from('announcements').select('*'),
-          publicSupabase.from('cms').select('*'),
-          publicSupabase.from('system_settings').select('*'), 
-          publicSupabase.from('closed_dates').select('*'),
-          publicSupabase.from('promo_codes').select('*'),
-          publicSupabase.from('events').select('*'),
-          publicSupabase.from('feedback').select('*')
-        ]);
-        
-        if (tablesData) {
-          setTables(tablesData.map((t: any) => {
-            const rawActive = t.isActive ?? t.is_active ?? t.isactive;
-            const isTableActive = rawActive === 1 || rawActive === true || rawActive === 'true' || (rawActive === undefined ? true : false);
-            return {
-              ...t,
-              session: t.sessionData ? (typeof t.sessionData === 'string' ? JSON.parse(t.sessionData) : t.sessionData) : undefined,
-              isActive: isTableActive
-            };
-          }) as Table[]);
-        }
-
-        if (resData) setReservations(resData as Reservation[]);
-
-        if (queueData) {
-          setQueue(queueData.map((q: any) => ({
-            ...q,
-            customerName: q.customerName || q.customer_name,
-            partySize: q.partySize || q.party_size,
-            arrivalTime: q.arrivalTime || q.arrival_time,
-            queueNumber: q.queueNumber || q.queue_number,
-          })) as QueueItem[]);
-        }
-
-        if (annData && annData.length > 0) {
-          setAnnouncements(annData.map((a: any) => ({
-            ...a,
+      if (annData) {
+        setAnnouncements((annData as any[]).map(a => {
+          const rawActive = a.is_active ?? a.isactive ?? a.isActive;
+          const isActive = rawActive !== undefined ? (rawActive === 1 || rawActive === true || rawActive === 'true') : true;
+          return {
             id: a.id,
             title: a.title,
             content: a.content,
             type: a.type || 'info',
-            isActive: a.isactive !== undefined ? (a.isactive === 1 || a.isactive === true || a.isactive === 'true') : (a.isActive === 1 || a.isActive === true || a.isActive === 'true'),
-            createdAt: a.createdat ? new Date(a.createdat) : (a.createdAt ? new Date(a.createdAt) : new Date()),
-            expiresAt: a.expiresat ? new Date(a.expiresat) : (a.expiresAt ? new Date(a.expiresAt) : undefined)
-          })) as Announcement[]);
-        }
-
-        if (closedDatesData && closedDatesData.length > 0) {
-          setClosedDates(closedDatesData.map((cd: any) => ({
-            ...cd,
-            id: cd.id,
-            date: cd.date,
-            reason: cd.reason,
-            isFullDay: cd.isfullday !== undefined ? (cd.isfullday === 1 || cd.isfullday === true) : (cd.is_full_day !== undefined ? (cd.is_full_day === 1 || cd.is_full_day === true) : cd.isFullDay),
-            openTime: cd.opentime || cd.open_time || cd.openTime,
-            closeTime: cd.closetime || cd.close_time || cd.closeTime,
-            dayOfWeek: cd.dayofweek ?? cd.day_of_week ?? cd.dayOfWeek,
-            type: cd.type || 'specific'
-          })) as ClosedDate[]);
-        }
-
-        if (promoData && promoData.length > 0) {
-          setPromoCodes(promoData.map((p: any) => {
-            const codeUpper = (p.code || '').trim().toUpperCase();
-            const usedInReservations = (resData || []).filter((r: any) => r.promoCode && r.promoCode.trim().toUpperCase() === codeUpper).length;
-            const currentUsage = Math.max(Number(p.usage_count ?? p.usagecount ?? p.usageCount ?? 0), usedInReservations);
-            const rawActive = p.is_active ?? p.isActive ?? p.isactive;
-            const isPromoActive = rawActive === 1 || rawActive === true || rawActive === 'true' || rawActive === undefined;
-            const rawLimited = p.is_limited_uses ?? p.isLimitedUses ?? p.islimiteduses;
-            const isLimited = rawLimited === 1 || rawLimited === true || rawLimited === 'true';
-            return {
-              ...p,
-              id: p.id,
-              code: codeUpper,
-              discountPercent: Number(p.discount_percent ?? p.discountpercent ?? p.discountPercent ?? 0),
-              description: p.description || '',
-              isActive: isPromoActive,
-              isLimitedUses: isLimited,
-              maxUsage: Number(p.max_usage ?? p.maxusage ?? p.maxUsage ?? 100),
-              usageCount: currentUsage,
-              startDate: p.start_date || p.startdate || p.startDate ? new Date(p.start_date || p.startdate || p.startDate) : undefined,
-              expiresAt: p.expires_at || p.expiresat || p.expiresAt ? new Date(p.expires_at || p.expiresat || p.expiresAt) : undefined,
-              createdAt: p.created_at || p.createdat || p.createdAt ? new Date(p.created_at || p.createdat || p.createdAt) : new Date()
-            };
-          }) as PromoCode[]);
-        }
-        
-        if (eventsData && eventsData.length > 0) {
-          const mappedEvents = eventsData.map((e: any) => ({
-            ...e,
-            id: e.id,
-            title: e.title,
-            date: e.date,
-            type: e.type,
-            description: e.description,
-            registrationLink: e.registrationlink || e.registration_link || e.registrationLink,
-            maxParticipants: e.maxparticipants ?? e.max_participants ?? e.maxParticipants,
-            slotsFull: e.slotsfull !== undefined ? (e.slotsfull === 1 || e.slotsfull === true) : e.slotsFull,
-            allowReservations: e.allowreservations !== undefined ? (e.allowreservations === 1 || e.allowreservations === true) : e.allowReservations,
-            caterWalkIns: e.caterwalkins !== undefined ? (e.caterwalkins === 1 || e.caterwalkins === true) : e.caterWalkIns,
-            walkInTableCount: e.walkintablecount ?? e.walk_in_table_count ?? e.walkInTableCount,
-            promoCodeId: e.promocodeid || e.promo_code_id || e.promoCodeId
-          }));
-          setEvents(prev => {
-            const existingIds = new Set(prev.map(ev => ev.id));
-            const newEvents = mappedEvents.filter((ev: any) => !existingIds.has(ev.id));
-            return [...prev, ...newEvents];
-          });
-        }
-
-        if (cmsData && cmsData.length > 0) {
-          const configObj = cmsData.reduce((acc: any, curr: any) => {
-            const key = curr.keyname || curr.key_name || curr.keyName;
-            const val = curr.settingvalue !== undefined ? curr.settingvalue : (curr.setting_value !== undefined ? curr.setting_value : (curr.content_value !== undefined ? curr.content_value : curr.settingValue));
-            if (key) acc[key] = val;
-            return acc;
-          }, {});
-          setSiteConfig((prev: any) => ({ ...prev, ...configObj }));
-        }
-
-        if (settingsData && settingsData.length > 0) {
-          const settingsObj = settingsData.reduce((acc: any, curr: any) => { 
-            const rawKey = curr.keyname || curr.key_name || curr.keyName;
-            if (!rawKey) return acc;
-            let val = curr.settingvalue !== undefined ? curr.settingvalue : (curr.setting_value !== undefined ? curr.setting_value : (curr.content_value !== undefined ? curr.content_value : curr.settingValue));
-            if (val === 'true' || val === true || val === '1' || val === 1) val = true;
-            else if (val === 'false' || val === false || val === '0' || val === 0) val = false;
-            else if (val !== null && val !== undefined && !isNaN(val) && String(val).trim() !== '' && !String(val).includes(':')) val = Number(val);
-            
-            acc[rawKey] = val;
-            const camelKey = rawKey.replace(/_([a-z])/g, (_: string, letter: string) => letter.toUpperCase());
-            acc[camelKey] = val;
-            const lower = rawKey.toLowerCase();
-            if (lower === 'isweekdayhappyhouractive') acc.isWeekdayHappyHourActive = Boolean(val);
-            if (lower === 'weekdayhappyhourrate') acc.weekdayHappyHourRate = Number(val) || 0;
-            if (lower === 'weekdayhappyhourstart') acc.weekdayHappyHourStart = String(val);
-            if (lower === 'weekdayhappyhourend') acc.weekdayHappyHourEnd = String(val);
-            if (lower === 'isweekendhappyhouractive') acc.isWeekendHappyHourActive = Boolean(val);
-            if (lower === 'weekendhappyhourrate') acc.weekendHappyHourRate = Number(val) || 0;
-            if (lower === 'weekendhappyhourstart') acc.weekendHappyHourStart = String(val);
-            if (lower === 'weekendhappyhourend') acc.weekendHappyHourEnd = String(val);
-            return acc; 
-          }, {});
-          
-          setRates(prev => ({ ...prev, ...settingsObj }));
-          setReservationTerms(prev => ({ ...prev, ...settingsObj }));
-        }
-
-        if (feedbackData && feedbackData.length > 0) {
-          setFeedback(feedbackData.map((f: any) => ({
-            id: f.id,
-            customerName: f.customerName || f.customer_name || 'Guest',
-            contactInfo: f.contactInfo || f.contact_info || '',
-            rating: Number(f.rating || 0),
-            feedbackType: f.feedbackType || f.feedback_type || 'suggestion',
-            comment: f.comment || '',
-            date: f.date ? new Date(f.date) : new Date(),
-            reservationId: f.reservationId || f.reservation_id,
-            tags: Array.isArray(f.tags) ? f.tags : (typeof f.tags === 'string' ? JSON.parse(f.tags || '[]') : [])
-          })) as Feedback[]);
-        }
-
-      } catch (err) {
-        console.error("Failed to sync with Supabase:", err);
-      } finally { 
-        if (isInitial) {
-          setTimeout(() => setIsInitializing(false), 800); 
-        }
+            isActive,
+            expiresAt: a.expires_at || a.expiresat || a.expiresAt || null,
+            createdAt: a.created_at || a.createdat || a.createdAt || new Date().toISOString(),
+            startDate: a.start_date || a.startdate || a.startDate || null
+          };
+        }) as Announcement[]);
       }
-    };
-    
-    // Initial fetch
-    fetchSupabaseData(true);
+      if (feedData) setFeedback((feedData as any[]).map(f => ({ ...f, tags: typeof f.tags === 'string' ? JSON.parse(f.tags || '[]') : (f.tags || []) })) as Feedback[]);
+      if (promoData) {
+        const countFromRes = (code: string) => {
+          if (!resData || !code) return 0;
+          return (resData as any[]).filter(r => {
+            const pCode = (r.promoCode || r.promocode || r.promo_code || '').trim().toUpperCase();
+            return pCode === code.trim().toUpperCase();
+          }).length;
+        };
 
-    // 🟢 Realtime sync across all live tables (tables, reservations, queue, promo_codes, settings, announcements)
-    const channelName = `realtime_site_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    const realtimeChannel = supabase.channel(channelName);
+        setPromoCodes((promoData as any[]).map(r => {
+          const resCount = countFromRes(r.code);
+          const effectiveUsage = Math.max(r.usage_count ?? r.usageCount ?? 0, resCount);
+          return {
+            id: r.id,
+            code: r.code,
+            discountPercent: r.discount_percent ?? r.discountPercent ?? 0,
+            description: r.description,
+            isActive: r.is_active === 1 || r.is_active === true || r.isActive === true || r.isActive === 1,
+            isLimitedUses: r.is_limited_uses === 1 || r.is_limited_uses === true || r.isLimitedUses === true,
+            maxUsage: r.max_usage ?? r.maxUsage ?? 0,
+            usageCount: effectiveUsage,
+            startDate: r.start_date || r.startDate || null,
+            expiresAt: r.expires_at || r.expiresAt || null
+          };
+        }) as PromoCode[]);
+      }
+      if (closedDatesData) setClosedDates((closedDatesData as any[]).map(r => ({ id: r.id, date: r.closed_date, type: r.type || 'specific', dayOfWeek: r.day_of_week, reason: r.reason, isFullDay: !!r.is_full_day, openTime: r.open_time, closeTime: r.close_time })) as ClosedDate[]);
+      if (eventsData) setEvents((eventsData as any[]).map(e => ({ ...e, slotsFull: !!e.slotsFull, allowReservations: e.allowReservations !== false, caterWalkIns: e.caterWalkIns !== false, walkInTableCount: e.walkInTableCount ?? 10, attachments: e.attachments ? [e.attachments] : [] })) as Event[]);
+      
+      let configObj: any = {};
+      if (cmsData) { 
+        (cmsData as any[]).forEach((curr: any) => {
+          const k = curr.key_name || curr.keyName || curr.keyname;
+          const v = curr.content_value ?? curr.setting_value ?? curr.settingValue ?? curr.settingvalue;
+          if (k) configObj[k] = v;
+        }); 
+      }
+      
+      if (settingsData) { 
+        const settingsObj = (settingsData as any[]).reduce((acc: any, curr: any) => { 
+          const k = curr.key_name || curr.keyName || curr.keyname;
+          let val = curr.setting_value ?? curr.settingValue ?? curr.settingvalue ?? curr.content_value; 
+          if (val === 'true') val = true; 
+          else if (val === 'false') val = false; 
+          else if (!isNaN(val) && val.trim() !== '' && !val.includes(':')) val = Number(val); 
+          if (k) {
+            acc[k] = val; 
+            configObj[k] = val;
+          }
+          return acc; 
+        }, {}); 
+        setRates(prev => ({ ...prev, ...settingsObj })); 
+        setReservationTerms(prev => ({ ...prev, ...settingsObj })); 
+      }
+      setSiteConfig((prev: any) => ({ ...(prev || {}), ...configObj }));
 
-    realtimeChannel
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'system_settings' }, (payload: any) => {
-        if (payload.new) {
-          const row = payload.new;
-          const rawKey = row.key_name || row.keyname || row.keyName;
-          if (!rawKey) return;
-          let val = row.setting_value !== undefined ? row.setting_value : row.settingvalue;
-          if (val === 'true' || val === true || val === '1' || val === 1) val = true;
-          else if (val === 'false' || val === false || val === '0' || val === 0) val = false;
-          else if (val !== null && val !== undefined && !isNaN(val) && String(val).trim() !== '' && !String(val).includes(':')) val = Number(val);
+      if (resData) {
+        const mappedRes = (resData as any[]).map(r => ({
+          id: r.id, customerName: r.customerName || r.customer_name, contactNumber: r.contactNumber || r.contact_number, email: r.email, date: new Date(r.date), timeSlot: r.timeSlot || r.time_slot, durationHours: r.durationHours || r.duration_hours, partySize: r.partySize || r.party_size, tableId: r.tableId || r.table_id, status: r.status, totalAmount: r.totalAmount || r.total_amount, downPaymentAmount: r.downPaymentAmount || r.down_payment_amount, downPaymentPaid: !!r.downPaymentPaid || !!r.down_payment_paid, balancePaid: !!r.balancePaid || !!r.balance_paid, createdAt: new Date(r.createdAt || r.created_at), cancellationReason: r.cancellationReason || r.cancellation_reason, refundStatus: r.refundStatus || r.refund_status, refundMethod: r.refundMethod || r.refund_method, refundNotes: r.refundNotes || r.refund_notes, paymentRef: r.paymentRef || r.payment_ref, receiptImg: r.receiptImg || r.receipt_img_url, promoCode: r.promoCode || r.promocode || r.promo_code || null, discountAmount: r.discountAmount || r.discountamount || r.discount_amount || 0
+        }));
+        setReservations(mappedRes);
 
-          const updates: Record<string, any> = { [rawKey]: val };
-          const camelKey = rawKey.replace(/_([a-z])/g, (_: string, letter: string) => letter.toUpperCase());
-          updates[camelKey] = val;
+        // 3. CACHE RESERVATIONS TO LOCAL SQLITE FOR OFFLINE FALLBACK
+        fetch('http://localhost:3001/api/cache-reservations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reservations: mappedRes })
+        }).catch(() => console.log('Local Cache Update Failed'));
+      }
+      
+      setLastSynced(new Date());
 
-          const lower = rawKey.toLowerCase();
-          if (lower === 'isweekdayhappyhouractive') updates.isWeekdayHappyHourActive = Boolean(val);
-          if (lower === 'weekdayhappyhourrate') updates.weekdayHappyHourRate = Number(val) || 0;
-          if (lower === 'weekdayhappyhourstart') updates.weekdayHappyHourStart = String(val);
-          if (lower === 'weekdayhappyhourend') updates.weekdayHappyHourEnd = String(val);
-          if (lower === 'isweekendhappyhouractive') updates.isWeekendHappyHourActive = Boolean(val);
-          if (lower === 'weekendhappyhourrate') updates.weekendHappyHourRate = Number(val) || 0;
-          if (lower === 'weekendhappyhourstart') updates.weekendHappyHourStart = String(val);
-          if (lower === 'weekendhappyhourend') updates.weekendHappyHourEnd = String(val);
+    } catch (err) {
+      console.warn("⚠️ Supabase Offline. Loading Reservations from Local Cache...", err);
+      // 4. STRICT OFFLINE FALLBACK FOR RESERVATIONS & CLOUD SETTINGS
+      const [resRes, ratesRes, annRes, cmsRes, closedDatesRes, promoRes, eventsRes, historyResFb] = await Promise.all([
+        fetch('http://localhost:3001/api/reservations').catch(() => null), fetch('http://localhost:3001/api/settings/rates').catch(() => null), fetch('http://localhost:3001/api/announcements').catch(() => null), fetch('http://localhost:3001/api/cms').catch(() => null), fetch('http://localhost:3001/api/closed-dates').catch(() => null), fetch('http://localhost:3001/api/promo-codes').catch(() => null), fetch('http://localhost:3001/api/events').catch(() => null), fetch('http://localhost:3001/api/session-history').catch(() => null)
+      ]);
 
-          setRates(prev => ({ ...prev, ...updates }));
-          setReservationTerms(prev => ({ ...prev, ...updates }));
-        }
-        fetchSupabaseData(false);
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tables' }, () => {
-        fetchSupabaseData(false);
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'reservations' }, () => {
-        fetchSupabaseData(false);
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'queue' }, () => {
-        fetchSupabaseData(false);
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'promo_codes' }, () => {
-        fetchSupabaseData(false);
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'announcements' }, () => {
-        fetchSupabaseData(false);
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'closed_dates' }, () => {
-        fetchSupabaseData(false);
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'events' }, () => {
-        fetchSupabaseData(false);
-      })
-      .subscribe();
+      if (resRes && resRes.ok) setReservations(await resRes.json());
+      if (annRes && annRes.ok) setAnnouncements(await annRes.json());
+      if (cmsRes && cmsRes.ok) setSiteConfig(await cmsRes.json());
+      if (closedDatesRes && closedDatesRes.ok) setClosedDates(await closedDatesRes.json());
+      if (promoRes && promoRes.ok) setPromoCodes(await promoRes.json());
+      if (historyResFb && historyResFb.ok) setSessionHistory(await historyResFb.json()); // 🟢 Fallback retains local history
+      if (eventsRes && eventsRes.ok) {
+        const dbEvents = await eventsRes.json();
+        setEvents(prev => { const existingIds = new Set(prev.map(e => e.id)); return [...prev, ...dbEvents.filter((e: any) => !existingIds.has(e.id))]; });
+      }
+      if (ratesRes && ratesRes.ok) {
+        const dbSettings = await ratesRes.json();
+        setRates(prev => ({ ...prev, ...dbSettings }));
+        setReservationTerms(prev => ({ ...prev, ...dbSettings }));
+      }
+    } finally {
+      setIsInitializing(false);
+    }
+  };
 
-    // 🟢 Silent periodic background polling fallback (every 7 seconds) so site never misses any local/remote state updates
-    const pollInterval = setInterval(() => {
-      fetchSupabaseData(false);
-    }, 7000);
-
-    return () => {
-      clearInterval(pollInterval);
-      supabase.removeChannel(realtimeChannel);
-    };
+  useEffect(() => {
+    forceFullSync();
   }, []);
 
   useEffect(() => {
@@ -565,24 +508,445 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
     fetchHolidays();
   }, []);
+  
+  const cloudSyncTimeout = useRef<NodeJS.Timeout | null>(null);
 
-  const addReservation = async (i: Omit<Reservation, 'id'|'createdAt'>): Promise<string> => {
+  const runCloudBackup = () => {
+    if (cloudSyncTimeout.current) clearTimeout(cloudSyncTimeout.current);
+    cloudSyncTimeout.current = setTimeout(() => {
+      fetch('http://localhost:3001/api/sync-to-cloud', { method: 'POST' }).catch(() => {});
+    }, 1500); 
+  };
+
+  const syncToDB = async (endpoint: string, method: 'POST' | 'PUT' | 'DELETE', payload: any, successMsg: string) => {
+    try {
+      const res = await fetch(`http://localhost:3001${endpoint}`, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const text = await res.text();
+      let json: any = null;
+      try { json = text ? JSON.parse(text) : null; } catch (e) { json = text; }
+      if (res.ok) { return json; } else { throw new Error(`DB error: ${res.status} ${text}`); }
+    } catch (e) { throw e; }
+  };
+
+  const addActivity = (type: ActivityType, description: string, metadata?: Record<string, any>) => {
+    const actor = staffProfile?.fullName || 'System / Customer';
+    const actorId = staffProfile?.id || 'system';
+    const detailedDescription = `${description} (Action by: ${actor})`;
+    const newActivity = { 
+      id: `act_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`, 
+      type, 
+      description: detailedDescription, 
+      timestamp: new Date(), 
+      metadata: { ...metadata, actorId } 
+    };
+    setActivities(prev => [newActivity, ...prev]);
+    syncToDB('/api/activities', 'POST', newActivity, "Activity logged").then(runCloudBackup).catch(()=>{});
+  };
+
+  const assignTable = (tableId: string, session: Session) => {
+    const updatedSession = { ...session, orders: [] };
+    setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'occupied', session: updatedSession } : t));
+    addActivity('table_assigned', `Assigned ${tables.find(t=>t.id===tableId)?.name} to ${session.customerName}`);
+    syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'occupied', session: updatedSession }, `Table assigned`).then(runCloudBackup).catch(()=>{});
+    supabase.from('tables').update({ status: 'occupied', sessionData: JSON.stringify(updatedSession), isActive: 1 }).eq('id', tableId).then();
+  };
+
+  const freeTable = (tableId: string) => {
+    setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'available', session: undefined, maintenanceReason: undefined } : t));
+    addActivity('table_freed', `Freed ${tables.find(t=>t.id===tableId)?.name}`);
+    syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'available', session: null }, `Table freed`).then(runCloudBackup).catch(()=>{});
+    supabase.from('tables').update({ status: 'available', sessionData: null, maintenanceReason: null, isActive: 1 }).eq('id', tableId).then();
+  };
+
+  const extendSession = (tableId: string, mins: number, pay: number) => {
+    setTables(prev => prev.map(t => {
+      if (t.id === tableId && t.session) {
+        const updatedSession = { ...t.session, durationMinutes: (t.session.durationMinutes||0) + mins, amountPaid: t.session.amountPaid + pay };
+        syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'occupied', session: updatedSession }, `Table extended`).then(runCloudBackup).catch(()=>{});
+        supabase.from('tables').update({ status: 'occupied', sessionData: JSON.stringify(updatedSession), isActive: 1 }).eq('id', tableId).then();
+        return { ...t, session: updatedSession };
+      }
+      return t;
+    }));
+    addActivity('session_extended', `Extended session at ${tables.find(t=>t.id===tableId)?.name} by ${mins} minutes`);
+  };
+
+  const migrateSession = (fromTableId: string, toTableId: string) => {
+    setTables(prev => {
+      const fromTable = prev.find(t => t.id === fromTableId);
+      const toTable = prev.find(t => t.id === toTableId);
+      if (!fromTable || !toTable || !fromTable.session) return prev;
+
+      const sessionToMove = { 
+        ...fromTable.session,
+        tableId: toTable.id,
+        tableName: toTable.name
+      };
+
+      const newTables = prev.map(t => {
+        if (t.id === fromTableId) return { ...t, status: 'available' as TableStatus, session: undefined };
+        if (t.id === toTableId) return { ...t, status: 'occupied' as TableStatus, session: sessionToMove };
+        return t;
+      });
+
+      syncToDB(`/api/tables/${fromTableId}`, 'PUT', { status: 'available', session: null }, `Freed for migration`).then(runCloudBackup).catch(()=>{});
+      supabase.from('tables').update({ status: 'available', sessionData: null, sessiondata: null, isActive: 1 }).eq('id', fromTableId).then();
+
+      syncToDB(`/api/tables/${toTableId}`, 'PUT', { status: 'occupied', session: sessionToMove }, `Occupied from migration`).then(runCloudBackup).catch(()=>{});
+      supabase.from('tables').update({ status: 'occupied', sessionData: JSON.stringify(sessionToMove), sessiondata: JSON.stringify(sessionToMove), isActive: 1 }).eq('id', toTableId).then();
+
+      addActivity('admin_action', `Migrated session (${sessionToMove.customerName}) from ${fromTable.name} to ${toTable.name}`);
+      return newTables;
+    });
+  };
+
+  const reserveTable = (tableId: string) => {
+    setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'reserved' } : t));
+    addActivity('table_reserved', `Reserved ${tables.find(t=>t.id===tableId)?.name}`);
+    supabase.from('tables').update({ status: 'reserved', isActive: 1 }).eq('id', tableId).then();
+  };
+  
+  const setTableMaintenance = (tableId: string, reason: string) => {
+    setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'maintenance', maintenanceReason: reason } : t));
+    syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'maintenance', maintenanceReason: reason }, `Table maintenance set`).then(runCloudBackup).catch(()=>{});
+    addActivity('admin_action', `Set ${tables.find(t=>t.id===tableId)?.name} to maintenance: ${reason}`);
+    supabase.from('tables').update({ status: 'maintenance', maintenanceReason: reason, isActive: 1 }).eq('id', tableId).then();
+  };
+
+  const setTableEvent = (tableId: string, eventName: string) => {
+    setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'event', maintenanceReason: eventName } : t));
+    syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'event', maintenanceReason: eventName }, `Table marked for event`).then(runCloudBackup).catch(()=>{});
+    addActivity('admin_action', `Reserved ${tables.find(t=>t.id===tableId)?.name} for event: ${eventName}`);
+    supabase.from('tables').update({ status: 'event', maintenanceReason: eventName, isActive: 1 }).eq('id', tableId).then();
+  };
+
+  const submitTableOrders = (tableId: string, cart: SessionOrder[]) => {
+    let updatedTableSession: Session | undefined;
+    setInventory(prev => prev.map(inv => {
+      const cartItem = cart.find(c => c.id === inv.id);
+      if (cartItem) {
+        const newStock = inv.stock - cartItem.qty;
+        syncToDB(`/api/inventory/${inv.id}`, 'PUT', { stock: newStock }, `Stock updated`).then(runCloudBackup).catch(()=>{});
+        supabase.from('inventory').update({ stock: newStock }).eq('id', inv.id).then();
+        return { ...inv, stock: newStock };
+      }
+      return inv;
+    }));
+    setTables(prev => prev.map(t => {
+      if (t.id === tableId && t.session) {
+        const newOrders = [...(t.session.orders || [])];
+        cart.forEach(cartItem => {
+          const existing = newOrders.find(o => o.id === cartItem.id);
+          if (existing) existing.qty += cartItem.qty;
+          else newOrders.push({ ...cartItem });
+        });
+        updatedTableSession = { ...t.session, orders: newOrders };
+        return { ...t, session: updatedTableSession };
+      }
+      return t;
+    }));
+    if (updatedTableSession) {
+      syncToDB(`/api/tables/${tableId}`, 'PUT', { session: updatedTableSession }, `Orders updated`).then(runCloudBackup).catch(()=>{});
+      supabase.from('tables').update({ sessionData: JSON.stringify(updatedTableSession) }).eq('id', tableId).then();
+    }
+    addActivity('pos_order', `Confirmed ${cart.length} new items for ${tables.find(t=>t.id===tableId)?.name}`);
+  };
+
+  const voidTableOrder = (tableId: string, orderIndex: number, order: SessionOrder) => {
+    let updatedTableSession: Session | undefined;
+    setInventory(prev => prev.map(inv => {
+      if (inv.id === order.id) {
+        const newStock = inv.stock + order.qty;
+        syncToDB(`/api/inventory/${inv.id}`, 'PUT', { stock: newStock }, `Stock restored`).then(runCloudBackup).catch(()=>{});
+        supabase.from('inventory').update({ stock: newStock }).eq('id', inv.id).then();
+        return { ...inv, stock: newStock };
+      }
+      return inv;
+    }));
+    setTables(prev => prev.map(t => {
+      if (t.id === tableId && t.session) {
+        const newOrders = [...(t.session.orders || [])];
+        newOrders.splice(orderIndex, 1);
+        updatedTableSession = { ...t.session, orders: newOrders };
+        return { ...t, session: updatedTableSession };
+      }
+      return t;
+    }));
+    if (updatedTableSession) {
+      syncToDB(`/api/tables/${tableId}`, 'PUT', { session: updatedTableSession }, `Order voided`).then(runCloudBackup).catch(()=>{});
+      supabase.from('tables').update({ sessionData: JSON.stringify(updatedTableSession) }).eq('id', tableId).then();
+    }
+    addActivity('admin_action', `Voided ${order.name} (x${order.qty}) from ${tables.find(t=>t.id===tableId)?.name}`);
+  };
+
+  const addToQueue = (i: Omit<QueueItem, 'id'|'arrivalTime'|'status'|'queueNumber'>) => {
+    setQueue(prev => {
+      const nextNum = Math.max(0, ...prev.map(q => q.queueNumber ?? 0)) + 1;
+      const newItem = { ...i, id: `q${Date.now()}`, arrivalTime: new Date(), status: 'waiting' as const, queueNumber: nextNum };
+      addActivity('queue_added', `Added ${i.customerName} to queue position #${nextNum}`);
+      syncToDB('/api/queue', 'POST', newItem, `Queue item added`).then(runCloudBackup).catch(()=>{});
+      supabase.from('queue').insert([{ ...newItem, arrivalTime: newItem.arrivalTime.toISOString() }]).then();
+      return [...prev, newItem];
+    });
+  };
+
+  const removeFromQueue = (id: string) => {
+    setQueue(prev => prev.filter(q => q.id !== id));
+    syncToDB(`/api/queue/${id}`, 'DELETE', {}, `Queue item removed`).then(runCloudBackup).catch(()=>{});
+    addActivity('queue_removed', `Removed ID: ${id} from queue`);
+    supabase.from('queue').delete().eq('id', id).then();
+  };
+
+  const callQueueItem = (id: string) => {
+    setQueue(prev => prev.map(q => q.id === id ? { ...q, status: 'called' } : q));
+    addActivity('queue_called', `Called customer ID: ${id} from queue to available table`);
+    syncToDB(`/api/queue/${id}`, 'PUT', { status: 'called' }, `Queue item called`).then(runCloudBackup).catch(()=>{});
+    supabase.from('queue').update({ status: 'called' }).eq('id', id).then();
+  };
+
+  const addLostItem = (i: Omit<LostItem, 'id'>) => {
+    const newItem = { ...i, id: `lf${Date.now()}` };
+    setLostItems(prev => [newItem, ...prev]);
+    syncToDB('/api/lost-and-found', 'POST', newItem, `Added lost item`).then(runCloudBackup).catch(()=>{});
+    addActivity('admin_action', `Added lost item: ${i.itemName}`);
+  };
+  const updateLostItem = (id: string, u: Partial<LostItem>) => {
+    setLostItems(prev => prev.map(i => i.id === id ? { ...i, ...u } : i));
+    syncToDB(`/api/lost-and-found/${id}`, 'PUT', u, `Updated lost item`).then(runCloudBackup).catch(()=>{});
+  };
+  const deleteLostItem = (id: string) => {
+    setLostItems(prev => prev.map(i => i.id === id ? { ...i, isArchived: true } : i));
+    syncToDB(`/api/lost-and-found/${id}`, 'DELETE', {}, `Archived lost item`).then(runCloudBackup).catch(()=>{});
+  };
+
+  const addWatchlistItem = (i: Omit<WatchlistItem, 'id'>) => {
+    const newItem = { ...i, id: `wl${Date.now()}` };
+    setWatchlist(prev => [newItem, ...prev]);
+    syncToDB('/api/watchlist', 'POST', newItem, `Added to watchlist`).then(runCloudBackup).catch(()=>{});
+    addActivity('admin_action', `Added ${i.name} to Watchlist`);
+  };
+  const updateWatchlistItem = (id: string, u: Partial<WatchlistItem>) => {
+    setWatchlist(prev => prev.map(i => i.id === id ? { ...i, ...u } : i));
+    syncToDB(`/api/watchlist/${id}`, 'PUT', u, `Updated watchlist item`).then(runCloudBackup).catch(()=>{});
+  };
+  const deleteWatchlistItem = (id: string) => {
+    setWatchlist(prev => prev.map(i => i.id === id ? { ...i, isArchived: true } : i));
+    syncToDB(`/api/watchlist/${id}`, 'DELETE', {}, `Archived watchlist item`).then(runCloudBackup).catch(()=>{});
+  };
+
+  const addSessionHistory = (i: Omit<SessionHistoryItem, 'id'>) => {
+    const newItem = { ...i, id: `sh${Date.now()}` };
+    setSessionHistory(prev => [newItem, ...prev]);
+    syncToDB('/api/session-history', 'POST', newItem, `Logged session history`).then(runCloudBackup).catch(()=>{});
+    
+    const startTimeStr = newItem.startTime ? new Date(newItem.startTime).toISOString() : new Date().toISOString();
+    const endTimeStr = newItem.endTime ? new Date(newItem.endTime).toISOString() : new Date().toISOString();
+
+    supabase.from('session_history').insert([{
+      ...newItem, 
+      startTime: startTimeStr, 
+      endTime: endTimeStr,
+      orders: JSON.stringify(newItem.orders || [])
+    }]).then();
+  };
+
+  const hashPassword = async (password: string) => {
+    const msgBuffer = new TextEncoder().encode(password);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  };
+
+  const staffLogin = async (u: string, p: string) => { 
+    const hashedP = await hashPassword(p); 
+    const valid = staffUsers.find(su => su.username === u && su.password === hashedP && su.isActive); 
+    if (valid) { 
+      setStaffLoggedIn(true); 
+      sessionStorage.setItem('oneshot_staff_auth', 'true');
+      const expiryTime = new Date().getTime() + (12 * 60 * 60 * 1000);
+      sessionStorage.setItem('oneshot_auth_expiry', expiryTime.toString());
+      sessionStorage.removeItem('oneshot_is_locked'); 
+      updateStaffProfile({ id: valid.id, fullName: valid.fullName, username: valid.username, role: valid.role, isAdmin: valid.isAdmin, phone: valid.phone || '', avatarImg: valid.avatarImg || '' });
+      await forceFullSync();
+      return true; 
+    }
+    return false; 
+  };
+
+  const adminLogin = async (u: string, p: string) => { 
+    const hashedP = await hashPassword(p); 
+    const valid = staffUsers.find(su => su.username === u && su.password === hashedP && su.isActive && su.isAdmin);
+    if (valid) {
+      setAdminLoggedIn(true);
+      sessionStorage.setItem('oneshot_admin_auth', 'true');
+      const expiryTime = new Date().getTime() + (12 * 60 * 60 * 1000);
+      sessionStorage.setItem('oneshot_auth_expiry', expiryTime.toString());
+      sessionStorage.removeItem('oneshot_is_locked');
+      updateStaffProfile({ id: valid.id, fullName: valid.fullName, username: valid.username, email: valid.email, role: valid.role, isAdmin: true, phone: valid.phone || '', avatarImg: valid.avatarImg || '' });
+      await forceFullSync();
+      return true;
+    }
+    return false; 
+  };
+
+  const staffLogout = async () => {
+    setIsLoggingOut(true);
+    setLogoutStep('Saving local SQLite records...');
+    await new Promise(r => setTimeout(r, 600));
+
+    setLogoutStep('Backing up to online cloud database...');
+    try {
+      await fetch('http://localhost:3001/api/sync-to-cloud', { method: 'POST' });
+    } catch (e) {
+      setLogoutStep('Local data saved securely. Closing app...');
+      await new Promise(r => setTimeout(r, 800));
+    }
+
+    setStaffLoggedIn(false);
+    setAdminLoggedIn(false);
+    sessionStorage.removeItem('oneshot_staff_auth');
+    sessionStorage.removeItem('oneshot_admin_auth');
+    sessionStorage.removeItem('oneshot_auth_expiry');
+    sessionStorage.removeItem('oneshot_is_locked');
+    sessionStorage.removeItem('oneshot_staff_profile'); 
+    window.location.reload(); 
+  };
+
+  const adminLogout = async () => {
+    setIsLoggingOut(true);
+    setLogoutStep('Saving local SQLite records...');
+    await new Promise(r => setTimeout(r, 600));
+
+    setLogoutStep('Backing up to online cloud database...');
+    try {
+      await fetch('http://localhost:3001/api/sync-to-cloud', { method: 'POST' });
+    } catch (e) {
+      setLogoutStep('Local data saved securely. Closing app...');
+      await new Promise(r => setTimeout(r, 800));
+    }
+
+    setAdminLoggedIn(false);
+    setStaffLoggedIn(false);
+    sessionStorage.removeItem('oneshot_admin_auth');
+    sessionStorage.removeItem('oneshot_staff_auth');
+    sessionStorage.removeItem('oneshot_auth_expiry');
+    sessionStorage.removeItem('oneshot_is_locked'); 
+    sessionStorage.removeItem('oneshot_staff_profile'); 
+    window.location.reload(); 
+  };
+
+ const resetStaffUserPassword = async (id: string) => {
+    try {
+      const targetUser = staffUsers.find(user => user.id === id);
+      const displayName = targetUser ? targetUser.fullName : id;
+      const hashedPw = await hashPassword('oneshotstaff'); 
+      setStaffUsers(prev => prev.map(u => u.id === id ? { ...u, password: hashedPw } : u));
+      syncToDB(`/api/staff/${id}`, 'PUT', { password: hashedPw }, `Reset staff password`).then(runCloudBackup).catch(()=>{});
+      addActivity('admin_action', `Reset password to default for: ${displayName}`);
+    } catch (error) { toast.error("Failed to reset password."); }
+  };
+
+  const resetPasswordWithPin = async (username: string, pin: string, newPassword: string) => {
+    const targetUser = staffUsers.find(u => u.username.toLowerCase() === username.toLowerCase() && u.isActive);
+    if (!targetUser) return { success: false, message: 'User not found or inactive.' };
+    if (targetUser.recoveryPin !== pin) return { success: false, message: 'Invalid Username or Recovery PIN.' };
+    const hashedNew = await hashPassword(newPassword); 
+    updateStaffUser(targetUser.id, { password: hashedNew });
+    addActivity('admin_action', `Password reset via Recovery PIN for user: ${username}`);
+    return { success: true, message: 'Password reset successfully!' };
+  };
+
+  const updateStaffProfile = (p: Partial<StaffProfile>) => {
+    setStaffProfile(prev => {
+      const updated = { ...prev, ...p };
+      sessionStorage.setItem('oneshot_staff_profile', JSON.stringify(updated));
+      return updated;
+    });
+
+    const targetId = p.id || staffProfile.id;
+    if (targetId) {
+      const dbPayload: Partial<StaffUser> = {};
+      
+      if (p.username !== undefined) dbPayload.username = p.username;
+      if (p.password !== undefined) dbPayload.password = p.password;
+      if (p.fullName !== undefined) dbPayload.fullName = p.fullName;
+      if (p.phone !== undefined) dbPayload.phone = p.phone;
+      if (p.avatarImg !== undefined) dbPayload.avatarImg = p.avatarImg;
+
+      if (Object.keys(dbPayload).length > 0) {
+        setStaffUsers(prev => prev.map(u => u.id === targetId ? { ...u, ...dbPayload } : u));
+        
+        fetch(`http://localhost:3001/api/staff/${targetId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(dbPayload)
+        }).catch(() => {});
+      }
+    }
+  };
+
+  const addTable = (name: string) => {
+    const newTable = { id: `t${Date.now()}`, name, status: 'available' as TableStatus, isActive: true };
+    setTables(prev => [...prev, newTable]);
+    addActivity('admin_action', `Added new table: ${name}`);
+    syncToDB('/api/tables', 'POST', newTable, `New table added`).then(runCloudBackup).catch(()=>{});
+  };
+
+  const updateTable = (id: string, name: string) => {
+    setTables(prev => prev.map(t => t.id === id ? { ...t, name } : t));
+    addActivity('admin_action', `Renamed table ID: ${id} to ${name}`);
+    syncToDB(`/api/tables/${id}`, 'PUT', { name }, `Table updated`).then(runCloudBackup).catch(()=>{});
+  };
+
+  const toggleTableActive = (id: string) => {
+    setTables(prev => {
+      const target = prev.find(t => t.id === id);
+      if (target) syncToDB(`/api/tables/${id}`, 'PUT', { isActive: !target.isActive }, `Table visibility toggled`).then(runCloudBackup).catch(()=>{});
+      return prev.map(t => t.id === id ? { ...t, isActive: !t.isActive } : t);
+    });
+    addActivity('admin_action', `Toggled active status for table ID: ${id}`);
+  };
+
+  const deleteTable = (id: string) => {
+    setTables(prev => prev.filter(t => t.id !== id));
+    syncToDB(`/api/tables/${id}`, 'DELETE', {}, `Table deleted`).then(runCloudBackup).catch(()=>{});
+    addActivity('admin_action', `Deleted table ID: ${id}`);
+  };
+
+  const addInventoryItem = (i: Omit<InventoryItem, 'id'>) => {
+    const newItem = { ...i, id: `inv${Date.now()}` };
+    setInventory(prev => [...prev, newItem]);
+    syncToDB('/api/inventory', 'POST', newItem, `Added ${i.name} to inventory`).then(runCloudBackup).catch(()=>{});
+    addActivity('admin_action', `Added new menu item: ${i.name}`); 
+  };
+
+  const updateInventoryItem = (id: string, u: Partial<InventoryItem>) => {
+    setInventory(prev => prev.map(i => i.id === id ? { ...i, ...u } : i));
+    syncToDB(`/api/inventory/${id}`, 'PUT', u, `Updated item ${id}`).then(runCloudBackup).catch(()=>{});
+    addActivity('admin_action', `Updated details for menu item ID: ${id}`);
+  };
+
+  const deleteInventoryItem = (id: string) => {
+    setInventory(prev => prev.filter(i => i.id !== id));
+    syncToDB(`/api/inventory/${id}`, 'DELETE', {}, `Inventory item deleted`).then(runCloudBackup).catch(()=>{});
+    addActivity('admin_action', `Deleted menu item ID: ${id}`);
+  };
+
+  const addReservation = (i: Omit<Reservation, 'id'|'createdAt'>): string => {
     const id = Math.random().toString(36).substring(2, 8).toUpperCase();
     const newRes = { ...i, id, createdAt: new Date() };
     
     setReservations(prev => [...prev, newRes as Reservation]);
+    addActivity('reservation_created', `New reservation created for ${i.customerName} (${id})`); 
     
-    const dateFormatted = typeof newRes.date === 'string'
-      ? newRes.date.split('T')[0]
-      : `${newRes.date.getFullYear()}-${String(newRes.date.getMonth() + 1).padStart(2, '0')}-${String(newRes.date.getDate()).padStart(2, '0')}`;
-
-    // 🟢 Map payload to match the Supabase schema using publicSupabase to bypass user-token RLS
+    syncToDB('/api/reservations', 'POST', newRes, `Reservation ${id} added`).then(runCloudBackup).catch(() => {});
+    
     const supabasePayload = {
       id: newRes.id,
       customerName: newRes.customerName,
       contactNumber: newRes.contactNumber,
-      email: newRes.email ? newRes.email.trim() : null,
-      date: dateFormatted,
+      email: newRes.email || null,
+      date: newRes.date.toISOString(),
       timeSlot: newRes.timeSlot,
       durationHours: newRes.durationHours,
       partySize: newRes.partySize,
@@ -595,113 +959,352 @@ export function AppProvider({ children }: { children: ReactNode }) {
       paymentRef: newRes.paymentRef || null,
       receiptImg: newRes.receiptImg || null,
       promoCode: newRes.promoCode || null,
-      discountAmount: newRes.discountAmount || 0,
+      discountAmount: newRes.discountAmount || null,
       createdAt: newRes.createdAt.toISOString()
     };
     
-    try {
-      const { error } = await publicSupabase.from('reservations').insert([supabasePayload]);
-      if (error) {
-        console.warn("Primary Supabase reservation insert note:", error.message);
-        // Fallback with minimal columns if an optional column constraint failed
-        await publicSupabase.from('reservations').insert([{
-          id: newRes.id,
-          customerName: newRes.customerName,
-          contactNumber: newRes.contactNumber,
-          email: newRes.email ? newRes.email.trim() : null,
-          date: dateFormatted,
-          timeSlot: newRes.timeSlot,
-          durationHours: newRes.durationHours,
-          partySize: newRes.partySize,
-          status: newRes.status,
-          totalAmount: newRes.totalAmount,
-          downPaymentAmount: newRes.downPaymentAmount,
-          downPaymentPaid: newRes.downPaymentPaid ? 1 : 0,
-          balancePaid: 0,
-          createdAt: new Date().toISOString()
-        }]);
-      }
-    } catch (insertErr) {
-      console.error("Supabase insert exception:", insertErr);
-    }
-
-    // 🟢 Increment promo code redemption usage count
-    if (newRes.promoCode) {
-      const pCode = newRes.promoCode.trim().toUpperCase();
-      const targetPromo = promoCodes.find(p => p.code.trim().toUpperCase() === pCode);
-      if (targetPromo) {
-        const nextCount = (targetPromo.usageCount || 0) + 1;
-        setPromoCodes(prev => prev.map(p => p.id === targetPromo.id ? { ...p, usageCount: nextCount } : p));
-        publicSupabase
-          .from('promo_codes')
-          .update({ usage_count: nextCount })
-          .eq('id', targetPromo.id)
-          .then(({ error }) => {
-            if (error) {
-              publicSupabase.from('promo_codes').update({ usageCount: nextCount }).eq('id', targetPromo.id);
-            }
-          });
-      }
-    }
+    supabase.from('reservations').insert([supabasePayload]).then(({ error }) => {
+      if (error) console.error("Supabase insert error:", error);
+    });
     
     return id;
+  };
+  
+  const updateReservationStatus = (id: string, status: ReservationStatus) => {
+    setReservations(prev => prev.map(r => r.id === id ? { ...r, status } : r));
+    syncToDB(`/api/reservations/${id}`, 'PUT', { status }, `Reservation status updated`).then(runCloudBackup).catch(()=>{});
+    supabase.from('reservations').update({ status }).eq('id', id).then();
+    addActivity('reservation_updated', `Reservation ${id} status updated to ${status}`); 
+  };
+
+  const cancelReservation = (id: string, reason: string) => {
+    setReservations(prev => prev.map(r => r.id === id ? { ...r, status: 'cancelled', cancellationReason: reason } : r));
+    syncToDB(`/api/reservations/${id}`, 'PUT', { status: 'cancelled', cancellationReason: reason }, `Reservation cancelled`).then(runCloudBackup).catch(()=>{});
+    supabase.from('reservations').update({ 
+      status: 'cancelled', 
+      cancellation_reason: reason,
+      cancellationreason: reason
+    }).eq('id', id).then(({ error }) => {
+      if (error) console.error("Supabase cancel error:", error);
+    });
+    addActivity('reservation_cancelled', `Reservation ${id} was cancelled. Reason: ${reason}`); 
+  };
+
+  const updateDownPayment = (id: string, paid: boolean) => {
+    setReservations(prev => prev.map(r => r.id === id ? { ...r, downPaymentPaid: paid } : r));
+    syncToDB(`/api/reservations/${id}`, 'PUT', { downPaymentPaid: paid }, `Down payment updated`).then(runCloudBackup).catch(()=>{});
+    supabase.from('reservations').update({ downPaymentPaid: paid ? 1 : 0 }).eq('id', id).then();
+    if (paid) addActivity('payment_received', `Down payment recorded for reservation ${id}`); 
+  };
+
+  const updateBalance = (id: string, paid: boolean) => {
+    setReservations(prev => prev.map(r => r.id === id ? { ...r, balancePaid: paid } : r));
+    syncToDB(`/api/reservations/${id}`, 'PUT', { balancePaid: paid }, `Balance updated`).then(runCloudBackup).catch(()=>{});
+    supabase.from('reservations').update({ balancePaid: paid ? 1 : 0 }).eq('id', id).then();
+    if (paid) addActivity('payment_received', `Remaining balance settled for reservation ${id}`); 
+  };
+
+  const updateRefundStatus = (id: string, refundStatus: string, method?: string, notes?: string) => {
+    setReservations(prev => prev.map(r => r.id === id ? { ...r, refundStatus: refundStatus as any, refundMethod: method as any, refundNotes: notes } as Reservation : r));
+    const payload = { refundStatus, refundMethod: method, refundNotes: notes };
+    syncToDB(`/api/reservations/${id}`, 'PUT', payload, `Refund status updated`).then(runCloudBackup).catch(()=>{});
+    supabase.from('reservations').update({ refundStatus: refundStatus, refundMethod: method, refundNotes: notes }).eq('id', id).then();
+    addActivity('reservation_updated', `Refund for ${id} marked as ${refundStatus}`); 
+  };
+
+  const acknowledgeRefund = (id: string) => {
+    setReservations(prev => prev.map(r => r.id === id ? { ...r, refundStatus: 'acknowledged' } as Reservation : r));
+    syncToDB(`/api/reservations/${id}`, 'PUT', { refundStatus: 'acknowledged' }, `Refund acknowledged`).then(runCloudBackup).catch(()=>{});
+    supabase.from('reservations').update({ refundStatus: 'acknowledged' }).eq('id', id).then();
+  };
+
+  const updateReservation = (id: string, u: Partial<Reservation>) => {
+    setReservations(prev => prev.map(r => r.id === id ? { ...r, ...u } : r));
+    syncToDB(`/api/reservations/${id}`, 'PUT', u, `Reservation updated`).then(runCloudBackup).catch(()=>{});
+    
+    const dbUpdates: any = {};
+    if (u.date) dbUpdates.date = new Date(u.date).toISOString();
+    if (u.timeSlot) dbUpdates.timeSlot = u.timeSlot;
+    if (u.durationHours) dbUpdates.durationHours = u.durationHours;
+    if (u.partySize) dbUpdates.partySize = u.partySize;
+    if (u.status) dbUpdates.status = u.status;
+    if (u.tableId !== undefined) dbUpdates.tableId = u.tableId; 
+    if (u.cancellationReason !== undefined) {
+      dbUpdates.cancellation_reason = u.cancellationReason;
+      dbUpdates.cancellationreason = u.cancellationReason;
+    }
+    if (u.downPaymentPaid !== undefined) dbUpdates.downPaymentPaid = u.downPaymentPaid ? 1 : 0;
+    if (u.balancePaid !== undefined) dbUpdates.balancePaid = u.balancePaid ? 1 : 0;
+    
+    supabase.from('reservations').update(dbUpdates).eq('id', id).then(({error}) => {
+      if (error) console.error("Supabase Reschedule/Void Error:", error);
+    });
+    addActivity('reservation_updated', `Reservation ${id} details were updated`);
   };
 
   const addFeedback = (i: Omit<Feedback, 'id'|'date'>) => {
     const newFeedback = { ...i, id: `f${Date.now()}`, date: new Date() };
     setFeedback(prev => [newFeedback as Feedback, ...prev]);
-    
-    try {
-      const stored = JSON.parse(localStorage.getItem('oneshot_local_feedback') || '[]');
-      stored.unshift(newFeedback);
-      localStorage.setItem('oneshot_local_feedback', JSON.stringify(stored.slice(0, 50)));
-    } catch (e) {}
-
-    const supabasePayload = {
-      id: newFeedback.id,
-      customerName: newFeedback.customerName,
-      contactInfo: newFeedback.contactInfo || '',
-      feedbackType: newFeedback.feedbackType || 'suggestion',
-      comment: newFeedback.comment,
-      reservationId: newFeedback.reservationId || null,
-      tags: Array.isArray(newFeedback.tags) ? newFeedback.tags : [],
-      status: 'pending',
-      date: new Date().toISOString()
-    };
-
-    // 1. Sync to Cloud Supabase
-    publicSupabase.from('feedback').insert([supabasePayload]).then(({ error }) => {
-      if (error) console.warn("Feedback cloud sync info:", error.message);
-    }).catch(e => console.warn("Feedback network note:", e));
-
-    // 2. Direct sync to local POS / machine edge server if available
-    try {
-      fetch('/api/feedback', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(supabasePayload)
-      }).catch(() => {});
-    } catch (e) {}
+    syncToDB('/api/feedback', 'POST', newFeedback, "New customer feedback").then(runCloudBackup).catch(()=>{});
+    const { rating, ...supabasePayload } = newFeedback;
+    supabase.from('feedback').insert([supabasePayload]).then();
+  };
+  const resolveFeedback = (id: string, notes: string) => {
+    setFeedback(prev => prev.map(f => f.id === id ? { ...f, status: 'resolved', notes } : f));
+    syncToDB(`/api/feedback/${id}`, 'PUT', { status: 'resolved', notes }, `Feedback resolved`).then(runCloudBackup).catch(()=>{});
+    supabase.from('feedback').update({ status: 'resolved', notes }).eq('id', id).then();
+    addActivity('admin_action', `Resolved feedback message from ID: ${id}`);
   };
 
+  const addPromoCode = (i: Omit<PromoCode, 'id'|'createdAt'|'usageCount'>): string => {
+    const id = `p${Date.now()}`;
+    const newPromo = { ...i, id, createdAt: new Date(), usageCount: 0 };
+    setPromoCodes(prev => [...prev, newPromo]);
+    syncToDB('/api/promo-codes', 'POST', newPromo, `Generated promo code`).then(runCloudBackup).catch(()=>{});
+
+    const supabasePayload: any = {
+      id,
+      code: i.code.trim().toUpperCase(),
+      discount_percent: i.discountPercent,
+      description: i.description || '',
+      is_active: i.isActive ? 1 : 0,
+      is_limited_uses: i.isLimitedUses ? 1 : 0,
+      max_usage: i.maxUsage,
+      usage_count: 0,
+      start_date: i.startDate ? new Date(i.startDate).toISOString() : null,
+      expires_at: i.expiresAt ? new Date(i.expiresAt).toISOString() : null
+    };
+    supabase.from('promo_codes').insert([supabasePayload]).then();
+
+    addActivity('admin_action', `Generated promo code: ${i.code}`);
+    return id;
+  };
+  
+  const updatePromoCode = (id: string, u: Partial<Omit<PromoCode, 'id'|'createdAt'|'usageCount'>>) => {
+    setPromoCodes(prev => prev.map(p => p.id === id ? { ...p, ...u } : p));
+    syncToDB(`/api/promo-codes/${id}`, 'PUT', u, `Promo code updated`).then(runCloudBackup).catch(()=>{});
+
+    const supabasePayload: any = {};
+    if (u.code !== undefined) supabasePayload.code = u.code.trim().toUpperCase();
+    if (u.discountPercent !== undefined) supabasePayload.discount_percent = u.discountPercent;
+    if (u.description !== undefined) supabasePayload.description = u.description;
+    if (u.isActive !== undefined) supabasePayload.is_active = u.isActive ? 1 : 0;
+    if (u.isLimitedUses !== undefined) supabasePayload.is_limited_uses = u.isLimitedUses ? 1 : 0;
+    if (u.maxUsage !== undefined) supabasePayload.max_usage = u.maxUsage;
+    if (u.startDate !== undefined) supabasePayload.start_date = u.startDate ? new Date(u.startDate).toISOString() : null;
+    if (u.expiresAt !== undefined) supabasePayload.expires_at = u.expiresAt ? new Date(u.expiresAt).toISOString() : null;
+    if (Object.keys(supabasePayload).length > 0) {
+      supabase.from('promo_codes').update(supabasePayload).eq('id', id).then();
+    }
+
+    addActivity('admin_action', `Updated promo code ID: ${id}`);
+  };
+  
+  const togglePromoCode = (id: string) => {
+    const target = promoCodes.find(p => p.id === id);
+    setPromoCodes(prev => prev.map(p => p.id === id ? { ...p, isActive: !p.isActive } : p));
+    if (target) {
+      syncToDB(`/api/promo-codes/${id}`, 'PUT', { isActive: !target.isActive }, 'Toggled promo').then(runCloudBackup).catch(()=>{});
+      supabase.from('promo_codes').update({ is_active: !target.isActive ? 1 : 0 }).eq('id', id).then();
+    }
+    addActivity('admin_action', `Toggled visibility for promo ID: ${id}`);
+  };
+  
+  const deletePromoCode = (id: string) => {
+    setPromoCodes(prev => prev.filter(p => p.id !== id));
+    syncToDB(`/api/promo-codes/${id}`, 'DELETE', {}, 'Deleted promo').then(runCloudBackup).catch(()=>{});
+    supabase.from('promo_codes').delete().eq('id', id).then();
+    addActivity('admin_action', `Deleted promo code ID: ${id}`);
+  };
+  
   const applyPromoCode = (code: string) => {
-    const cleanCode = (code || '').trim().toUpperCase();
-    const now = new Date().getTime();
+    const now = new Date();
     return promoCodes.find(p => {
-      if (!p.code || p.code.trim().toUpperCase() !== cleanCode) return false;
-      if (!p.isActive) return false;
-      if (p.startDate && new Date(p.startDate).getTime() > now + 86400000) return false; 
-      if (p.expiresAt && new Date(p.expiresAt).getTime() < now) return false; 
-      if (p.isLimitedUses && p.usageCount >= p.maxUsage) return false; 
+      if (p.code.toUpperCase() !== code.toUpperCase() || !p.isActive) return false;
+      if (p.startDate && new Date(p.startDate) > now) return false; 
+      if (p.expiresAt && new Date(p.expiresAt) < now) return false; 
+      if (p.isLimitedUses !== false && p.usageCount >= p.maxUsage) return false; 
       return true;
     }) || null;
   };
 
-  const acknowledgeRefund = (id: string) => {
-    setReservations(prev => prev.map(r => r.id === id ? { ...r, refundStatus: 'acknowledged' } as Reservation : r));
-    publicSupabase.from('reservations').update({ refundStatus: 'acknowledged' }).eq('id', id).then(({ error }) => {
-      if (error) console.error("Error updating refund status:", error);
-    });
+  const addStaffUser = (u: Omit<StaffUser, 'id'|'createdAt'>) => {
+    const id = `su${Date.now()}`;
+    const newUser = { ...u, id, createdAt: new Date() };
+    setStaffUsers(prev => [...prev, newUser]);
+    syncToDB('/api/staff', 'POST', newUser, `Added staff user`).then(runCloudBackup).catch(()=>{});
+    addActivity('admin_action', `Created new staff user: ${u.username}`);
+  };
+  
+  const updateStaffUser = (id: string, u: Partial<StaffUser>) => {
+    const targetUser = staffUsers.find(user => user.id === id);
+    const displayName = targetUser ? targetUser.fullName : id;
+    setStaffUsers(prev => prev.map(user => user.id === id ? { ...user, ...u } : user));
+    syncToDB(`/api/staff/${id}`, 'PUT', u, `Updated staff user`).then(runCloudBackup).catch(()=>{});
+    addActivity('admin_action', `Updated details for: ${displayName}`);
+  };
+  
+  const toggleStaffUserActive = (id: string) => {
+    const target = staffUsers.find(u => u.id === id);
+    if (target) {
+      setStaffUsers(prev => prev.map(u => u.id === id ? { ...u, isActive: !u.isActive } : u));
+      syncToDB(`/api/staff/${id}`, 'PUT', { isActive: !target.isActive }, `Toggled staff active status`).then(runCloudBackup).catch(()=>{});
+      addActivity('admin_action', `Toggled active status for staff user: ${target.username}`);
+    }
+  };
+  
+  const updateRates = async (r: Partial<RatesConfig>) => {
+    const sanitized = { ...r } as Partial<RatesConfig>;
+    setRates(prev => ({ ...prev, ...sanitized }));
+    if (sanitized.hourlyRate !== undefined) sanitized.hourlyRate = Number(sanitized.hourlyRate) || 0;
+    if (sanitized.overtimeRate !== undefined) sanitized.overtimeRate = Number(sanitized.overtimeRate) || 0;
+    if (sanitized.weekdayHappyHourRate !== undefined) sanitized.weekdayHappyHourRate = Number(sanitized.weekdayHappyHourRate) || 0;
+    if (sanitized.weekendHappyHourRate !== undefined) sanitized.weekendHappyHourRate = Number(sanitized.weekendHappyHourRate) || 0;
+    if (sanitized.downPaymentPercent !== undefined && sanitized.downPaymentPercent !== null) {
+      let dp = Number(sanitized.downPaymentPercent) || 0;
+      dp = Math.max(0, Math.min(100, dp));
+      sanitized.downPaymentPercent = dp;
+    }
+    setRates(prev => ({ ...prev, ...sanitized }));
+
+    // 1. Direct Supabase sync so live website receives changes immediately
+    try {
+      const rows = Object.entries(sanitized).map(([k, v]) => ({
+        key_name: k,
+        setting_value: String(v ?? '')
+      }));
+      await supabase.from('system_settings').upsert(rows, { onConflict: 'key_name' });
+    } catch (e) {
+      console.warn("Direct Supabase rates sync note:", e);
+    }
+
+    // 2. Local SQLite DB sync
+    try {
+      const res = await syncToDB('/api/settings/rates', 'PUT', sanitized, `Updated System Rates`).catch(() => null);
+      addActivity('admin_action', 'System rates updated');
+      runCloudBackup(); 
+      return res;
+    } catch (e) { throw e; }
+  };
+
+  const updateReservationTerms = async (t: Partial<ReservationTerms>) => {
+    setReservationTerms(prev => ({ ...prev, ...t }));
+
+    // 1. Direct Supabase sync so live website receives changes immediately
+    try {
+      const rows = Object.entries(t).map(([k, v]) => ({
+        key_name: k,
+        setting_value: String(v ?? '')
+      }));
+      await supabase.from('system_settings').upsert(rows, { onConflict: 'key_name' });
+    } catch (e) {
+      console.warn("Direct Supabase terms sync note:", e);
+    }
+
+    // 2. Local SQLite DB sync
+    try {
+      const res = await syncToDB('/api/settings/terms', 'PUT', t, `Updated Reservation Terms`).catch(() => null); 
+      addActivity('admin_action', 'Reservation terms updated');
+      runCloudBackup(); 
+      return res;
+    } catch (e) { throw e; }
+  };
+
+ const addAnnouncement = (a: Omit<Announcement, 'id'|'createdAt'>) => {
+    const newAnn = { ...a, id: `a${Date.now()}`, createdAt: new Date() };
+    setAnnouncements(prev => [newAnn, ...prev]);
+    syncToDB('/api/announcements', 'POST', newAnn, `Created announcement: ${a.title}`).then(runCloudBackup).catch(()=>{});
+    addActivity('admin_action', `Created public announcement: ${a.title}`);
+  };
+
+  const updateAnnouncement = (id: string, u: Partial<Announcement>) => {
+    setAnnouncements(prev => prev.map(a => a.id === id ? { ...a, ...u } : a));
+    syncToDB(`/api/announcements/${id}`, 'PUT', u, `Updated announcement`).then(runCloudBackup).catch(()=>{});
+    addActivity('admin_action', `Updated announcement ID: ${id}`);
+  };
+  
+  const deleteAnnouncement = (id: string) => {
+    setAnnouncements(prev => prev.filter(a => a.id !== id));
+    syncToDB(`/api/announcements/${id}`, 'DELETE', {}, `Deleted announcement`).then(runCloudBackup).catch(()=>{});
+    addActivity('admin_action', `Deleted announcement ID: ${id}`);
+  };
+
+  const toggleAnnouncement = (id: string) => {
+    const target = announcements.find(a => a.id === id);
+    if (target) {
+      setAnnouncements(prev => prev.map(a => a.id === id ? { ...a, isActive: !a.isActive } : a));
+      syncToDB(`/api/announcements/${id}`, 'PUT', { isActive: !target.isActive }, `Toggled announcement visibility`).then(runCloudBackup).catch(()=>{});
+      addActivity('admin_action', `Toggled visibility for announcement ID: ${id}`);
+    }
+  };
+
+  const addClosedDate = (c: Omit<ClosedDate, 'id'>) => {
+    const newCd = { ...c, id: `cd${Date.now()}` };
+    setClosedDates(prev => [...prev, newCd]);
+    syncToDB('/api/closed-dates', 'POST', newCd, `Created closed date for ${c.date}`).then(runCloudBackup).catch(()=>{});
+    addActivity('admin_action', `Added closure date: ${c.date}`);
+  };
+  
+  const removeClosedDate = (id: string) => {
+    setClosedDates(prev => prev.filter(c => c.id !== id));
+    syncToDB(`/api/closed-dates/${id}`, 'DELETE', {}, `Deleted closed date`).then(runCloudBackup).catch(()=>{});
+    addActivity('admin_action', `Removed closure date ID: ${id}`);
+  };
+  
+  const updateClosedDate = (id: string, u: Partial<ClosedDate>) => {
+    setClosedDates(prev => prev.map(c => c.id === id ? { ...c, ...u } : c));
+    syncToDB(`/api/closed-dates/${id}`, 'PUT', u, `Updated closed date`).then(runCloudBackup).catch(()=>{});
+  };
+
+  const addEvent = (e: Omit<Event, 'id'>) => {
+    const newEvent = { ...e, id: Date.now().toString() };
+    setEvents(prev => [...prev, newEvent]);
+    syncToDB('/api/events', 'POST', newEvent, `Created new event`).then(runCloudBackup).catch(()=>{});
+    addActivity('admin_action', `Created special event: ${e.title}`);
+  };
+  
+  const updateEvent = (id: string, updates: Partial<Omit<Event, 'id'>>) => {
+    setEvents(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e));
+    syncToDB(`/api/events/${id}`, 'PUT', updates, `Updated event`).then(runCloudBackup).catch(()=>{});
+    addActivity('admin_action', `Updated event ID: ${id}`);
+  };
+  
+  const deleteEvent = (id: string) => {
+    setEvents(prev => prev.filter(e => e.id !== id));
+    syncToDB(`/api/events/${id}`, 'DELETE', {}, `Deleted event`).then(runCloudBackup).catch(()=>{});
+    addActivity('admin_action', `Deleted event ID: ${id}`);
+  };
+
+  const updateSiteConfig = async (newConfig: any) => {
+    setSiteConfig((prev: any) => ({ ...prev, ...newConfig }));
+
+    // 1. Direct Supabase sync so live website receives changes immediately
+    try {
+      const cmsRows = Object.entries(newConfig).map(([k, v]) => ({
+        keyname: k,
+        settingvalue: typeof v === 'object' ? JSON.stringify(v) : String(v ?? '')
+      }));
+      const { error: cmsErr } = await supabase.from('cms').upsert(cmsRows, { onConflict: 'keyname' });
+      if (cmsErr) {
+        const altRows = Object.entries(newConfig).map(([k, v]) => ({
+          key_name: k,
+          setting_value: typeof v === 'object' ? JSON.stringify(v) : String(v ?? '')
+        }));
+        await supabase.from('cms').upsert(altRows, { onConflict: 'key_name' });
+      }
+      // Dual-sync to system_settings for total redundancy
+      const settingsRows = Object.entries(newConfig).map(([k, v]) => ({
+        key_name: k,
+        setting_value: typeof v === 'object' ? JSON.stringify(v) : String(v ?? '')
+      }));
+      await supabase.from('system_settings').upsert(settingsRows, { onConflict: 'key_name' });
+    } catch (e) {
+      console.warn("Direct Supabase CMS sync note:", e);
+    }
+
+    // 2. Local SQLite DB sync
+    syncToDB('/api/cms', 'PUT', newConfig, `Updated Website Content`).then(runCloudBackup).catch(()=>{});
+    addActivity('admin_action', `Updated public website CMS content`);
   };
 
   if (isInitializing) {
@@ -719,12 +1322,121 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   return (
     <AppContext.Provider value={{
-      tables, queue, reservations, promoCodes, rates, reservationTerms, announcements, closedDates, weather, updateWeatherLocation,
-      activeAnnouncement, updateActiveAnnouncement, siteConfig, events,
-      addReservation, addFeedback, applyPromoCode, refreshLiveMonitor,
-      acknowledgeRefund, validateBookingPreflight
+      tables, queue, reservations, feedback, activities, promoCodes, staffUsers, inventory, rates, reservationTerms, announcements, closedDates, weather, updateWeatherLocation,
+      activeAnnouncement, updateActiveAnnouncement,
+      staffLoggedIn, adminLoggedIn, staffProfile,
+      staffLogin, staffLogout, adminLogin, adminLogout, updateStaffProfile,
+      assignTable, freeTable, reserveTable, extendSession, migrateSession, setTableMaintenance, setTableEvent, addTable, updateTable, toggleTableActive, deleteTable,
+      addInventoryItem, updateInventoryItem, deleteInventoryItem, submitTableOrders, voidTableOrder,
+      addToQueue, removeFromQueue, callQueueItem,
+      addReservation, updateReservationStatus, updateReservation, cancelReservation, updateDownPayment, updateBalance,
+      addFeedback, resolveFeedback, addActivity, addPromoCode, updatePromoCode, togglePromoCode, deletePromoCode, applyPromoCode,
+      events, addEvent, updateEvent, deleteEvent,
+      addStaffUser, updateStaffUser, resetStaffUserPassword, toggleStaffUserActive,
+      updateRates, updateReservationTerms, addAnnouncement, updateAnnouncement, deleteAnnouncement, toggleAnnouncement, addClosedDate, removeClosedDate, updateClosedDate, siteConfig, updateSiteConfig, refreshLiveMonitor,
+      lostItems, addLostItem, updateLostItem, deleteLostItem,
+      watchlist, addWatchlistItem, updateWatchlistItem, deleteWatchlistItem, sessionHistory, addSessionHistory, resetPasswordWithPin, isSystemOffline,
+      hashPassword,
+      theme, primaryColor, updateTheme, updatePrimaryColor,
+      updateRefundStatus, acknowledgeRefund,
+      isLoggingOut, logoutStep,
+      lastSynced, forceFullSync
     }}>
+      {/* 🟢 Global Fullscreen Logout Overlay with Thread Loader */}
+      {isLoggingOut && (
+        <div className="fixed inset-0 z-[99999] bg-neutral-950/90 backdrop-blur-md flex flex-col items-center justify-center animate-fade-in">
+          <div className="relative w-16 h-16 mb-5">
+            <div className="absolute inset-0 border-4 border-neutral-800 rounded-full"></div>
+            <div className="absolute inset-0 border-4 border-emerald-500 rounded-full border-t-transparent animate-spin"></div>
+          </div>
+          <h2 className="text-lg font-black text-white uppercase tracking-widest mb-1">
+            Safeguarding Venue Records
+          </h2>
+          <p className="text-xs text-emerald-400 font-semibold uppercase tracking-wider animate-pulse">
+            {logoutStep}
+          </p>
+        </div>
+      )}
+
+      {/* 🟢 Global First-Time Recovery PIN Modal */}
+      <AnimatePresence>
+        {showRecoveryModal && (() => {
+          const targetUser = staffUsers.find((u: any) => u.username === staffProfile?.username);
+          return (
+            <motion.div 
+              initial={{ opacity: 0 }} 
+              animate={{ opacity: 1 }} 
+              exit={{ opacity: 0 }} 
+              className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/80 backdrop-blur-sm px-4"
+            >
+              <motion.div 
+                initial={{ scale: 0.95, y: 20 }} 
+                animate={{ scale: 1, y: 0 }} 
+                className="bg-neutral-950 border border-amber-900/50 rounded-3xl max-w-md w-full shadow-2xl overflow-hidden p-8 text-center"
+              >
+                <div className="w-16 h-16 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mx-auto mb-4 text-amber-500">
+                  <KeyRound size={28} />
+                </div>
+                <h2 className="text-2xl font-black text-amber-400 tracking-wide uppercase mb-3">Save Your Recovery PIN</h2>
+                <p className="text-sm text-neutral-400 leading-relaxed mb-6">
+                  You haven't backed up your emergency access PIN. Because this system is designed to operate completely offline, this 4-digit PIN is the <strong>ONLY</strong> way to recover your account if you forget your password.
+                </p>
+                
+                <div className="bg-black/40 border border-black/50 rounded-xl p-6 mb-6">
+                  <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-bold mb-2">Your Unique PIN</p>
+                  <p className="text-6xl font-mono font-black text-white tracking-[0.2em]">{targetUser?.recoveryPin || '0000'}</p>
+                </div>
+                
+                <div className="flex gap-3 mb-6">
+                  <button 
+                    onClick={() => { 
+                      navigator.clipboard.writeText(targetUser?.recoveryPin || '0000'); 
+                      setPinCopied(true); 
+                      setHasInteractedWithPin(true);
+                      setTimeout(()=>setPinCopied(false), 2000); 
+                    }} 
+                    className="flex-1 py-3.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 rounded-xl text-xs font-bold transition-colors border border-neutral-800 flex items-center justify-center gap-2"
+                  >
+                    {pinCopied ? <CheckCircle2 size={16} className="text-emerald-400" /> : <Copy size={16} />} {pinCopied ? 'Copied!' : 'Copy PIN'}
+                  </button>
+                  <button 
+                    onClick={handleDownloadPin} 
+                    className="flex-1 py-3.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 rounded-xl text-xs font-bold transition-colors border border-neutral-800 flex items-center justify-center gap-2"
+                  >
+                    <Download size={16} /> Save as .txt
+                  </button>
+                </div>
+                
+                <label className={`flex items-start gap-3 p-4 rounded-xl border transition-colors mb-6 text-left ${hasInteractedWithPin ? 'border-neutral-800 bg-neutral-900/30 hover:bg-neutral-900/50 cursor-pointer' : 'border-rose-900/50 bg-rose-950/10 cursor-not-allowed opacity-80'}`}>
+                  <input 
+                    type="checkbox" 
+                    checked={pinSaved} 
+                    disabled={!hasInteractedWithPin}
+                    onChange={() => setPinSaved(!pinSaved)} 
+                    className={`mt-1 h-4 w-4 rounded border-neutral-700 bg-neutral-800 text-emerald-500 focus:ring-emerald-500 ${!hasInteractedWithPin ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`} 
+                  />
+                  <span className="text-xs text-neutral-400 leading-relaxed">
+                    {hasInteractedWithPin 
+                      ? "I confirm that I have safely copied or downloaded my recovery PIN." 
+                      : "⚠️ Action Required: You must Copy or Download your PIN to proceed."}
+                  </span>
+                </label>
+
+                <button 
+                  onClick={handleAcknowledgePin} 
+                  disabled={!pinSaved}
+                  className="w-full bg-amber-600 hover:bg-amber-500 disabled:bg-neutral-900 disabled:text-neutral-600 text-neutral-950 font-black py-4 rounded-xl transition-all shadow-lg shadow-amber-900/20 uppercase tracking-widest text-xs"
+                >
+                  Enter System
+                </button>
+              </motion.div>
+            </motion.div>
+          );
+        })()}
+      </AnimatePresence>
+        
       {children}
+      
     </AppContext.Provider>
   );
 }
