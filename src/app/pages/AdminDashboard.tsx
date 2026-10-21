@@ -55,43 +55,7 @@ export function AdminDashboard() {
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
-  
-  // ── Reporting Analytics Overview ──
-  const analytics7Days = useMemo(() => {
-    const end = new Date();
-    const start = subDays(end, 6);
-    const days = eachDayOfInterval({ start, end });
-    const history = sessionHistory || [];
-    return days.map(day => {
-      const daySessions = history.filter((h: any) => isSameDay(new Date(h.startTime || h.endTime), day));
-      const rev = daySessions.reduce((s: number, h: any) => s + (Number(h.totalAmount) || 0), 0);
-      return {
-        label: format(day, "EEE"),
-        date: format(day, "MMM dd"),
-        revenue: rev,
-        sessions: daySessions.length
-      };
-    });
-  }, [sessionHistory]);
-
-  const todayRevenue = useMemo(() => {
-    return (sessionHistory || [])
-      .filter((h: any) => isToday(new Date(h.startTime || h.endTime)))
-      .reduce((s: number, h: any) => s + (Number(h.totalAmount) || 0), 0);
-  }, [sessionHistory]);
-
-  const todayCompletedSessions = useMemo(() => {
-    return (sessionHistory || []).filter((h: any) => isToday(new Date(h.startTime || h.endTime))).length;
-  }, [sessionHistory]);
-
-  const tableUtilizationRate = useMemo(() => {
-    const active = tables.filter((t: any) => t.isActive && t.status !== "maintenance");
-    if (!active.length) return 0;
-    const occ = active.filter((t: any) => t.status === "occupied").length;
-    return Math.round((occ / active.length) * 100);
-  }, [tables]);
-
-  return () => {
+    return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
