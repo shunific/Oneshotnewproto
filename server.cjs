@@ -587,7 +587,13 @@ app.post('/api/sync-to-cloud', async (req, res) => {
         db.all(`SELECT * FROM ${localTable}`, [], async (err, rows) => {
           if (err || !rows || rows.length === 0) return resolve();
           try {
-            const payload = rows.map(mapFn);
+            const rawPayload = rows.map(mapFn);
+            const payload = rawPayload.filter(item => {
+              if (!item) return false;
+              if (cloudTable === "cms") return item.keyname && String(item.keyname).trim() !== "" && item.settingvalue !== null && item.settingvalue !== undefined;
+              return true;
+            });
+            if (payload.length === 0) return resolve();
             console.log(`☁️ Syncing ${localTable}: ${payload.length} row(s)`);
 
 const { data, error } = await supabase
@@ -610,8 +616,15 @@ if (error) {
     };
 
    await Promise.all([
-      syncTable('cms', 'cms', r => ({ keyname: r.keyName || r.keyname, settingvalue: r.settingValue || r.settingvalue }), 'keyname'),
-      syncTable('cms', 'system_settings', r => ({ key_name: r.keyName || r.keyname, setting_value: r.settingValue || r.settingvalue }), 'key_name'),
+      syncTable("cms", "cms", r => {
+        const k = (r.keyName || r.keyname || "").trim();
+        if (!k) return null;
+        const rawVal = (r.settingValue !== undefined && r.settingValue !== null) ? r.settingValue : (r.settingvalue ?? "");
+        return {
+          keyname: k,
+          settingvalue: typeof rawVal === "object" ? JSON.stringify(rawVal) : String(rawVal)
+        };
+      }, "keyname"),
       syncTable('systemSettings', 'system_settings', r => ({ key_name: r.keyName, setting_value: r.settingValue }), 'key_name'),
       syncTable('tables', 'tables', r => ({ id: r.id, name: r.name, status: r.status, isActive: r.isActive ? 1 : 0, maintenanceReason: r.maintenanceReason, sessionData: r.sessionData }), 'id'),
       

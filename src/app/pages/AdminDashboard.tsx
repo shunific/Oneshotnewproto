@@ -212,41 +212,6 @@ export function AdminDashboard() {
   const dynamicAlerts = getDynamicAlerts();
 
 
-  // ── Reporting Analytics Overview ──
-  const analytics7Days = useMemo(() => {
-    const end = new Date();
-    const start = subDays(end, 6);
-    const days = eachDayOfInterval({ start, end });
-    const history = sessionHistory || [];
-    return days.map(day => {
-      const daySessions = history.filter((h: any) => isSameDay(new Date(h.startTime || h.endTime), day));
-      const rev = daySessions.reduce((s: number, h: any) => s + (Number(h.totalAmount) || 0), 0);
-      return {
-        label: format(day, "EEE"),
-        date: format(day, "MMM dd"),
-        revenue: rev,
-        sessions: daySessions.length
-      };
-    });
-  }, [sessionHistory]);
-
-  const todayRevenue = useMemo(() => {
-    return (sessionHistory || [])
-      .filter((h: any) => isToday(new Date(h.startTime || h.endTime)))
-      .reduce((s: number, h: any) => s + (Number(h.totalAmount) || 0), 0);
-  }, [sessionHistory]);
-
-  const todayCompletedSessions = useMemo(() => {
-    return (sessionHistory || []).filter((h: any) => isToday(new Date(h.startTime || h.endTime))).length;
-  }, [sessionHistory]);
-
-  const tableUtilizationRate = useMemo(() => {
-    const active = tables.filter((t: any) => t.isActive && t.status !== "maintenance");
-    if (!active.length) return 0;
-    const occ = active.filter((t: any) => t.status === "occupied").length;
-    return Math.round((occ / active.length) * 100);
-  }, [tables]);
-
   return (
     <div className="space-y-6 relative">
       
@@ -559,41 +524,6 @@ export function AdminDashboard() {
                 const isTomorrowRes = isTomorrow(new Date(r.date));
                 const dateLabel = isTodayRes ? 'Today' : isTomorrowRes ? 'Tomorrow' : format(new Date(r.date), 'MMM d');
               
-  // ── Reporting Analytics Overview ──
-  const analytics7Days = useMemo(() => {
-    const end = new Date();
-    const start = subDays(end, 6);
-    const days = eachDayOfInterval({ start, end });
-    const history = sessionHistory || [];
-    return days.map(day => {
-      const daySessions = history.filter((h: any) => isSameDay(new Date(h.startTime || h.endTime), day));
-      const rev = daySessions.reduce((s: number, h: any) => s + (Number(h.totalAmount) || 0), 0);
-      return {
-        label: format(day, "EEE"),
-        date: format(day, "MMM dd"),
-        revenue: rev,
-        sessions: daySessions.length
-      };
-    });
-  }, [sessionHistory]);
-
-  const todayRevenue = useMemo(() => {
-    return (sessionHistory || [])
-      .filter((h: any) => isToday(new Date(h.startTime || h.endTime)))
-      .reduce((s: number, h: any) => s + (Number(h.totalAmount) || 0), 0);
-  }, [sessionHistory]);
-
-  const todayCompletedSessions = useMemo(() => {
-    return (sessionHistory || []).filter((h: any) => isToday(new Date(h.startTime || h.endTime))).length;
-  }, [sessionHistory]);
-
-  const tableUtilizationRate = useMemo(() => {
-    const active = tables.filter((t: any) => t.isActive && t.status !== "maintenance");
-    if (!active.length) return 0;
-    const occ = active.filter((t: any) => t.status === "occupied").length;
-    return Math.round((occ / active.length) * 100);
-  }, [tables]);
-
   return (
                   <div key={r.id} className="p-3 bg-neutral-900/50 border border-neutral-800/60 rounded-lg hover:bg-neutral-900 transition-colors flex items-center justify-between group">
                     <div className="min-w-0">

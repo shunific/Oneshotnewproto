@@ -159,11 +159,16 @@ export function AdminSiteSettings() {
   const saveLocationPin = async () => {
     setIsProcessing(true);
     try {
+      let embed = (locationForm.googleMapsEmbedUrl || "").trim();
+      const iframeMatch = embed.match(/src=["']([^"']+)["']/i);
+      if (iframeMatch) {
+        embed = iframeMatch[1];
+      }
       await updateSiteConfig({
         address: (locationForm.address || "").trim().slice(0, 200),
-        latitude: locationForm.latitude,
-        longitude: locationForm.longitude,
-        googleMapsEmbedUrl: locationForm.googleMapsEmbedUrl,
+        latitude: String(locationForm.latitude || "").trim(),
+        longitude: String(locationForm.longitude || "").trim(),
+        googleMapsEmbedUrl: embed,
       });
       flash("Location pin and address saved and synchronized!", "success");
     } catch (err: any) {
@@ -765,6 +770,18 @@ export function AdminSiteSettings() {
               <Navigation size={13} /> View on Google Maps &rarr;
             </a>
           </div>
+        </div>
+
+        <div>
+          <label className="block text-[11px] text-neutral-400 mb-1 font-medium">Google Maps Embed URL / Share Link (Optional)</label>
+          <input 
+            type="text" 
+            value={locationForm.googleMapsEmbedUrl || ""} 
+            onChange={e => setLocationForm(l => ({ ...l, googleMapsEmbedUrl: e.target.value }))}
+            placeholder='Paste Google Maps embed link or <iframe src="..."> code'
+            className="w-full bg-neutral-900 border border-neutral-800 rounded-lg p-2.5 text-xs text-neutral-100 outline-none focus:border-rose-500 font-mono"
+          />
+          <p className="text-[10px] text-neutral-500 mt-1">If empty, the live map automatically generates an embedded pin from your Venue Address and Latitude/Longitude coordinates.</p>
         </div>
 
         {/* Live Interactive Map Pin Preview */}

@@ -1268,22 +1268,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSiteConfig((prev: any) => ({ ...prev, ...newConfig }));
     await syncToDB('/api/cms', 'PUT', newConfig, `Updated Website Content`).catch(() => {});
     try {
-      const entries = Object.entries(newConfig).map(([k, v]) => ({
-        keyname: k,
-        settingvalue: typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v ?? '')
-      }));
-      await supabase.from('cms').upsert(entries, { onConflict: 'keyname' });
+      const entries = Object.entries(newConfig)
+        .filter(([k, v]) => k && String(k).trim() !== "" && v !== null && v !== undefined)
+        .map(([k, v]) => ({
+          keyname: String(k).trim(),
+          settingvalue: typeof v === 'object' ? JSON.stringify(v) : String(v ?? "")
+        }));
+      if (entries.length > 0) {
+        await supabase.from('cms').upsert(entries, { onConflict: 'keyname' });
+      }
     } catch (e) {
       console.warn('Cloud CMS upsert error:', e);
-    }
-    try {
-      const sysEntries = Object.entries(newConfig).map(([k, v]) => ({
-        key_name: k,
-        setting_value: typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v ?? '')
-      }));
-      await supabase.from('system_settings').upsert(sysEntries, { onConflict: 'key_name' });
-    } catch (e) {
-      console.warn('Cloud system_settings upsert error:', e);
     }
     runCloudBackup();
     addActivity('admin_action', `Updated public website CMS content`);
