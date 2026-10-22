@@ -331,21 +331,31 @@ export function HomePage() {
     : "https://images.unsplash.com/photo-1761335633357-04fab36b333f?q=80";
 
   // 🟢 DYNAMIC CMS CONTENT (Pulls from Site Settings, fallback to defaults)
+  const getCfg = (keys: string[], fallback: string = '') => {
+    if (!siteConfig) return fallback;
+    for (const k of keys) {
+      if (siteConfig[k] !== undefined && siteConfig[k] !== null && String(siteConfig[k]).trim() !== '') {
+        return String(siteConfig[k]).trim();
+      }
+    }
+    return fallback;
+  };
+
   const cms = {
-    heroTitle: siteConfig?.venueName || 'ONE SHOT',
-    heroSubtitle: siteConfig?.venueName ? '' : 'Bar & Billiards',
-    heroDescription: siteConfig?.tagline || 'Your premier billiard destination at Autobase OAX, Cainta, Rizal.',
+    heroTitle: getCfg(['venueName', 'venuename', 'venue_name', 'name'], 'ONE SHOT'),
+    heroSubtitle: getCfg(['venueName', 'venuename', 'venue_name']) ? '' : 'Bar & Billiards',
+    heroDescription: getCfg(['tagline', 'slogan', 'heroDescription'], 'Your premier billiard destination at Autobase OAX, Cainta, Rizal.'),
     aboutTitle: 'A Passion for the Game',
-    aboutP1: siteConfig?.description || 'One Shot Bar & Billiards was founded with a simple mission: to create the ultimate billiard experience in Cainta, Rizal.',
-    aboutP2: siteConfig?.description ? '' : 'Our tournament-grade tables are maintained with precision, and our staff are passionate players themselves.',
-    aboutP3: siteConfig?.description ? '' : 'Whether you are a seasoned champion or picking up a cue for the first time, One Shot welcomes you.',
+    aboutP1: getCfg(['description', 'venuedescription', 'venue_description', 'aboutDescription', 'aboutP1'], 'One Shot Bar & Billiards was founded with a simple mission: to create the ultimate billiard experience in Cainta, Rizal.'),
+    aboutP2: getCfg(['description', 'venue_description']) ? '' : 'Our tournament-grade tables are maintained with precision, and our staff are passionate players themselves.',
+    aboutP3: getCfg(['description', 'venue_description']) ? '' : 'Whether you are a seasoned champion or picking up a cue for the first time, One Shot welcomes you.',
     aboutImage: cmsAboutImage,
-    address: siteConfig?.address || 'Autobase OAX, San Juan, Cainta, Rizal 1900',
-    phone: siteConfig?.contactNumber || siteConfig?.phone || '0917-123-4567 | 0998-765-4321',
-    email: siteConfig?.contactEmail || siteConfig?.email || 'oneshot.billiards@gmail.com',
-    latitude: siteConfig?.latitude || '14.5995',
-    longitude: siteConfig?.longitude || '120.9842',
-    googleMapsEmbedUrl: siteConfig?.googleMapsEmbedUrl || '',
+    address: getCfg(['address', 'venueAddress', 'venue_address'], 'Autobase OAX, San Juan, Cainta, Rizal 1900'),
+    phone: getCfg(['contactNumber', 'phone', 'contactnumber', 'contact_number', 'contactPhone'], '0917-123-4567 | 0998-765-4321'),
+    email: getCfg(['contactEmail', 'email', 'contactemail', 'contact_email'], 'oneshot.billiards@gmail.com'),
+    latitude: getCfg(['latitude', 'lat'], '14.5995'),
+    longitude: getCfg(['longitude', 'lng', 'lon'], '120.9842'),
+    googleMapsEmbedUrl: getCfg(['googleMapsEmbedUrl', 'googlemapsembedurl', 'mapUrl', 'embedUrl'], ''),
   };
 
   useEffect(() => {
@@ -630,16 +640,27 @@ export function HomePage() {
 
   const isWeekendDay = (d: Date) => d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
 
+  const getTermNum = (keys: string[], fallback: number) => {
+    if (!reservationTerms) return fallback;
+    for (const k of keys) {
+      const v = reservationTerms[k];
+      if (v !== undefined && v !== null && !isNaN(Number(v)) && Number(v) > 0) {
+        return Number(v);
+      }
+    }
+    return fallback;
+  };
+
   const minAllowedPartySize = (() => {
-    const wDayMin = Number(reservationTerms?.weekdayMinPartySize) || 1;
-    const wEndMin = Number(reservationTerms?.weekendMinPartySize) || 1;
+    const wDayMin = getTermNum(['weekdayMinPartySize', 'weekdayminpartysize', 'weekday_min_party_size', 'min_party_size', 'minPartySize'], 1);
+    const wEndMin = getTermNum(['weekendMinPartySize', 'weekendminpartysize', 'weekend_min_party_size', 'min_party_size', 'minPartySize'], 1);
     if (!selectedDate) return Math.min(wDayMin, wEndMin);
     return isWeekendDay(new Date(selectedDate)) ? wEndMin : wDayMin;
   })();
 
   const maxAllowedPartySize = (() => {
-    const wDayMax = Number(reservationTerms?.weekdayMaxPartySize) || 10;
-    const wEndMax = Number(reservationTerms?.weekendMaxPartySize) || 10;
+    const wDayMax = getTermNum(['weekdayMaxPartySize', 'weekdaymaxpartysize', 'weekday_max_party_size', 'max_party_size', 'maxPartySize'], 10);
+    const wEndMax = getTermNum(['weekendMaxPartySize', 'weekendmaxpartysize', 'weekend_max_party_size', 'max_party_size', 'maxPartySize'], 10);
     if (!selectedDate) return Math.max(wDayMax, wEndMax);
     return isWeekendDay(new Date(selectedDate)) ? wEndMax : wDayMax;
   })();
