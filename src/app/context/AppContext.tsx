@@ -1276,6 +1276,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } catch (e) {
       console.warn('Cloud CMS upsert error:', e);
     }
+    try {
+      const sysEntries = Object.entries(newConfig).map(([k, v]) => ({
+        key_name: k,
+        setting_value: typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v ?? '')
+      }));
+      await supabase.from('system_settings').upsert(sysEntries, { onConflict: 'key_name' });
+    } catch (e) {
+      console.warn('Cloud system_settings upsert error:', e);
+    }
     runCloudBackup();
     addActivity('admin_action', `Updated public website CMS content`);
   };
