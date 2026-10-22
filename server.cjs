@@ -611,8 +611,7 @@ if (error) {
 
    await Promise.all([
       syncTable('cms', 'cms', r => ({ keyname: r.keyName || r.keyname, settingvalue: r.settingValue || r.settingvalue }), 'keyname'),
-      syncTable('cms', 'system_settings', r => ({ key_name: r.keyName || r.keyname, setting_value: r.settingValue || r.settingvalue }), 'key_name')
-      // syncTable('cms', 'cms', r => ({ keyname: r.keyName || r.keyname, settingvalue: r.settingValue || r.settingvalue }), 'keyname'),
+      syncTable('cms', 'system_settings', r => ({ key_name: r.keyName || r.keyname, setting_value: r.settingValue || r.settingvalue }), 'key_name'),
       syncTable('systemSettings', 'system_settings', r => ({ key_name: r.keyName, setting_value: r.settingValue }), 'key_name'),
       syncTable('tables', 'tables', r => ({ id: r.id, name: r.name, status: r.status, isActive: r.isActive ? 1 : 0, maintenanceReason: r.maintenanceReason, sessionData: r.sessionData }), 'id'),
       
