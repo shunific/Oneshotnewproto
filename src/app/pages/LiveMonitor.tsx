@@ -285,23 +285,35 @@ export function LiveMonitor() {
         </div>
       </header>
 
-      {/* Status Summary Bar */}
-      <div className="flex-none bg-neutral-900/50 border-b border-neutral-800/50 px-6 py-3 flex items-center gap-6">
-        <div className="flex items-center gap-2">
+      {/* Status Summary & Color Indicators Bar */}
+      <div className="flex-none bg-neutral-900/60 border-b border-neutral-800/60 px-6 py-2.5 flex flex-wrap items-center gap-4 sm:gap-6">
+        <div className="flex items-center gap-1.5">
           <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.9)]" />
-          <span className="text-sm font-semibold text-emerald-300">{availableCount} Available</span>
+          <span className="text-xs font-bold text-emerald-300">{availableCount} Available</span>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
-          <span className="text-sm font-semibold text-amber-300">{occupiedCount} In Use</span>
+        <div className="flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.6)]" />
+          <span className="text-xs font-bold text-amber-300">{occupiedCount} In Use</span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-full bg-blue-500" />
+          <span className="text-xs font-medium text-blue-300">Open Time</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse" />
+          <span className="text-xs font-medium text-rose-300">Overtime</span>
+        </div>
+        <div className="flex items-center gap-1.5">
           <span className="w-2.5 h-2.5 rounded-full bg-sky-500" />
-          <span className="text-sm font-semibold text-sky-300">{reservedCount} Reserved</span>
+          <span className="text-xs font-bold text-sky-300">{reservedCount} Reserved</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-full bg-orange-500" />
+          <span className="text-xs font-medium text-orange-300">Maintenance</span>
         </div>
         <div className="ml-auto flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="text-[11px] text-neutral-500 uppercase tracking-widest font-semibold">Live</span>
+          <span className="text-[11px] text-neutral-400 uppercase tracking-widest font-semibold">Live</span>
         </div>
       </div>
 
@@ -318,16 +330,6 @@ export function LiveMonitor() {
             {activeTablesList.map(table => (
               <TableCard key={table.id} table={table} />
             ))}
-          </div>
-
-          {/* Legend */}
-          <div className="mt-6 flex flex-wrap gap-4 text-[11px] text-neutral-600 font-medium">
-            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-500" /> Open</div>
-            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-amber-500" /> In Use</div>
-            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-blue-500" /> Open Time</div>
-            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-rose-500" /> Overtime</div>
-            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-sky-500" /> Reserved</div>
-            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-orange-500" /> Maintenance</div>
           </div>
         </div>
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase, publicSupabase } from '../utils/supabase';
@@ -330,19 +330,32 @@ export function HomePage() {
     ? (siteConfig.aboutImage.startsWith('http') ? siteConfig.aboutImage : `http://localhost:3001${siteConfig.aboutImage}`)
     : "https://images.unsplash.com/photo-1761335633357-04fab36b333f?q=80";
 
-  // 🟢 HARDCODED TEXT (Replaces dynamic admin text)
+  // 🟢 DYNAMIC CMS CONTENT (Pulls from Site Settings, fallback to defaults)
+  const getCfg = (keys: string[], fallback: string = '') => {
+    if (!siteConfig) return fallback;
+    for (const k of keys) {
+      if (siteConfig[k] !== undefined && siteConfig[k] !== null && String(siteConfig[k]).trim() !== '') {
+        return String(siteConfig[k]).trim();
+      }
+    }
+    return fallback;
+  };
+
   const cms = {
-    heroTitle: 'ONE SHOT',
-    heroSubtitle: 'Bar & Billiards',
-    heroDescription: 'Your premier billiard destination at Autobase OAX, Cainta, Rizal.',
+    heroTitle: getCfg(['venueName', 'venuename', 'venue_name', 'name'], 'ONE SHOT'),
+    heroSubtitle: getCfg(['venueName', 'venuename', 'venue_name']) ? '' : 'Bar & Billiards',
+    heroDescription: getCfg(['tagline', 'slogan', 'heroDescription'], 'Your premier billiard destination at Autobase OAX, Cainta, Rizal.'),
     aboutTitle: 'A Passion for the Game',
-    aboutP1: 'One Shot Bar & Billiards was founded with a simple mission: to create the ultimate billiard experience in Cainta, Rizal.',
-    aboutP2: 'Our tournament-grade tables are maintained with precision, and our staff are passionate players themselves.',
-    aboutP3: 'Whether you are a seasoned champion or picking up a cue for the first time, One Shot welcomes you.',
+    aboutP1: getCfg(['description', 'venuedescription', 'venue_description', 'aboutDescription', 'aboutP1'], 'One Shot Bar & Billiards was founded with a simple mission: to create the ultimate billiard experience in Cainta, Rizal.'),
+    aboutP2: getCfg(['description', 'venue_description']) ? '' : 'Our tournament-grade tables are maintained with precision, and our staff are passionate players themselves.',
+    aboutP3: getCfg(['description', 'venue_description']) ? '' : 'Whether you are a seasoned champion or picking up a cue for the first time, One Shot welcomes you.',
     aboutImage: cmsAboutImage,
-    address: 'Autobase OAX, San Juan, Cainta, Rizal 1900',
-    phone: '0917-123-4567 | 0998-765-4321',
-    email: 'oneshot.billiards@gmail.com',
+    address: getCfg(['address', 'venueAddress', 'venue_address'], 'Autobase OAX, San Juan, Cainta, Rizal 1900'),
+    phone: getCfg(['contactNumber', 'phone', 'contactnumber', 'contact_number', 'contactPhone'], '0917-123-4567 | 0998-765-4321'),
+    email: getCfg(['contactEmail', 'email', 'contactemail', 'contact_email'], 'oneshot.billiards@gmail.com'),
+    latitude: getCfg(['latitude', 'lat'], '14.5995'),
+    longitude: getCfg(['longitude', 'lng', 'lon'], '120.9842'),
+    googleMapsEmbedUrl: getCfg(['googleMapsEmbedUrl', 'googlemapsembedurl', 'mapUrl', 'embedUrl'], ''),
   };
 
   useEffect(() => {
@@ -625,13 +638,31 @@ export function HomePage() {
     }
   })();
 
+  const isWeekendDay = (d: Date) => d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
+
+  const getTermNum = (keys: string[], fallback: number) => {
+    if (!reservationTerms) return fallback;
+    for (const k of keys) {
+      const v = reservationTerms[k];
+      if (v !== undefined && v !== null && !isNaN(Number(v)) && Number(v) > 0) {
+        return Number(v);
+      }
+    }
+    return fallback;
+  };
+
+  const minAllowedPartySize = (() => {
+    const wDayMin = getTermNum(['weekdayMinPartySize', 'weekdayminpartysize', 'weekday_min_party_size', 'min_party_size', 'minPartySize'], 1);
+    const wEndMin = getTermNum(['weekendMinPartySize', 'weekendminpartysize', 'weekend_min_party_size', 'min_party_size', 'minPartySize'], 1);
+    if (!selectedDate) return Math.min(wDayMin, wEndMin);
+    return isWeekendDay(new Date(selectedDate)) ? wEndMin : wDayMin;
+  })();
+
   const maxAllowedPartySize = (() => {
-    const wDayMax = Number(reservationTerms?.weekdayMaxPartySize) || 20;
-    const wEndMax = Number(reservationTerms?.weekendMaxPartySize) || 20;
+    const wDayMax = getTermNum(['weekdayMaxPartySize', 'weekdaymaxpartysize', 'weekday_max_party_size', 'max_party_size', 'maxPartySize'], 10);
+    const wEndMax = getTermNum(['weekendMaxPartySize', 'weekendmaxpartysize', 'weekend_max_party_size', 'max_party_size', 'maxPartySize'], 10);
     if (!selectedDate) return Math.max(wDayMax, wEndMax);
-    const d = new Date(selectedDate);
-    const isWeekend = d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
-    return isWeekend ? wEndMax : wDayMax;
+    return isWeekendDay(new Date(selectedDate)) ? wEndMax : wDayMax;
   })();
 
   const getMaxDuration = () => {
@@ -652,6 +683,18 @@ export function HomePage() {
 
   const maxAllowedDuration = getMaxDuration();
 
+  const minAllowedTime = useMemo(() => {
+    if (!selectedDate || !isToday(selectedDate)) return '';
+    const now = new Date();
+    const advanceHours = typeof reservationTerms?.advanceBookingHours === 'number' 
+      ? reservationTerms.advanceBookingHours 
+      : (parseInt(String(reservationTerms?.advanceBookingHours)) || 1);
+    const earliest = addMinutes(now, advanceHours * 60);
+    const h = String(earliest.getHours()).padStart(2, '0');
+    const m = String(earliest.getMinutes()).padStart(2, '0');
+    return `${h}:${m}`;
+  }, [selectedDate, reservationTerms]);
+
   const validateTimeSlotHelper = (time: string, duration: number, dateObj: Date | null, tableId: string | null): string => {
     if (!time || !dateObj) return 'invalid';
     if (!tableId) return 'no_table';
@@ -667,8 +710,9 @@ export function HomePage() {
 
     if (isToday(requestedStart)) {
       const nowMins = new Date().getHours() * 60 + new Date().getMinutes();
+      const advanceNoticeMins = (Number(reservationTerms?.advanceBookingHours) || 1) * 60;
       if (slotMins <= nowMins) return 'past'; 
-      if (slotMins < nowMins + 60) return 'advance';
+      if (slotMins < nowMins + advanceNoticeMins) return 'advance';
     }
 
     const startReserveMins = parseToMins(rates?.reservationStartTime || '12:00');
@@ -713,6 +757,11 @@ export function HomePage() {
     e.preventDefault();
     if (!resForm.name || !resForm.phone || !selectedDate || !selectedTableId || !resForm.timeSlot || timeValidation !== 'valid') return;
     
+    if (resForm.pax < minAllowedPartySize || resForm.pax > maxAllowedPartySize) {
+      alert(`Party size must be between ${minAllowedPartySize} and ${maxAllowedPartySize} guests for the selected date.`);
+      return;
+    }
+
     if (!isDownPaymentWaived && resForm.paymentMethod === 'gcash') {
       const hasRef = resForm.paymentRef.trim().length > 0;
       const hasImg = receiptFile !== null;
@@ -1258,10 +1307,38 @@ export function HomePage() {
                 </div>
                 
                 <div className="mb-12">
-                  <h3 className="text-center text-xl font-bold text-white mb-6">Autobase OAX, Cainta</h3>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-xl font-bold text-white">{cms.address || "Autobase OAX, Cainta"}</h3>
+                    <a
+                      href={
+                        cms.latitude && cms.longitude
+                          ? `https://www.google.com/maps/search/?api=1&query=${cms.latitude},${cms.longitude}`
+                          : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(cms.address || "One Shot Bar and Billiards, Cainta")}`
+                      }
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1 transition-colors"
+                    >
+                      <MapPin size={13} /> Open in Google Maps &rarr;
+                    </a>
+                  </div>
                   <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden h-96 relative group">
                     <iframe 
-                      src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3861.6425983794347!2d121.12493947585098!3d14.581333485888201!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3397c70049cd2efb%3A0x4b8fd5634abcd6cc!2sOne%20Shot%20Bar%20and%20Billiards!5e0!3m2!1sen!2sph!4v1700000000000!5m2!1sen!2sph" 
+                      src={(() => {
+                        let url = (cms.googleMapsEmbedUrl || "").trim();
+                        const iframeMatch = url.match(/src=["']([^"']+)["']/i);
+                        if (iframeMatch) url = iframeMatch[1];
+                        if (url && (url.includes('/maps/embed') || url.includes('output=embed'))) return url;
+                        const latNum = parseFloat(cms.latitude);
+                        const lngNum = parseFloat(cms.longitude);
+                        if (!isNaN(latNum) && !isNaN(lngNum) && latNum !== 0 && lngNum !== 0) {
+                          return `https://maps.google.com/maps?q=${latNum},${lngNum}&t=&z=16&ie=UTF8&iwloc=&output=embed`;
+                        }
+                        if (cms.address && cms.address.trim() !== '') {
+                          return `https://maps.google.com/maps?q=${encodeURIComponent(cms.address.trim())}&t=&z=16&ie=UTF8&iwloc=&output=embed`;
+                        }
+                        return "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3861.6425983794347!2d121.12493947585098!3d14.581333485888201!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3397c70049cd2efb%3A0x4b8fd5634abcd6cc!2sOne%20Shot%20Bar%20and%20Billiards!5e0!3m2!1sen!2sph!4v1700000000000!5m2!1sen!2sph";
+                      })()} 
                       className="absolute inset-0 w-full h-full border-0 grayscale hover:grayscale-0 transition-all duration-700"
                       allowFullScreen={false} 
                       loading="lazy" 
@@ -1396,6 +1473,12 @@ export function HomePage() {
                                   setClosureAlert(null); // Clear any closure alert when a valid date is picked
                                   setIsCalendarExpanded(false);
                                   setIsTableSelectorExpanded(true);
+                                  if (d) {
+                                    const isWEnd = d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
+                                    const minP = isWEnd ? (Number(reservationTerms?.weekendMinPartySize) || 1) : (Number(reservationTerms?.weekdayMinPartySize) || 1);
+                                    const maxP = isWEnd ? (Number(reservationTerms?.weekendMaxPartySize) || 10) : (Number(reservationTerms?.weekdayMaxPartySize) || 10);
+                                    setResForm(f => ({ ...f, pax: Math.max(minP, Math.min(maxP, f.pax)) }));
+                                  }
                                 }}
                                 reservedDates={reservedDates}
                                 closedDates={closedDates || []}
@@ -1446,27 +1529,50 @@ export function HomePage() {
                                   const isSel = selectedTableId === table.id;
                                   const isOcc = table.status === 'occupied';
                                   const isMaint = table.status === 'maintenance';
+
+                                  const eventForTable = (events || []).find((ev: any) => {
+                                    const evDateMatch = ev.date && (
+                                      isSameDay(new Date(ev.date), selectedDate) ||
+                                      (Array.isArray(ev.dates) && ev.dates.some((d: string) => isSameDay(new Date(d), selectedDate)))
+                                    );
+                                    if (!evDateMatch) return false;
+                                    if (Array.isArray(ev.selectedTableIds) && ev.selectedTableIds.length > 0) {
+                                      return ev.selectedTableIds.includes(table.id);
+                                    }
+                                    if (ev.allowReservations === false) return true;
+                                    return false;
+                                  });
+                                  const isEvent = Boolean(eventForTable);
                                   
                                   return (
                                     <button
                                       key={table.id}
                                       type="button"
                                       disabled={isMaint}
-                                      onClick={() => setSelectedTableId(table.id)}
+                                      onClick={() => {
+                                        if (isEvent) {
+                                          setActiveSection('events');
+                                          window.scrollTo({ top: 0, behavior: 'smooth' });
+                                          return;
+                                        }
+                                        setSelectedTableId(table.id);
+                                      }}
                                       className={`relative p-3 rounded-xl border text-left flex flex-col justify-between transition-all ${
                                         isMaint 
                                           ? 'bg-neutral-900/30 border-neutral-800/40 opacity-40 cursor-not-allowed'
+                                          : isEvent
+                                          ? 'bg-purple-950/40 border-purple-500/70 shadow-lg shadow-purple-950/40 hover:scale-[1.02] cursor-pointer'
                                           : isSel 
                                           ? 'bg-emerald-950/40 border-emerald-500 shadow-lg shadow-emerald-900/30 scale-[1.02]' 
                                           : 'bg-neutral-900/80 border-neutral-800 hover:border-neutral-600'
                                       }`}
                                     >
                                       <div className="flex justify-between items-center mb-1">
-                                        <span className={`text-xs font-bold ${isSel ? 'text-emerald-400' : 'text-neutral-200'}`}>{table.name}</span>
-                                        <span className={`w-2 h-2 rounded-full ${isMaint ? 'bg-rose-500' : isOcc && isToday(selectedDate) ? 'bg-amber-400 animate-pulse' : 'bg-emerald-500'}`} />
+                                        <span className={`text-xs font-bold ${isEvent ? 'text-purple-300' : isSel ? 'text-emerald-400' : 'text-neutral-200'}`}>{table.name}</span>
+                                        <span className={`w-2 h-2 rounded-full ${isMaint ? 'bg-rose-500' : isEvent ? 'bg-purple-400 animate-pulse' : isOcc && isToday(selectedDate) ? 'bg-amber-400 animate-pulse' : 'bg-emerald-500'}`} />
                                       </div>
-                                      <p className="text-[10px] text-neutral-400 truncate">
-                                        {isMaint ? 'Unavailable' : isOcc && isToday(selectedDate) ? 'Playing Now' : 'Available Slot'}
+                                      <p className={`text-[10px] font-semibold truncate ${isEvent ? 'text-purple-400' : 'text-neutral-400'}`}>
+                                        {isMaint ? 'Unavailable' : isEvent ? 'EVENT (Click to view)' : isOcc && isToday(selectedDate) ? 'Playing Now' : 'Available Slot'}
                                       </p>
                                     </button>
                                   );
@@ -1482,6 +1588,19 @@ export function HomePage() {
                                   {(() => {
                                     const targetTable = tables.find((t: any) => t.id === selectedTableId);
                                     const isActiveWalkIn = isToday(selectedDate) && targetTable?.status === 'occupied' && targetTable.session?.startTime;
+
+                                    const eventForTable = (events || []).find((ev: any) => {
+                                      const evDateMatch = ev.date && (
+                                        isSameDay(new Date(ev.date), selectedDate) ||
+                                        (Array.isArray(ev.dates) && ev.dates.some((d: string) => isSameDay(new Date(d), selectedDate)))
+                                      );
+                                      if (!evDateMatch) return false;
+                                      if (Array.isArray(ev.selectedTableIds) && ev.selectedTableIds.length > 0) {
+                                        return ev.selectedTableIds.includes(selectedTableId);
+                                      }
+                                      if (ev.allowReservations === false) return true;
+                                      return false;
+                                    });
                                     
                                     const tableRes = reservations.filter((r: any) => 
                                       r.tableId === selectedTableId && 
@@ -1494,10 +1613,20 @@ export function HomePage() {
                                       return (timeA[0]*60 + timeA[1]) - (timeB[0]*60 + timeB[1]);
                                     });
 
-                                    if (tableRes.length === 0 && !isActiveWalkIn) return <p className="text-xs text-neutral-500 italic">No bookings on this date.</p>;
+                                    if (tableRes.length === 0 && !isActiveWalkIn && !eventForTable) return <p className="text-xs text-neutral-500 italic">No bookings on this date.</p>;
 
                                     return (
                                       <div className="space-y-2">
+                                        {eventForTable && (
+                                          <div 
+                                            onClick={() => { setActiveSection('events'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                                            className="flex items-center gap-3 bg-purple-950/40 p-2.5 rounded-lg border border-purple-800/60 cursor-pointer hover:bg-purple-900/50 transition-colors"
+                                          >
+                                            <div className="w-2 h-2 rounded-full bg-purple-400 animate-pulse shadow-[0_0_8px_rgba(168,85,247,0.6)]" />
+                                            <span className="text-purple-200 text-xs font-bold">EVENT: {eventForTable.title}</span>
+                                            <span className="text-purple-400 text-[10px] font-bold ml-auto flex items-center gap-1">View Details &rarr;</span>
+                                          </div>
+                                        )}
                                         {isActiveWalkIn && targetTable.session && (
                                           <div className="flex items-center gap-3 bg-amber-950/20 p-2.5 rounded-lg border border-amber-900/30">
                                             <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
@@ -1601,13 +1730,39 @@ export function HomePage() {
                                 <div className="col-span-1">
                                   <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end">
                                     <span>Pax</span>
-                                    <span className="text-[9px] text-emerald-500 font-bold ml-1">Max {maxAllowedPartySize}</span>
+                                    <span className="text-[9px] text-emerald-500 font-bold ml-1">{minAllowedPartySize}–{maxAllowedPartySize} pax</span>
                                   </label>
-                                  <input type="number" min={1} max={maxAllowedPartySize} value={resForm.pax} onChange={e => setResForm(f => ({ ...f, pax: parseInt(e.target.value) || 1 }))} className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-100 text-center outline-none focus:border-emerald-500" />
+                                  <input 
+                                    type="number" 
+                                    min={minAllowedPartySize} 
+                                    max={maxAllowedPartySize} 
+                                    value={resForm.pax} 
+                                    onChange={e => setResForm(f => ({ ...f, pax: parseInt(e.target.value) || minAllowedPartySize }))} 
+                                    className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-100 text-center outline-none focus:border-emerald-500" 
+                                  />
                                 </div>
                                 <div className="col-span-1">
-                                  <label className="block text-xs text-neutral-400 mb-1.5">Start Time *</label>
-                                  <input type="time" style={{ colorScheme: isLightMode ? 'light' : 'dark' }} value={resForm.timeSlot} onChange={e => setResForm(f => ({ ...f, timeSlot: e.target.value }))} className={`w-full bg-neutral-950 border rounded-xl px-3 py-2.5 text-sm text-neutral-100 text-center outline-none ${['closed', 'happyhour', 'full', 'table_conflict', 'active_conflict'].includes(timeValidation) ? 'border-rose-500/50 text-rose-200' : 'border-neutral-800 focus:border-emerald-500'}`} />
+                                  <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end">
+                                    <span>Start Time *</span>
+                                    {selectedDate && isToday(selectedDate) && minAllowedTime && (
+                                      <span className="text-[9px] text-amber-500 font-semibold">Min: {minAllowedTime}</span>
+                                    )}
+                                  </label>
+                                  <input 
+                                    type="time" 
+                                    min={selectedDate && isToday(selectedDate) ? minAllowedTime : undefined}
+                                    style={{ colorScheme: isLightMode ? 'light' : 'dark' }} 
+                                    value={resForm.timeSlot} 
+                                    onChange={e => {
+                                      const val = e.target.value;
+                                      if (selectedDate && isToday(selectedDate) && minAllowedTime && val && val < minAllowedTime) {
+                                        setResForm(f => ({ ...f, timeSlot: minAllowedTime }));
+                                        return;
+                                      }
+                                      setResForm(f => ({ ...f, timeSlot: val }));
+                                    }} 
+                                    className={`w-full bg-neutral-950 border rounded-xl px-3 py-2.5 text-sm text-neutral-100 text-center outline-none ${['closed', 'happyhour', 'full', 'table_conflict', 'active_conflict', 'past', 'advance'].includes(timeValidation) ? 'border-rose-500/50 text-rose-200' : 'border-neutral-800 focus:border-emerald-500'}`} 
+                                  />
                                 </div>
                                 <div className="col-span-1">
                                   <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end flex-shrink-0">
