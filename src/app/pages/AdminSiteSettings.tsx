@@ -138,6 +138,25 @@ export function AdminSiteSettings() {
 
   // Save General Info & Description
   const saveGeneralInfo = async () => {
+    // Phone validation: numbers only
+    const cleanPhone = (form.contactNumber || "").trim();
+    if (cleanPhone && !/^\d+$/.test(cleanPhone)) {
+      flash("Contact phone must contain only numbers (no letters or special characters).", "error");
+      return;
+    }
+    if (cleanPhone && (cleanPhone.length < 7 || cleanPhone.length > 15)) {
+      flash("Contact phone number must be between 7 and 15 digits (e.g. 09171234567).", "error");
+      return;
+    }
+
+    // Email validation
+    const cleanEmail = (form.contactEmail || "").trim();
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    if (cleanEmail && !emailRegex.test(cleanEmail)) {
+      flash("Please enter a valid email address format (e.g. contact@oneshot.com).", "error");
+      return;
+    }
+
     setIsProcessing(true);
     try {
       await updateSiteConfig({
@@ -656,17 +675,22 @@ export function AdminSiteSettings() {
 
           <div>
             <div className="flex justify-between items-center mb-1">
-              <label className="text-[11px] text-neutral-400 font-medium">Contact Phone</label>
-              <span className="text-[10px] text-neutral-500 font-mono">{(form.contactNumber || "").length}/25</span>
+              <label className="text-[11px] text-neutral-400 font-medium">Contact Phone (Numbers Only)</label>
+              <span className="text-[10px] text-neutral-500 font-mono">{(form.contactNumber || "").length} digits</span>
             </div>
             <input 
-              type="text" 
-              maxLength={25}
+              type="tel" 
+              inputMode="numeric"
+              maxLength={15}
               value={form.contactNumber || ""} 
-              onChange={e => setForm((f: any) => ({ ...f, contactNumber: e.target.value }))}
-              placeholder="e.g. 0917-123-4567"
+              onChange={e => {
+                const numericOnly = e.target.value.replace(/[^0-9]/g, "");
+                setForm((f: any) => ({ ...f, contactNumber: numericOnly }));
+              }}
+              placeholder="e.g. 09171234567"
               className="w-full bg-neutral-900 border border-neutral-800 rounded-lg p-2.5 text-xs text-neutral-100 outline-none focus:border-amber-500 font-mono"
             />
+            <p className="text-[10px] text-neutral-500 mt-1">Accepts numbers only (letters and symbols are automatically blocked).</p>
           </div>
 
           <div>
