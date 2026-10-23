@@ -47,7 +47,7 @@ export function AdminSiteSettings() {
 
   // Toast notification
   const [toast, setToast] = useState<{msg: string, type: "success" | "error"} | null>(null);
-  const toastTimeout = useRef<NodeJS.Timeout | null>(null);
+  const toastTimeout = useRef<any | null>(null);
 
   const flash = (msg: string, type: "success" | "error" = "success") => {
     if (toastTimeout.current) clearTimeout(toastTimeout.current);
@@ -106,14 +106,33 @@ export function AdminSiteSettings() {
 
   // Save General Info & Description
   const saveGeneralInfo = async () => {
+    // Phone validation: numbers only
+    const cleanPhone = (form.contactNumber || "").trim();
+    if (cleanPhone && !/^\d+$/.test(cleanPhone)) {
+      flash("Contact phone must contain only numbers (no letters or special characters).", "error");
+      return;
+    }
+    if (cleanPhone && (cleanPhone.length < 7 || cleanPhone.length > 15)) {
+      flash("Contact phone number must be between 7 and 15 digits (e.g. 09171234567).", "error");
+      return;
+    }
+
+    // Email validation: strict email regex format
+    const cleanEmail = (form.contactEmail || "").trim();
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    if (cleanEmail && !emailRegex.test(cleanEmail)) {
+      flash("Please enter a valid email address format (e.g. contact@oneshot.com).", "error");
+      return;
+    }
+
     setIsProcessing(true);
     try {
       await updateSiteConfig({
         venueName: form.venueName,
         tagline: form.tagline,
         description: form.description,
-        contactNumber: form.contactNumber,
-        contactEmail: form.contactEmail,
+        contactNumber: cleanPhone,
+        contactEmail: cleanEmail,
       });
       flash("General information updated successfully!", "success");
     } catch (err: any) {
@@ -127,11 +146,20 @@ export function AdminSiteSettings() {
   const saveLocationPin = async () => {
     setIsProcessing(true);
     try {
+      const trimmedAddress = (locationForm.address || "").trim().slice(0, 200);
+      const trimmedLat = String(locationForm.latitude || "").trim();
+      const trimmedLng = String(locationForm.longitude || "").trim();
+      let trimmedEmbed = (locationForm.googleMapsEmbedUrl || "").trim();
+      const iframeMatch = trimmedEmbed.match(/src=["']([^"']+)["']/i);
+      if (iframeMatch) {
+        trimmedEmbed = iframeMatch[1];
+      }
+
       await updateSiteConfig({
-        address: locationForm.address,
-        latitude: locationForm.latitude,
-        longitude: locationForm.longitude,
-        googleMapsEmbedUrl: locationForm.googleMapsEmbedUrl,
+        address: trimmedAddress,
+        latitude: trimmedLat,
+        longitude: trimmedLng,
+        googleMapsEmbedUrl: trimmedEmbed,
       });
       flash("Location pin and address updated successfully!", "success");
     } catch (err: any) {
@@ -564,22 +592,43 @@ export function AdminSiteSettings() {
             />
           </div>
           <div>
-            <label className="block text-[11px] text-neutral-400 mb-1 font-medium">Contact Phone</label>
+            <div className="flex justify-between items-center mb-1">
+              <label className="text-[11px] text-neutral-400 font-medium">Contact Phone (Numbers Only)</label>
+              <span className="text-[10px] text-neutral-500 font-mono">{(form.contactNumber || "").length} digits</span>
+            </div>
             <input 
-              type="text" 
+              type="tel" 
+              inputMode="numeric"
+              maxLength={15}
               value={form.contactNumber || ""} 
-              onChange={e => setForm((f: any) => ({ ...f, contactNumber: e.target.value }))}
-              className="w-full bg-neutral-900 border border-neutral-800 rounded-lg p-2.5 text-xs text-neutral-100 outline-none focus:border-amber-500"
+              onChange={e => {
+                const numericOnly = e.target.value.replace(/[^0-9]/g, '');
+                setForm((f: any) => ({ ...f, contactNumber: numericOnly }));
+              }}
+              placeholder="e.g. 09171234567"
+              className="w-full bg-neutral-900 border border-neutral-800 rounded-lg p-2.5 text-xs text-neutral-100 outline-none focus:border-amber-500 font-mono"
             />
+            <p className="text-[10px] text-neutral-500 mt-1">Accepts numbers only (letters and symbols are automatically blocked).</p>
           </div>
           <div>
-            <label className="block text-[11px] text-neutral-400 mb-1 font-medium">Contact Email</label>
+            <div className="flex justify-between items-center mb-1">
+              <label className="text-[11px] text-neutral-400 font-medium">Contact Email</label>
+              {form.contactEmail && !/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(form.contactEmail.trim()) && (
+                <span className="text-[10px] text-rose-400 font-semibold">Invalid email format</span>
+              )}
+            </div>
             <input 
               type="email" 
               value={form.contactEmail || ""} 
-              onChange={e => setForm((f: any) => ({ ...f, contactEmail: e.target.value }))}
-              className="w-full bg-neutral-900 border border-neutral-800 rounded-lg p-2.5 text-xs text-neutral-100 outline-none focus:border-amber-500"
+              onChange={e => setForm((f: any) => ({ ...f, contactEmail: e.target.value.trim() }))}
+              placeholder="e.g. contact@oneshot.com"
+              className={`w-full bg-neutral-900 border rounded-lg p-2.5 text-xs text-neutral-100 outline-none font-mono ${
+                form.contactEmail && !/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(form.contactEmail.trim())
+                  ? 'border-rose-500/80 focus:border-rose-500'
+                  : 'border-neutral-800 focus:border-amber-500'
+              }`}
             />
+            <p className="text-[10px] text-neutral-500 mt-1">Must be a valid email format (e.g. name@domain.com).</p>
           </div>
         </div>
 
@@ -656,6 +705,28 @@ export function AdminSiteSettings() {
             >
               <Navigation size={13} /> View on Google Maps &rarr;
             </a>
+          </div>
+          <div className="md:col-span-3">
+            <div className="flex justify-between items-center mb-1">
+              <label className="text-[11px] text-neutral-400 font-medium">Google Maps Embed URL / Share Link (Optional)</label>
+              {locationForm.googleMapsEmbedUrl && (
+                <button
+                  type="button"
+                  onClick={() => setLocationForm(l => ({ ...l, googleMapsEmbedUrl: "" }))}
+                  className="text-[10px] text-rose-400 hover:text-rose-300 font-medium"
+                >
+                  Clear Custom Embed Link
+                </button>
+              )}
+            </div>
+            <input 
+              type="text" 
+              value={locationForm.googleMapsEmbedUrl || ""} 
+              onChange={e => setLocationForm(l => ({ ...l, googleMapsEmbedUrl: e.target.value }))}
+              placeholder='Paste Google Maps embed URL or <iframe src="..."> code, or leave blank to auto-pin from address/coordinates'
+              className="w-full bg-neutral-900 border border-neutral-800 rounded-lg p-2.5 text-xs text-neutral-100 outline-none focus:border-rose-500 font-mono"
+            />
+            <p className="text-[10px] text-neutral-500 mt-1">If blank, the customer map will automatically center and pin using your Venue Address and Latitude/Longitude coordinates.</p>
           </div>
         </div>
 

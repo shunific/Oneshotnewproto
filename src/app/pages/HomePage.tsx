@@ -1324,6 +1324,7 @@ export function HomePage() {
                   </div>
                   <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden h-96 relative group">
                     <iframe 
+                      key={`map_${cms.address}_${cms.latitude}_${cms.longitude}_${cms.googleMapsEmbedUrl}`}
                       src={(() => {
                         let url = (cms.googleMapsEmbedUrl || "").trim();
                         const iframeMatch = url.match(/src=["']([^"']+)["']/i);
@@ -1337,7 +1338,7 @@ export function HomePage() {
                         if (cms.address && cms.address.trim() !== '') {
                           return `https://maps.google.com/maps?q=${encodeURIComponent(cms.address.trim())}&t=&z=16&ie=UTF8&iwloc=&output=embed`;
                         }
-                        return "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3861.6425983794347!2d121.12493947585098!3d14.581333485888201!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3397c70049cd2efb%3A0x4b8fd5634abcd6cc!2sOne%20Shot%20Bar%20and%20Billiards!5e0!3m2!1sen!2sph!4v1700000000000!5m2!1sen!2sph";
+                        return "https://maps.google.com/maps?q=14.581333,121.124939&t=&z=16&ie=UTF8&iwloc=&output=embed";
                       })()} 
                       className="absolute inset-0 w-full h-full border-0 grayscale hover:grayscale-0 transition-all duration-700"
                       allowFullScreen={false} 

@@ -452,21 +452,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (eventsData) setEvents((eventsData as any[]).map(e => ({ ...e, slotsFull: !!e.slotsFull, allowReservations: e.allowReservations !== false, caterWalkIns: e.caterWalkIns !== false, walkInTableCount: e.walkInTableCount ?? 10, attachments: e.attachments ? [e.attachments] : [] })) as Event[]);
       
       let configObj: any = {};
-      if (cmsData) { 
-        (cmsData as any[]).forEach((curr: any) => {
-          const k = curr.key_name || curr.keyName || curr.keyname;
-          const v = curr.content_value ?? curr.setting_value ?? curr.settingValue ?? curr.settingvalue;
-          if (k) configObj[k] = v;
-        }); 
-      }
-      
       if (settingsData) { 
         const settingsObj = (settingsData as any[]).reduce((acc: any, curr: any) => { 
           const k = curr.key_name || curr.keyName || curr.keyname;
           let val = curr.setting_value ?? curr.settingValue ?? curr.settingvalue ?? curr.content_value; 
           if (val === 'true') val = true; 
           else if (val === 'false') val = false; 
-          else if (!isNaN(val) && val.trim() !== '' && !val.includes(':')) val = Number(val); 
+          else if (!isNaN(val) && typeof val === 'string' && val.trim() !== '' && !val.includes(':') && !val.includes('.')) val = Number(val); 
           if (k) {
             acc[k] = val; 
             configObj[k] = val;
@@ -475,6 +467,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }, {}); 
         setRates(prev => ({ ...prev, ...settingsObj })); 
         setReservationTerms(prev => ({ ...prev, ...settingsObj })); 
+      }
+
+      // 🟢 CMS Data is the definitive Source of Truth for website branding, contact info & map pin:
+      if (cmsData) { 
+        (cmsData as any[]).forEach((curr: any) => {
+          const k = curr.key_name || curr.keyName || curr.keyname;
+          const v = curr.settingvalue ?? curr.settingValue ?? curr.setting_value ?? curr.content_value;
+          if (k) configObj[k] = v;
+        }); 
       }
       setSiteConfig((prev: any) => ({ ...(prev || {}), ...configObj }));
 
