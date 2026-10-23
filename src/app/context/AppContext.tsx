@@ -566,7 +566,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     fetchHolidays();
   }, []);
   
-  const cloudSyncTimeout = useRef<NodeJS.Timeout | null>(null);
+  const cloudSyncTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const runCloudBackup = () => {
     if (cloudSyncTimeout.current) clearTimeout(cloudSyncTimeout.current);
