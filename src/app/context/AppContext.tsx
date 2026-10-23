@@ -128,8 +128,8 @@ export type WeatherData = {
   temp: number; condition: string; isRaining: boolean; code: number; locationName: string;
 };
 
-export const HOURLY_RATE = 150;
-export const DOWN_PAYMENT_RATE = 0.25;
+export const HOURLY_RATE = 0;
+export const DOWN_PAYMENT_RATE = 0;
 
 export const generateRandomPromoCode = () => {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -182,7 +182,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [isInitializing, setIsInitializing] = useState(true);
 
   // States
-  const [tables, setTables] = useState<Table[]>([]);
+  const [tables, setTables] = useState<Table[]>(() => {
+    try {
+      const cached = localStorage.getItem('oneshot_tables_cache');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {}
+    return Array.from({ length: 10 }, (_, i) => ({
+      id: `t${i + 1}`,
+      name: `Table ${i + 1}`,
+      status: 'available' as TableStatus,
+      isActive: true,
+    }));
+  });
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
@@ -238,6 +252,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     root.setAttribute('data-theme', theme);
     root.setAttribute('data-color', primaryColor);
   }, [theme, primaryColor]);
+
+  useEffect(() => {
+    if (tables && tables.length > 0) {
+      try {
+        localStorage.setItem('oneshot_tables_cache', JSON.stringify(tables));
+      } catch (e) {}
+    }
+  }, [tables]);
 
   const updateTheme = (newTheme: 'dark' | 'light') => {
     setTheme(newTheme);
@@ -334,19 +356,54 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (lostRes && lostRes.ok) setLostItems(await lostRes.json());
       if (watchRes && watchRes.ok) setWatchlist(await watchRes.json());
 
-      // 2. FETCH CLOUD DATA (Supabase is Source of Truth for Online Reservations & CMS)
-      // 🟢 NOTICE: We are NO LONGER fetching session_history from the cloud to prevent local data erasure!
+      // 2. FETCH CLOUD DATA (Supabase is Source of Truth for Online Reservations, CMS & Tables)
       const [
         { data: resData, error: resErr }, { data: annData }, { data: cmsData }, 
-        { data: settingsData }, { data: closedDatesData }, { data: promoData }, { data: eventsData }, { data: feedData }
+        { data: settingsData }, { data: closedDatesData }, { data: promoData }, { data: eventsData }, { data: feedData },
+        { data: cloudTablesData }
       ] = await Promise.all([
         supabase.from('reservations').select('*'), supabase.from('announcements').select('*'), 
         supabase.from('cms').select('*'), supabase.from('system_settings').select('*'), 
         supabase.from('closed_dates').select('*'), supabase.from('promo_codes').select('*'), 
-        supabase.from('events').select('*'), supabase.from('feedback').select('*')
+        supabase.from('events').select('*'), supabase.from('feedback').select('*'),
+        supabase.from('tables').select('*')
       ]);
 
       if (resErr) throw new Error("Supabase is unreachable.");
+
+      if (cloudTablesData && (cloudTablesData as any[]).length > 0) {
+        const mappedCloudTables: Table[] = (cloudTablesData as any[]).map(t => {
+          let session: any = undefined;
+          const rawSession = t.sessionData || t.sessiondata || t.session;
+          if (rawSession) {
+            try {
+              session = typeof rawSession === 'string' ? JSON.parse(rawSession) : rawSession;
+            } catch (e) {
+              session = undefined;
+            }
+          }
+          const rawActive = t.isActive ?? t.isactive ?? t.is_active;
+          const isActive = rawActive !== undefined ? (rawActive === 1 || rawActive === true || rawActive === 'true') : true;
+
+          return {
+            id: String(t.id),
+            name: t.name || `Table ${t.id}`,
+            status: (t.status as TableStatus) || 'available',
+            isActive,
+            maintenanceReason: t.maintenanceReason || t.maintenancereason || undefined,
+            session
+          };
+        });
+
+        setTables(prev => {
+          // If local tables fetch failed (like when viewing customer facing site without local machine running),
+          // adopt cloud tables from Supabase!
+          if (!tablesRes || !tablesRes.ok || !prev || prev.length === 0) {
+            return mappedCloudTables;
+          }
+          return prev;
+        });
+      }
 
       if (annData) {
         setAnnouncements((annData as any[]).map(a => {
@@ -932,7 +989,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     addActivity('admin_action', `Deleted menu item ID: ${id}`);
   };
 
-  const addReservation = async (i: Omit<Reservation, 'id'|'createdAt'>): Promise<string> => {
+  const addReservation = (i: Omit<Reservation, 'id'|'createdAt'>): string => {
     const id = Math.random().toString(36).substring(2, 8).toUpperCase();
     const newRes = { ...i, id, createdAt: new Date() };
     
@@ -945,8 +1002,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       id: newRes.id,
       customerName: newRes.customerName,
       contactNumber: newRes.contactNumber,
-      email: newRes.email ? newRes.email.trim() : null,
-      date: dateFormatted,
+      email: newRes.email || null,
+      date: newRes.date.toISOString(),
       timeSlot: newRes.timeSlot,
       durationHours: newRes.durationHours,
       partySize: newRes.partySize,
@@ -959,54 +1016,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       paymentRef: newRes.paymentRef || null,
       receiptImg: newRes.receiptImg || null,
       promoCode: newRes.promoCode || null,
-      discountAmount: newRes.discountAmount || 0,
+      discountAmount: newRes.discountAmount || null,
       createdAt: newRes.createdAt.toISOString()
     };
     
-    try {
-      const { error } = await publicSupabase.from('reservations').insert([supabasePayload]);
-      if (error) {
-        console.warn("Primary Supabase reservation insert note:", error.message);
-        // Fallback with minimal columns if an optional column constraint failed
-        await publicSupabase.from('reservations').insert([{
-          id: newRes.id,
-          customerName: newRes.customerName,
-          contactNumber: newRes.contactNumber,
-          email: newRes.email ? newRes.email.trim() : null,
-          date: dateFormatted,
-          timeSlot: newRes.timeSlot,
-          durationHours: newRes.durationHours,
-          partySize: newRes.partySize,
-          status: newRes.status,
-          totalAmount: newRes.totalAmount,
-          downPaymentAmount: newRes.downPaymentAmount,
-          downPaymentPaid: newRes.downPaymentPaid ? 1 : 0,
-          balancePaid: 0,
-          createdAt: new Date().toISOString()
-        }]);
-      }
-    } catch (insertErr) {
-      console.error("Supabase insert exception:", insertErr);
-    }
-
-    // 🟢 Increment promo code redemption usage count
-    if (newRes.promoCode) {
-      const pCode = newRes.promoCode.trim().toUpperCase();
-      const targetPromo = promoCodes.find(p => p.code.trim().toUpperCase() === pCode);
-      if (targetPromo) {
-        const nextCount = (targetPromo.usageCount || 0) + 1;
-        setPromoCodes(prev => prev.map(p => p.id === targetPromo.id ? { ...p, usageCount: nextCount } : p));
-        publicSupabase
-          .from('promo_codes')
-          .update({ usage_count: nextCount })
-          .eq('id', targetPromo.id)
-          .then(({ error }) => {
-            if (error) {
-              publicSupabase.from('promo_codes').update({ usageCount: nextCount }).eq('id', targetPromo.id);
-            }
-          });
-      }
-    }
+    supabase.from('reservations').insert([supabasePayload]).then(({ error }) => {
+      if (error) console.error("Supabase insert error:", error);
+    });
     
     return id;
   };
@@ -1159,14 +1175,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
   
   const applyPromoCode = (code: string) => {
-    const cleanCode = (code || '').trim().toUpperCase();
-    const now = new Date().getTime();
+    const now = new Date();
     return promoCodes.find(p => {
-      if (!p.code || p.code.trim().toUpperCase() !== cleanCode) return false;
-      if (!p.isActive) return false;
-      if (p.startDate && new Date(p.startDate).getTime() > now + 86400000) return false; 
-      if (p.expiresAt && new Date(p.expiresAt).getTime() < now) return false; 
-      if (p.isLimitedUses && p.usageCount >= p.maxUsage) return false; 
+      if (p.code.toUpperCase() !== code.toUpperCase() || !p.isActive) return false;
+      if (p.startDate && new Date(p.startDate) > now) return false; 
+      if (p.expiresAt && new Date(p.expiresAt) < now) return false; 
+      if (p.isLimitedUses !== false && p.usageCount >= p.maxUsage) return false; 
       return true;
     }) || null;
   };
