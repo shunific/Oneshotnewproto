@@ -1307,15 +1307,38 @@ export function HomePage() {
                 </div>
                 
                 <div className="mb-12">
-                  <h3 className="text-center text-xl font-bold text-white mb-6">{cms.address || "Autobase OAX, Cainta"}</h3>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-xl font-bold text-white">{cms.address || "Autobase OAX, Cainta"}</h3>
+                    <a
+                      href={
+                        cms.latitude && cms.longitude
+                          ? `https://www.google.com/maps/search/?api=1&query=${cms.latitude},${cms.longitude}`
+                          : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(cms.address || "One Shot Bar and Billiards, Cainta")}`
+                      }
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1 transition-colors"
+                    >
+                      <MapPin size={13} /> Open in Google Maps &rarr;
+                    </a>
+                  </div>
                   <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden h-96 relative group">
                     <iframe 
-                      src={
-                        cms.googleMapsEmbedUrl ||
-                        (cms.latitude && cms.longitude
-                          ? `https://maps.google.com/maps?q=${cms.latitude},${cms.longitude}&t=&z=15&ie=UTF8&iwloc=&output=embed`
-                          : `https://maps.google.com/maps?q=${encodeURIComponent(cms.address)}&t=&z=15&ie=UTF8&iwloc=&output=embed`)
-                      } 
+                      src={(() => {
+                        let url = (cms.googleMapsEmbedUrl || "").trim();
+                        const iframeMatch = url.match(/src=["']([^"']+)["']/i);
+                        if (iframeMatch) url = iframeMatch[1];
+                        if (url && (url.includes('/maps/embed') || url.includes('output=embed'))) return url;
+                        const latNum = parseFloat(cms.latitude);
+                        const lngNum = parseFloat(cms.longitude);
+                        if (!isNaN(latNum) && !isNaN(lngNum) && latNum !== 0 && lngNum !== 0) {
+                          return `https://maps.google.com/maps?q=${latNum},${lngNum}&t=&z=16&ie=UTF8&iwloc=&output=embed`;
+                        }
+                        if (cms.address && cms.address.trim() !== '') {
+                          return `https://maps.google.com/maps?q=${encodeURIComponent(cms.address.trim())}&t=&z=16&ie=UTF8&iwloc=&output=embed`;
+                        }
+                        return "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3861.6425983794347!2d121.12493947585098!3d14.581333485888201!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3397c70049cd2efb%3A0x4b8fd5634abcd6cc!2sOne%20Shot%20Bar%20and%20Billiards!5e0!3m2!1sen!2sph!4v1700000000000!5m2!1sen!2sph";
+                      })()} 
                       className="absolute inset-0 w-full h-full border-0 grayscale hover:grayscale-0 transition-all duration-700"
                       allowFullScreen={false} 
                       loading="lazy" 
