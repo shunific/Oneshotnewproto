@@ -182,7 +182,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [isInitializing, setIsInitializing] = useState(true);
 
   // States
-  const [tables, setTables] = useState<Table[]>([]);
+  const [tables, setTables] = useState<Table[]>(() => {
+    try {
+      const cached = localStorage.getItem('oneshot_tables_cache');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {}
+    return Array.from({ length: 10 }, (_, i) => ({
+      id: `t${i + 1}`,
+      name: `Table ${i + 1}`,
+      status: 'available' as TableStatus,
+      isActive: true,
+    }));
+  });
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
@@ -238,6 +252,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     root.setAttribute('data-theme', theme);
     root.setAttribute('data-color', primaryColor);
   }, [theme, primaryColor]);
+
+  useEffect(() => {
+    if (tables && tables.length > 0) {
+      try {
+        localStorage.setItem('oneshot_tables_cache', JSON.stringify(tables));
+      } catch (e) {}
+    }
+  }, [tables]);
 
   const updateTheme = (newTheme: 'dark' | 'light') => {
     setTheme(newTheme);
@@ -334,19 +356,54 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (lostRes && lostRes.ok) setLostItems(await lostRes.json());
       if (watchRes && watchRes.ok) setWatchlist(await watchRes.json());
 
-      // 2. FETCH CLOUD DATA (Supabase is Source of Truth for Online Reservations & CMS)
-      // 🟢 NOTICE: We are NO LONGER fetching session_history from the cloud to prevent local data erasure!
+      // 2. FETCH CLOUD DATA (Supabase is Source of Truth for Online Reservations, CMS & Tables)
       const [
         { data: resData, error: resErr }, { data: annData }, { data: cmsData }, 
-        { data: settingsData }, { data: closedDatesData }, { data: promoData }, { data: eventsData }, { data: feedData }
+        { data: settingsData }, { data: closedDatesData }, { data: promoData }, { data: eventsData }, { data: feedData },
+        { data: cloudTablesData }
       ] = await Promise.all([
         supabase.from('reservations').select('*'), supabase.from('announcements').select('*'), 
         supabase.from('cms').select('*'), supabase.from('system_settings').select('*'), 
         supabase.from('closed_dates').select('*'), supabase.from('promo_codes').select('*'), 
-        supabase.from('events').select('*'), supabase.from('feedback').select('*')
+        supabase.from('events').select('*'), supabase.from('feedback').select('*'),
+        supabase.from('tables').select('*')
       ]);
 
       if (resErr) throw new Error("Supabase is unreachable.");
+
+      if (cloudTablesData && (cloudTablesData as any[]).length > 0) {
+        const mappedCloudTables: Table[] = (cloudTablesData as any[]).map(t => {
+          let session: any = undefined;
+          const rawSession = t.sessionData || t.sessiondata || t.session;
+          if (rawSession) {
+            try {
+              session = typeof rawSession === 'string' ? JSON.parse(rawSession) : rawSession;
+            } catch (e) {
+              session = undefined;
+            }
+          }
+          const rawActive = t.isActive ?? t.isactive ?? t.is_active;
+          const isActive = rawActive !== undefined ? (rawActive === 1 || rawActive === true || rawActive === 'true') : true;
+
+          return {
+            id: String(t.id),
+            name: t.name || `Table ${t.id}`,
+            status: (t.status as TableStatus) || 'available',
+            isActive,
+            maintenanceReason: t.maintenanceReason || t.maintenancereason || undefined,
+            session
+          };
+        });
+
+        setTables(prev => {
+          // If local tables fetch failed (like when viewing customer facing site without local machine running),
+          // adopt cloud tables from Supabase!
+          if (!tablesRes || !tablesRes.ok || !prev || prev.length === 0) {
+            return mappedCloudTables;
+          }
+          return prev;
+        });
+      }
 
       if (annData) {
         setAnnouncements((annData as any[]).map(a => {
@@ -394,29 +451,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (closedDatesData) setClosedDates((closedDatesData as any[]).map(r => ({ id: r.id, date: r.closed_date, type: r.type || 'specific', dayOfWeek: r.day_of_week, reason: r.reason, isFullDay: !!r.is_full_day, openTime: r.open_time, closeTime: r.close_time })) as ClosedDate[]);
       if (eventsData) setEvents((eventsData as any[]).map(e => ({ ...e, slotsFull: !!e.slotsFull, allowReservations: e.allowReservations !== false, caterWalkIns: e.caterWalkIns !== false, walkInTableCount: e.walkInTableCount ?? 10, attachments: e.attachments ? [e.attachments] : [] })) as Event[]);
       
+      let configObj: any = {};
       if (cmsData) { 
-        const configObj = (cmsData as any[]).reduce((acc: any, curr: any) => { 
-          const k = curr.keyname || curr.key_name || curr.keyName;
-          const v = curr.settingvalue !== undefined ? curr.settingvalue : (curr.settingValue !== undefined ? curr.settingValue : curr.content_value);
-          if (k) acc[k] = v; 
-          return acc; 
-        }, {}); 
-        setSiteConfig(configObj); 
+        (cmsData as any[]).forEach((curr: any) => {
+          const k = curr.key_name || curr.keyName || curr.keyname;
+          const v = curr.content_value ?? curr.setting_value ?? curr.settingValue ?? curr.settingvalue;
+          if (k) configObj[k] = v;
+        }); 
       }
       
       if (settingsData) { 
         const settingsObj = (settingsData as any[]).reduce((acc: any, curr: any) => { 
           const k = curr.key_name || curr.keyName || curr.keyname;
-          let val = curr.setting_value !== undefined ? curr.setting_value : (curr.settingValue !== undefined ? curr.settingValue : curr.settingvalue);
+          let val = curr.setting_value ?? curr.settingValue ?? curr.settingvalue ?? curr.content_value; 
           if (val === 'true') val = true; 
           else if (val === 'false') val = false; 
-          else if (val !== null && val !== undefined && !isNaN(val) && String(val).trim() !== '' && !String(val).includes(':')) val = Number(val); 
-          if (k) acc[k] = val; 
+          else if (!isNaN(val) && val.trim() !== '' && !val.includes(':')) val = Number(val); 
+          if (k) {
+            acc[k] = val; 
+            configObj[k] = val;
+          }
           return acc; 
         }, {}); 
         setRates(prev => ({ ...prev, ...settingsObj })); 
         setReservationTerms(prev => ({ ...prev, ...settingsObj })); 
       }
+      setSiteConfig((prev: any) => ({ ...(prev || {}), ...configObj }));
 
       if (resData) {
         const mappedRes = (resData as any[]).map(r => ({
@@ -1163,17 +1223,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
       sanitized.downPaymentPercent = dp;
     }
     setRates(prev => ({ ...prev, ...sanitized }));
+
+    // 1. Direct Supabase sync so live website receives changes immediately
     try {
-      const res = await syncToDB('/api/settings/rates', 'PUT', sanitized, `Updated System Rates`);
-      try {
-        const entries = Object.entries(sanitized).map(([k, v]) => ({
-          key_name: k,
-          setting_value: String(v ?? '')
-        }));
-        await supabase.from('system_settings').upsert(entries, { onConflict: 'key_name' });
-      } catch (err) {
-        console.warn('Cloud rates upsert error:', err);
-      }
+      const rows = Object.entries(sanitized).map(([k, v]) => ({
+        key_name: k,
+        setting_value: String(v ?? '')
+      }));
+      await supabase.from('system_settings').upsert(rows, { onConflict: 'key_name' });
+    } catch (e) {
+      console.warn("Direct Supabase rates sync note:", e);
+    }
+
+    // 2. Local SQLite DB sync
+    try {
+      const res = await syncToDB('/api/settings/rates', 'PUT', sanitized, `Updated System Rates`).catch(() => null);
       addActivity('admin_action', 'System rates updated');
       runCloudBackup(); 
       return res;
@@ -1182,17 +1246,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const updateReservationTerms = async (t: Partial<ReservationTerms>) => {
     setReservationTerms(prev => ({ ...prev, ...t }));
+
+    // 1. Direct Supabase sync so live website receives changes immediately
     try {
-      const res = await syncToDB('/api/settings/terms', 'PUT', t, `Updated Reservation Terms`); 
-      try {
-        const entries = Object.entries(t).map(([k, v]) => ({
-          key_name: k,
-          setting_value: String(v ?? '')
-        }));
-        await supabase.from('system_settings').upsert(entries, { onConflict: 'key_name' });
-      } catch (err) {
-        console.warn('Cloud terms upsert error:', err);
-      }
+      const rows = Object.entries(t).map(([k, v]) => ({
+        key_name: k,
+        setting_value: String(v ?? '')
+      }));
+      await supabase.from('system_settings').upsert(rows, { onConflict: 'key_name' });
+    } catch (e) {
+      console.warn("Direct Supabase terms sync note:", e);
+    }
+
+    // 2. Local SQLite DB sync
+    try {
+      const res = await syncToDB('/api/settings/terms', 'PUT', t, `Updated Reservation Terms`).catch(() => null); 
       addActivity('admin_action', 'Reservation terms updated');
       runCloudBackup(); 
       return res;
@@ -1264,23 +1332,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
     addActivity('admin_action', `Deleted event ID: ${id}`);
   };
 
- const updateSiteConfig = async (newConfig: any) => {
+  const updateSiteConfig = async (newConfig: any) => {
     setSiteConfig((prev: any) => ({ ...prev, ...newConfig }));
-    await syncToDB('/api/cms', 'PUT', newConfig, `Updated Website Content`).catch(() => {});
+
+    // 1. Direct Supabase sync so live website receives changes immediately
     try {
-      const entries = Object.entries(newConfig)
-        .filter(([k, v]) => k && String(k).trim() !== "" && v !== null && v !== undefined)
-        .map(([k, v]) => ({
-          keyname: String(k).trim(),
-          settingvalue: typeof v === 'object' ? JSON.stringify(v) : String(v ?? "")
+      const cmsRows = Object.entries(newConfig).map(([k, v]) => ({
+        keyname: k,
+        settingvalue: typeof v === 'object' ? JSON.stringify(v) : String(v ?? '')
+      }));
+      const { error: cmsErr } = await supabase.from('cms').upsert(cmsRows, { onConflict: 'keyname' });
+      if (cmsErr) {
+        const altRows = Object.entries(newConfig).map(([k, v]) => ({
+          key_name: k,
+          setting_value: typeof v === 'object' ? JSON.stringify(v) : String(v ?? '')
         }));
-      if (entries.length > 0) {
-        await supabase.from('cms').upsert(entries, { onConflict: 'keyname' });
+        await supabase.from('cms').upsert(altRows, { onConflict: 'key_name' });
       }
+      // Dual-sync to system_settings for total redundancy
+      const settingsRows = Object.entries(newConfig).map(([k, v]) => ({
+        key_name: k,
+        setting_value: typeof v === 'object' ? JSON.stringify(v) : String(v ?? '')
+      }));
+      await supabase.from('system_settings').upsert(settingsRows, { onConflict: 'key_name' });
     } catch (e) {
-      console.warn('Cloud CMS upsert error:', e);
+      console.warn("Direct Supabase CMS sync note:", e);
     }
-    runCloudBackup();
+
+    // 2. Local SQLite DB sync
+    syncToDB('/api/cms', 'PUT', newConfig, `Updated Website Content`).then(runCloudBackup).catch(()=>{});
     addActivity('admin_action', `Updated public website CMS content`);
   };
 
