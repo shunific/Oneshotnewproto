@@ -144,8 +144,8 @@ export function AdminSiteSettings() {
       flash("Contact phone must contain only numbers (no letters or special characters).", "error");
       return;
     }
-    if (cleanPhone && (cleanPhone.length < 7 || cleanPhone.length > 15)) {
-      flash("Contact phone number must be between 7 and 15 digits (e.g. 09171234567).", "error");
+    if (cleanPhone && (cleanPhone.length < 11 || cleanPhone.length > 13)) {
+      flash("Contact phone number must be between 11 and 13 digits (e.g. 09171234567).", "error");
       return;
     }
 
@@ -675,22 +675,24 @@ export function AdminSiteSettings() {
 
           <div>
             <div className="flex justify-between items-center mb-1">
-              <label className="text-[11px] text-neutral-400 font-medium">Contact Phone (Numbers Only)</label>
-              <span className="text-[10px] text-neutral-500 font-mono">{(form.contactNumber || "").length} digits</span>
+              <label className="text-[11px] text-neutral-400 font-medium">Contact Phone</label>
+              <span className={`text-[10px] ${(form.contactNumber || "").length > 13 || ((form.contactNumber || "").length > 0 && (form.contactNumber || "").length < 11) ? "text-amber-400 font-bold" : "text-neutral-500 font-mono"}`}>
+                {(form.contactNumber || "").length}/13
+              </span>
             </div>
             <input 
               type="tel" 
               inputMode="numeric"
-              maxLength={15}
+              maxLength={13}
               value={form.contactNumber || ""} 
               onChange={e => {
-                const numericOnly = e.target.value.replace(/[^0-9]/g, "");
+                const numericOnly = e.target.value.replace(/[^0-9]/g, "").slice(0, 13);
                 setForm((f: any) => ({ ...f, contactNumber: numericOnly }));
               }}
               placeholder="e.g. 09171234567"
               className="w-full bg-neutral-900 border border-neutral-800 rounded-lg p-2.5 text-xs text-neutral-100 outline-none focus:border-amber-500 font-mono"
             />
-            <p className="text-[10px] text-neutral-500 mt-1">Accepts numbers only (letters and symbols are automatically blocked).</p>
+            <p className="text-[10px] text-neutral-500 mt-1">11 to 13 digits only (e.g. 09171234567).</p>
           </div>
 
           <div>
