@@ -1273,12 +1273,6 @@ export function HomePage() {
                                   <span className="text-sm font-black text-white tracking-wide">{avgDuration > 0 ? `${avgDuration} mins` : 'Gathering Data...'}</span>
                                 </div>
                               </div>
-                              
-                              {totalHistoricalSessions > 0 && (
-                                <p className="text-[9px] text-emerald-500/50 font-mono uppercase tracking-widest text-right">
-                                  AI Trained on {totalHistoricalSessions} sessions
-                                </p>
-                              )}
                             </div>
                           </div>
                         </div>
@@ -1311,7 +1305,7 @@ export function HomePage() {
                     <h3 className="text-xl font-bold text-white">{cms.address || "Autobase OAX, Cainta"}</h3>
                     <a
                       href={
-                        cms.address && cms.address.trim() !== ""
+                        cms.address && cms.address.trim() !== ''
                           ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(cms.address.trim())}`
                           : (cms.latitude && cms.longitude
                               ? `https://www.google.com/maps/search/?api=1&query=${cms.latitude},${cms.longitude}`
@@ -1331,10 +1325,10 @@ export function HomePage() {
                         let url = (cms.googleMapsEmbedUrl || "").trim();
                         const iframeMatch = url.match(/src=["']([^"']+)["']/i);
                         if (iframeMatch) url = iframeMatch[1];
-                        if (url && (url.includes("/maps/embed") || url.includes("output=embed"))) return url;
+                        if (url && (url.includes('/maps/embed') || url.includes('output=embed'))) return url;
 
-                        // 1. Prioritize Venue Address query (places pin directly on One Shot Bar and Billiards Cainta)
-                        if (cms.address && cms.address.trim() !== "") {
+                        // 1. Prioritize Venue Address search query (matches Admin preview & shows business pin)
+                        if (cms.address && cms.address.trim() !== '') {
                           return `https://maps.google.com/maps?q=${encodeURIComponent(cms.address.trim())}&t=&z=16&ie=UTF8&iwloc=&output=embed`;
                         }
 
@@ -1545,12 +1539,18 @@ export function HomePage() {
                                       (Array.isArray(ev.dates) && ev.dates.some((d: string) => isSameDay(new Date(d), selectedDate)))
                                     );
                                     if (!evDateMatch) return false;
-                                    if (Array.isArray(ev.selectedTableIds) && ev.selectedTableIds.length > 0) {
-                                      return ev.selectedTableIds.includes(table.id);
+                                    const tIds = ev.selectedTableIds || ev.eventTableIds || ev.event_table_ids || ev.tableIds || [];
+                                    if (Array.isArray(tIds) && tIds.length > 0) {
+                                      return tIds.includes(table.id);
                                     }
                                     if (ev.allowReservations === false) return true;
                                     return false;
-                                  });
+                                  }) || reservations.find((r: any) => 
+                                    r.tableId === table.id && 
+                                    isSameDay(new Date(r.date), selectedDate) && 
+                                    r.status !== 'cancelled' &&
+                                    (r.customerName?.startsWith('EVENT:') || r.id?.startsWith('EVT-') || r.paymentRef === 'EVENT')
+                                  );
                                   const isEvent = Boolean(eventForTable);
                                   
                                   return (
@@ -1604,8 +1604,9 @@ export function HomePage() {
                                         (Array.isArray(ev.dates) && ev.dates.some((d: string) => isSameDay(new Date(d), selectedDate)))
                                       );
                                       if (!evDateMatch) return false;
-                                      if (Array.isArray(ev.selectedTableIds) && ev.selectedTableIds.length > 0) {
-                                        return ev.selectedTableIds.includes(selectedTableId);
+                                      const tIds = ev.selectedTableIds || ev.eventTableIds || ev.event_table_ids || ev.tableIds || [];
+                                      if (Array.isArray(tIds) && tIds.length > 0) {
+                                        return tIds.includes(selectedTableId);
                                       }
                                       if (ev.allowReservations === false) return true;
                                       return false;
@@ -1653,6 +1654,24 @@ export function HomePage() {
                                           const [rH, rM] = r.timeSlot.split(':').map(Number);
                                           rStart.setHours(rH, rM, 0, 0);
                                           const rEnd = addMinutes(rStart, r.durationHours * 60);
+                                          const isEventRes = r.customerName?.startsWith('EVENT:') || r.id?.startsWith('EVT-') || r.paymentRef === 'EVENT';
+
+                                          if (isEventRes) {
+                                            return (
+                                              <div 
+                                                key={r.id} 
+                                                onClick={() => { setActiveSection('events'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                                                className="flex items-center gap-3 bg-purple-950/40 hover:bg-purple-900/60 p-2.5 rounded-lg border border-purple-800/60 cursor-pointer transition-colors group"
+                                              >
+                                                <div className="w-2 h-2 rounded-full bg-purple-400 animate-pulse shadow-[0_0_8px_rgba(168,85,247,0.6)]" />
+                                                <span className="text-purple-200 text-xs font-semibold">{format(rStart, 'h:mm a')} - {format(rEnd, 'h:mm a')}</span>
+                                                <span className="text-purple-300 group-hover:text-white text-[10px] font-bold ml-auto px-2 py-0.5 rounded bg-purple-900/60 border border-purple-700/50 flex items-center gap-1">
+                                                  EVENT &rarr;
+                                                </span>
+                                              </div>
+                                            );
+                                          }
+
                                           return (
                                             <div key={r.id} className="flex items-center gap-3 bg-neutral-900 p-2.5 rounded-lg border border-neutral-800">
                                               <div className="w-2 h-2 rounded-full bg-sky-500 shadow-[0_0_8px_rgba(14,165,233,0.5)]" />
@@ -2240,32 +2259,6 @@ export function HomePage() {
                       <p className="text-xs text-neutral-400 leading-relaxed">{event.description}</p>
                     </div>
                   ))}
-                </div>
-              )}
-
-              {pastEvents.length > 0 && (
-                <div className="space-y-4">
-                  <h3 className="text-xs font-bold text-neutral-500 uppercase tracking-widest flex items-center gap-2"><Clock size={14} /> Event Archive</h3>
-                  {pastEvents.map((event: any) => {
-                    const isOver7Days = isEventOver7DaysOld(event.date);
-                    return (
-                      <div 
-                        key={event.id} 
-                        className={`rounded-2xl border p-5 transition-all ${
-                          isOver7Days 
-                            ? 'bg-neutral-950/40 border-neutral-900 text-neutral-600 grayscale opacity-40 select-none' 
-                            : 'bg-neutral-900/50 border-neutral-800/80 text-neutral-400'
-                        }`}
-                      >
-                        <div className="flex justify-between items-center mb-2">
-                          <span className="text-[9px] bg-neutral-800 text-neutral-400 px-2 py-0.5 rounded font-bold uppercase">{event.type}</span>
-                          <span className="text-[10px] font-semibold">{isOver7Days ? 'Archived (>7d ago)' : event.date}</span>
-                        </div>
-                        <h4 className={`text-sm font-bold mb-1 ${isOver7Days ? 'text-neutral-500 line-through' : 'text-neutral-200'}`}>{event.title}</h4>
-                        <p className="text-xs line-clamp-2">{event.description}</p>
-                      </div>
-                    );
-                  })}
                 </div>
               )}
             </motion.div>

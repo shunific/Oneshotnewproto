@@ -1373,7 +1373,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
           <div className="absolute inset-0 border-4 border-emerald-500 rounded-full border-t-transparent animate-spin"></div>
         </div>
         <h1 className="text-2xl font-black text-white tracking-widest">ONE SHOT</h1>
-        <p className="text-[10px] text-emerald-500 font-bold uppercase tracking-[0.2em] mt-2 animate-pulse">Loading Application...</p>
       </div>
     );
   }
