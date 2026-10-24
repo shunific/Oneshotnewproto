@@ -1311,9 +1311,11 @@ export function HomePage() {
                     <h3 className="text-xl font-bold text-white">{cms.address || "Autobase OAX, Cainta"}</h3>
                     <a
                       href={
-                        cms.latitude && cms.longitude
-                          ? `https://www.google.com/maps/search/?api=1&query=${cms.latitude},${cms.longitude}`
-                          : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(cms.address || "One Shot Bar and Billiards, Cainta")}`
+                        cms.address && cms.address.trim() !== ""
+                          ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(cms.address.trim())}`
+                          : (cms.latitude && cms.longitude
+                              ? `https://www.google.com/maps/search/?api=1&query=${cms.latitude},${cms.longitude}`
+                              : `https://www.google.com/maps/search/?api=1&query=One%20Shot%20Bar%20and%20Billiards%20Cainta`)
                       }
                       target="_blank"
                       rel="noopener noreferrer"
@@ -1329,15 +1331,21 @@ export function HomePage() {
                         let url = (cms.googleMapsEmbedUrl || "").trim();
                         const iframeMatch = url.match(/src=["']([^"']+)["']/i);
                         if (iframeMatch) url = iframeMatch[1];
-                        if (url && (url.includes('/maps/embed') || url.includes('output=embed'))) return url;
+                        if (url && (url.includes("/maps/embed") || url.includes("output=embed"))) return url;
+
+                        // 1. Prioritize Venue Address query (places pin directly on One Shot Bar and Billiards Cainta)
+                        if (cms.address && cms.address.trim() !== "") {
+                          return `https://maps.google.com/maps?q=${encodeURIComponent(cms.address.trim())}&t=&z=16&ie=UTF8&iwloc=&output=embed`;
+                        }
+
+                        // 2. Otherwise use explicit custom coordinates if provided
                         const latNum = parseFloat(cms.latitude);
                         const lngNum = parseFloat(cms.longitude);
                         if (!isNaN(latNum) && !isNaN(lngNum) && latNum !== 0 && lngNum !== 0) {
                           return `https://maps.google.com/maps?q=${latNum},${lngNum}&t=&z=16&ie=UTF8&iwloc=&output=embed`;
                         }
-                        if (cms.address && cms.address.trim() !== '') {
-                          return `https://maps.google.com/maps?q=${encodeURIComponent(cms.address.trim())}&t=&z=16&ie=UTF8&iwloc=&output=embed`;
-                        }
+
+                        // 3. Fallback to One Shot Bar and Billiards Cainta
                         return "https://maps.google.com/maps?q=14.581333,121.124939&t=&z=16&ie=UTF8&iwloc=&output=embed";
                       })()} 
                       className="absolute inset-0 w-full h-full border-0 grayscale hover:grayscale-0 transition-all duration-700"
