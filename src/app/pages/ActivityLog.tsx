@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef } from 'react';
-import { useAppContext, ActivityType } from '../context/AppContext';
+import { useAppContext, Activity, ActivityType } from '../context/AppContext';
 import { 
   PlusCircle, XCircle, RefreshCw, Info, FileText, 
   LayoutGrid, ShoppingCart, CalendarDays, Users, ShieldCheck, Tag,
@@ -27,9 +27,10 @@ export function ActivityLog() {
     'System Actions': ['admin_action', 'tako_action', 'promo_created'],
   };
 
-  const getActor = (description: string) => {
-    const match = description.match(/\(Action by:\s*(.*?)\)/);
-    return match ? match[1] : 'System';
+  const getActor = (activity: Activity) => {
+    if (typeof activity.metadata?.actorName === 'string' && activity.metadata.actorName.trim()) return activity.metadata.actorName;
+    if (typeof activity.metadata?.actorId === 'string' && activity.metadata.actorId.trim()) return activity.metadata.actorId;
+    return 'Unknown legacy actor';
   };
 
   const cleanDescription = (desc: string) => desc.replace(/\s*\(Action by:.*?\)/, '');
@@ -92,7 +93,7 @@ export function ActivityLog() {
         // Using a cleaner format: YYYY-MM-DD HH:MM AM/PM
         const formattedDate = `${dateObj.toLocaleDateString()} ${dateObj.toLocaleTimeString()}`;
         const module = getModule(act.type);
-        const actor = getActor(act.description);
+        const actor = getActor(act);
         const event = act.type.replace(/_/g, ' ');
         const details = cleanDescription(act.description);
         
@@ -176,7 +177,7 @@ export function ActivityLog() {
     }
   };
 
-  const uniqueActors = useMemo(() => Array.from(new Set(activities.map(a => getActor(a.description)))).sort(), [activities]);
+  const uniqueActors = useMemo(() => Array.from(new Set(activities.map(a => getActor(a)))).sort(), [activities]);
   const uniqueEvents = useMemo(() => Array.from(new Set(activities.map(a => a.type))).sort(), [activities]);
 
   const filteredActivities = activities.filter(a => {
@@ -189,7 +190,7 @@ export function ActivityLog() {
       if (startDate && endDate && !isWithinInterval(actDate, { start: startOfDay(new Date(startDate)), end: endOfDay(new Date(endDate)) })) return false;
     }
     if (moduleFilter !== 'ALL' && getModule(a.type) !== moduleFilter) return false;
-    if (actorFilter !== 'ALL' && getActor(a.description) !== actorFilter) return false;
+    if (actorFilter !== 'ALL' && getActor(a) !== actorFilter) return false;
     if (eventFilter !== 'ALL' && a.type !== eventFilter) return false;
     return true;
   });
@@ -330,7 +331,7 @@ export function ActivityLog() {
                         {moduleName}
                       </div>
                     </td>
-                    <td className="px-5 py-3.5 text-neutral-300">{getActor(act.description)}</td>
+                    <td className="px-5 py-3.5 text-neutral-300">{getActor(act)}</td>
                     <td className="px-5 py-3.5">
                       <div className="flex items-center gap-2 text-neutral-300 font-medium">
                         {eventUI.icon}

@@ -1,10 +1,17 @@
-import { useState, useRef } from 'react';
+import { localFetch } from '../utils/localApi';
+import { useState, useRef, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { Package, Search, Plus, UploadCloud, Archive, CheckCircle, Clock, Check, X, AlertTriangle, RefreshCw, History } from 'lucide-react';
 import { format } from 'date-fns';
 
+export function lostPhotoUrl(image: string) {
+  if (!image?.startsWith('/api/images/')) return image;
+  const origin = ['localhost', '127.0.0.1'].includes(window.location.hostname) && window.location.port !== '5173' ? window.location.origin : 'http://localhost:3001';
+  return origin + image;
+}
+
 export function LostAndFound() {
-  const { lostItems, addLostItem, updateLostItem, deleteLostItem } = useAppContext() as any;
+  const { lostItems, addLostItem, updateLostItem, deleteLostItem, staffProfile } = useAppContext() as any;
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'found' | 'claimed' | 'archived' | 'all'>('found');
   
@@ -12,6 +19,11 @@ export function LostAndFound() {
   const [form, setForm] = useState({ itemName: '', description: '', image: '' });
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const mounted = useRef(true);
+  const transitionBusy = useRef(false),pageOwner = useRef(staffProfile);
+  pageOwner.current=staffProfile;
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useEffect(() => () => { if (form.image.startsWith('blob:')) URL.revokeObjectURL(form.image); }, [form.image]);
 
   const [claimModalId, setClaimModalId] = useState<string | null>(null);
   const [claimName, setClaimName] = useState('');
@@ -51,6 +63,7 @@ export function LostAndFound() {
   const handleImage = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024) { flash('Choose a PNG, JPEG or WebP photo, 5 MiB or smaller.', 'error'); e.target.value = ''; return; }
       setForm({ ...form, image: URL.createObjectURL(file) });
       setImageFile(file);
     }
@@ -58,32 +71,31 @@ export function LostAndFound() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     if (!form.itemName.trim() || !form.description.trim()) {
       flash("Item name and description are required.", "error");
       return;
     }
 
     setIsSubmitting(true);
-    let finalImageUrl = form.image;
+    let finalImageUrl = form.image.startsWith('/api/images/') ? form.image : '';
 
     try {
-      // 🟢 Physically upload the image to the local SQLite edge server
       if (imageFile) {
         const formData = new FormData();
         formData.append('image', imageFile);
-        const res = await fetch('http://localhost:3001/api/images', {
-          method: 'POST',
-          body: formData,
-        });
-        if (res.ok) {
-          const data = await res.json();
-          finalImageUrl = data.url; // Permanent local URL
-        } else {
-          flash("Failed to upload image. Saving without photo.", "error");
-        }
+        const res = await localFetch('http://localhost:3001/api/images', { method: 'POST', body: formData });
+        if (!res.ok) throw new Error('Photo could not be saved. Please retry.');
+        const data = await res.json();
+        if (typeof data.url !== 'string' || !/^\/api\/images\/[0-9a-f-]{36}$/.test(data.url)) throw new Error('Photo upload could not be confirmed. Please retry.');
+        if (!mounted.current) return;
+        finalImageUrl = data.url;
+        setForm(previous => ({ ...previous, image: finalImageUrl }));
+        setImageFile(null);
       }
 
-      addLostItem({ 
+      if (!mounted.current) return;
+      await addLostItem({
         itemName: form.itemName.trim(), 
         description: form.description.trim(), 
         image: finalImageUrl, 
@@ -91,28 +103,44 @@ export function LostAndFound() {
         status: 'found' 
       });
       
+      if (!mounted.current) return;
       flash("Lost item successfully recorded.", "success");
       setShowModal(false);
       setForm({ itemName: '', description: '', image: '' });
       setImageFile(null);
     } catch (error) {
-      flash("An error occurred while saving.", "error");
+      if (mounted.current) flash(error instanceof Error ? error.message : "An error occurred while saving. Please retry.", "error");
     } finally {
-      setIsSubmitting(false);
+      if (mounted.current) setIsSubmitting(false);
     }
   };
 
-  const handleClaim = (e: React.FormEvent) => {
+  const handleClaim = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!claimName.trim() || !claimModalId) {
       flash("Claimant name or ID is required.", "error");
       return;
     }
-    // 🟢 Automatically archive when claimed
-    updateLostItem(claimModalId, { status: 'claimed', claimedBy: claimName.trim(), claimedDate: new Date(), isArchived: true });
-    flash(`Item successfully marked as claimed by ${claimName.trim()}.`, "success");
-    setClaimModalId(null);
-    setClaimName('');
+    await runLostAction(async()=>{
+      await updateLostItem(claimModalId, { status: 'claimed', claimedBy: claimName.trim(), claimedDate: new Date(), isArchived: true });
+    },`Item successfully marked as claimed by ${claimName.trim()}.`,true);
+  };
+
+  const runLostAction = async (save:()=>Promise<void>,message:string,closeClaim=false) => {
+    if(transitionBusy.current||isSubmitting)return;
+    const owner=pageOwner.current;
+    const isCurrent=()=>mounted.current&&pageOwner.current===owner;
+    transitionBusy.current=true;setIsSubmitting(true);
+    try {
+      await save();if(!isCurrent())return;
+      flash(message,'success');
+      if(closeClaim){setClaimModalId(null);setClaimName('');}
+    } catch(error) {
+      if(isCurrent())flash(error instanceof Error?error.message:'Lost-item change was not confirmed.','error');
+    } finally {
+      transitionBusy.current=false;
+      if(isCurrent())setIsSubmitting(false);
+    }
   };
 
   return (
@@ -170,7 +198,7 @@ export function LostAndFound() {
             <h2 className="text-2xl font-black text-white flex items-center gap-2"><Package className="text-emerald-500" /> Lost & Found</h2>
             <p className="text-sm text-neutral-500 mt-1">Manage items left behind by customers.</p>
           </div>
-          <button onClick={() => setShowModal(true)} className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-xl font-semibold flex items-center gap-2 transition-colors flex-shrink-0 w-full md:w-auto justify-center">
+          <button disabled={isSubmitting} onClick={() => setShowModal(true)} className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-xl font-semibold flex items-center gap-2 transition-colors flex-shrink-0 w-full md:w-auto justify-center">
             <Plus size={16} /> Log Item
           </button>
         </div>
@@ -210,7 +238,7 @@ export function LostAndFound() {
           <div key={item.id} className={`bg-neutral-950 border rounded-2xl overflow-hidden flex flex-col transition-all ${item.status === 'claimed' || item.isArchived ? 'border-neutral-800 opacity-70' : 'border-emerald-900/50 hover:border-emerald-500/50'}`}>
             <div className="h-48 bg-neutral-900 relative">
               {item.image ? (
-                 <img src={item.image} alt={item.itemName} className="w-full h-full object-cover" />
+                 <img src={lostPhotoUrl(item.image)} alt={item.itemName} className="w-full h-full object-cover" />
               ) : (
                  <div className="w-full h-full flex items-center justify-center text-neutral-700"><Package size={48} /></div>
               )}
@@ -237,13 +265,13 @@ export function LostAndFound() {
             </div>
             {!item.isArchived && item.status !== 'claimed' && (
               <div className="border-t border-neutral-800 p-3 flex gap-2 bg-neutral-900/50">
-                <button onClick={() => setClaimModalId(item.id)} className="flex-1 bg-neutral-800 hover:bg-neutral-700 text-white text-xs font-semibold py-2 rounded-lg transition-colors">Mark as Claimed</button>
-                <button onClick={() => { deleteLostItem(item.id); flash("Item moved to archives.", "success"); }} className="px-3 bg-neutral-900 hover:bg-rose-900/50 border border-neutral-800 text-neutral-500 hover:text-rose-500 rounded-lg transition-colors" title="Move to History/Archive"><Archive size={14}/></button>
+                <button disabled={isSubmitting} onClick={() => setClaimModalId(item.id)} className="flex-1 bg-neutral-800 hover:bg-neutral-700 text-white text-xs font-semibold py-2 rounded-lg transition-colors">Mark as Claimed</button>
+                <button disabled={isSubmitting} onClick={() => runLostAction(()=>deleteLostItem(item.id),"Item moved to archives.")} className="px-3 bg-neutral-900 hover:bg-rose-900/50 border border-neutral-800 text-neutral-500 hover:text-rose-500 rounded-lg transition-colors" title="Move to History/Archive"><Archive size={14}/></button>
               </div>
             )}
             {item.status === 'claimed' && (
               <div className="border-t border-neutral-800 p-3 flex gap-2 bg-neutral-900/50">
-                <button onClick={() => { updateLostItem(item.id, { status: 'found', claimedBy: null, claimedDate: null, isArchived: false }); flash("Reverted to unclaimed status.", "success"); }} className="flex-1 bg-neutral-900 border border-neutral-700 text-neutral-400 hover:text-white text-xs font-semibold py-2 rounded-lg transition-colors">Revert to Unclaimed</button>
+                <button disabled={isSubmitting} onClick={() => runLostAction(()=>updateLostItem(item.id, { status: 'found', claimedBy: null, claimedDate: null, isArchived: false }),"Reverted to unclaimed status.")} className="flex-1 bg-neutral-900 border border-neutral-700 text-neutral-400 hover:text-white text-xs font-semibold py-2 rounded-lg transition-colors">Revert to Unclaimed</button>
               </div>
             )}
           </div>
@@ -261,24 +289,24 @@ export function LostAndFound() {
                   <label className="block text-xs text-neutral-400">Item Name *</label>
                   <CharCount current={form.itemName} max={50} />
                 </div>
-                <input required maxLength={50} type="text" value={form.itemName} onChange={e => setForm({...form, itemName: e.target.value})} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-emerald-500" placeholder="e.g. Black Wallet" />
+                <input disabled={isSubmitting} required maxLength={50} type="text" value={form.itemName} onChange={e => setForm({...form, itemName: e.target.value})} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-emerald-500" placeholder="e.g. Black Wallet" />
               </div>
               <div>
                 <div className="flex justify-between items-center mb-1.5">
                   <label className="block text-xs text-neutral-400">Description *</label>
                   <CharCount current={form.description} max={400} />
                 </div>
-                <textarea required maxLength={400} value={form.description} onChange={e => setForm({...form, description: e.target.value})} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-emerald-500 resize-none h-20" placeholder="Contents, color, brand..." />
+                <textarea disabled={isSubmitting} required maxLength={400} value={form.description} onChange={e => setForm({...form, description: e.target.value})} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-emerald-500 resize-none h-20" placeholder="Contents, color, brand..." />
               </div>
               <div>
                 <label className="block text-xs text-neutral-400 mb-1.5">Photo</label>
                 <label className="flex items-center justify-center gap-2 w-full h-24 border-2 border-dashed border-neutral-700 rounded-xl cursor-pointer hover:border-emerald-500 bg-neutral-900 transition-colors">
-                  <input type="file" accept="image/*" className="hidden" onChange={handleImage} />
-                  {form.image ? <img src={form.image} className="h-full object-contain" /> : <span className="text-xs text-neutral-500 flex items-center gap-2"><UploadCloud size={16}/> Click to upload image</span>}
+                  <input disabled={isSubmitting} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={handleImage} />
+                  {form.image ? <img src={lostPhotoUrl(form.image)} className="h-full object-contain" /> : <span className="text-xs text-neutral-500 flex items-center gap-2"><UploadCloud size={16}/> Click to upload image</span>}
                 </label>
               </div>
               <div className="flex gap-2 pt-2">
-                <button type="button" onClick={() => { setShowModal(false); setImageFile(null); setForm({ itemName: '', description: '', image: '' }); }} className="flex-1 bg-neutral-800 text-white py-2.5 rounded-xl text-sm font-semibold">Cancel</button>
+                <button type="button" disabled={isSubmitting} onClick={() => { setShowModal(false); setImageFile(null); setForm({ itemName: '', description: '', image: '' }); }} className="flex-1 bg-neutral-800 text-white py-2.5 rounded-xl text-sm font-semibold">Cancel</button>
                 <button type="submit" disabled={isSubmitting} className="flex-1 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white py-2.5 rounded-xl text-sm font-semibold transition-colors">
                   {isSubmitting ? 'Saving...' : 'Save Item'}
                 </button>
@@ -299,10 +327,10 @@ export function LostAndFound() {
                    <label className="text-xs text-neutral-400">Claimant Name / ID *</label>
                    <CharCount current={claimName} max={50} />
                  </div>
-                 <input required maxLength={50} type="text" value={claimName} onChange={e => setClaimName(e.target.value)} autoFocus className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-3 py-2.5 text-sm text-white outline-none focus:border-emerald-500" placeholder="Customer Name or ID..." />
+                 <input disabled={isSubmitting} required maxLength={50} type="text" value={claimName} onChange={e => setClaimName(e.target.value)} autoFocus className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-3 py-2.5 text-sm text-white outline-none focus:border-emerald-500" placeholder="Customer Name or ID..." />
                </div>
                <div className="flex gap-2">
-                 <button type="button" onClick={() => { setClaimModalId(null); setClaimName(''); }} className="flex-1 bg-neutral-800 text-white py-2.5 rounded-xl text-sm font-semibold">Cancel</button>
+                 <button type="button" disabled={isSubmitting} onClick={() => { setClaimModalId(null); setClaimName(''); }} className="flex-1 bg-neutral-800 text-white py-2.5 rounded-xl text-sm font-semibold">Cancel</button>
                  <button type="submit" className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 rounded-xl text-sm font-semibold">Confirm Claim</button>
                </div>
              </form>

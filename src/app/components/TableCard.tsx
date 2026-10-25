@@ -1,3 +1,4 @@
+import { openTimeStop } from '../utils/openTimeAvailability.js';
 import { useState, useEffect } from 'react';
 import { Table } from '../context/AppContext';
 import { Play, XSquare, Clock, Calendar, Wrench, ShoppingCart, Plus, Infinity as InfinityIcon } from 'lucide-react';
@@ -5,6 +6,8 @@ import { addMinutes, differenceInSeconds } from 'date-fns';
 
 interface TableCardProps {
   table: Table;
+  held?: boolean;
+  availabilityVerified?: boolean;
   onAssign: () => void;
   onExtend: () => void;
   onEnd: () => void;
@@ -12,9 +15,10 @@ interface TableCardProps {
   nextReservation: { date: Date; customerName: string; timeSlot: string } | null;
 }
 
-export function TableCard({ table, onAssign, onExtend, onEnd, onOrder, nextReservation }: TableCardProps) {
+export function TableCard({ table, held=false, availabilityVerified=true, onAssign, onExtend, onEnd, onOrder, nextReservation }: TableCardProps) {
   const [now, setNow] = useState(new Date());
   const isEvent = table.status === 'event';
+  const stop = openTimeStop(table.session, Date.now());
 
   const backgroundCls = isEvent 
     ? 'bg-purple-950/40 border-purple-800/50 text-purple-400 opacity-90' 
@@ -30,10 +34,11 @@ export function TableCard({ table, onAssign, onExtend, onEnd, onOrder, nextReser
   // Timer Calculation Logic
   const getTimerInfo = () => {
     if (!table.session) return null;
+    const currentTime=table.status==='occupied'?new Date():now;
     
     // 🟢 NEW: Intercept Open Time Logic
     if (table.session.isOpenTime || table.session.durationMinutes === null) {
-      const elapsedSecs = Math.max(0, differenceInSeconds(now, new Date(table.session.startTime)));
+      const elapsedSecs = Math.max(0, differenceInSeconds(stop?.reached ? new Date(stop.latestEndTime) : currentTime, new Date(table.session.startTime)));
       const hrs = String(Math.floor(elapsedSecs / 3600)).padStart(2, '0');
       const mm = String(Math.floor((elapsedSecs % 3600) / 60)).padStart(2, '0');
       const ss = String(elapsedSecs % 60).padStart(2, '0');
@@ -48,7 +53,7 @@ export function TableCard({ table, onAssign, onExtend, onEnd, onOrder, nextReser
 
     // Standard Countdown Logic
     const endTime = addMinutes(new Date(table.session.startTime), table.session.durationMinutes);
-    const secsLeft = differenceInSeconds(endTime, now);
+    const secsLeft = differenceInSeconds(endTime, currentTime);
     const isOvertime = secsLeft < 0;
     const absSecs = Math.abs(secsLeft);
     
@@ -69,6 +74,8 @@ export function TableCard({ table, onAssign, onExtend, onEnd, onOrder, nextReser
 
   // Smart click handler for the whole card
   const handleCardClick = () => {
+    if(held)return;
+    if(table.status==='available'&&!availabilityVerified)return;
     if (table.status === 'available' || table.status === 'reserved') {
       onAssign();
     } else if (table.status === 'occupied') {
@@ -81,7 +88,7 @@ export function TableCard({ table, onAssign, onExtend, onEnd, onOrder, nextReser
     <div 
       onClick={handleCardClick}
       className={`relative flex flex-col bg-neutral-900 border-2 border-transparent hover:border-neutral-700 rounded-2xl overflow-hidden transition-all duration-200 
-      ${table.status !== 'maintenance' ? 'cursor-pointer hover:-translate-y-1 hover:shadow-xl hover:shadow-black/50' : 'opacity-80'}
+      ${table.status !== 'maintenance'&&!held ? 'cursor-pointer hover:-translate-y-1 hover:shadow-xl hover:shadow-black/50' : 'opacity-80'}
       ${timer?.isOvertime ? '!border-rose-600 shadow-[0_0_15px_rgba(225,29,72,0.15)] hover:!border-rose-400' : ''}`}
     >
       
@@ -90,19 +97,21 @@ export function TableCard({ table, onAssign, onExtend, onEnd, onOrder, nextReser
 
       {/* Header */}
       <div className="px-5 py-4 border-b border-neutral-800/60 flex items-start justify-between bg-neutral-950/30">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-neutral-800 border border-neutral-700 flex items-center justify-center font-black text-lg text-white">
-            {table.name.replace('Table ', '')}
+        <div className="flex min-w-0 items-start gap-3">
+          <div aria-hidden="true" className="w-10 h-10 shrink-0 rounded-xl bg-neutral-800 border border-neutral-700 flex items-center justify-center font-black text-lg text-white">
+            {table.name.match(/\d+/)?.[0].slice(0,3)||table.name.trim().split(/\s+/).map(word=>word[0]).slice(0,2).join('').toUpperCase()}
           </div>
-          <div>
-            <p className="text-xs text-neutral-500 uppercase tracking-widest font-semibold">{table.name}</p>
-            {table.status === 'available' && <span className="text-sm font-bold text-emerald-400 flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-emerald-500" /> Open</span>}
+          <div className="min-w-0">
+            <p className="break-words text-xs text-neutral-500 uppercase tracking-widest font-semibold">{table.name}</p>
+            {held&&<span className="text-sm font-bold text-amber-300">Transfer held</span>}
+            {table.status === 'available' && !held && availabilityVerified && <span className="text-sm font-bold text-emerald-400 flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-emerald-500" /> Open</span>}
+            {table.status === 'available' && !held && !availabilityVerified && <span className="text-sm font-bold text-amber-300">Check availability</span>}
             {table.status === 'reserved' && <span className="text-sm font-bold text-blue-400 flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-blue-500" /> Reserved</span>}
             {table.status === 'maintenance' && <span className="text-sm font-bold text-orange-400 flex items-center gap-1.5"><Wrench size={12}/> Maintenance</span>}
             {table.status === 'occupied' && (
               <span className={`text-sm font-bold flex items-center gap-1.5 ${timer?.isOvertime ? 'text-rose-400' : timer?.isOpenTime ? 'text-blue-400' : 'text-amber-400'}`}>
                 <span className={`w-2 h-2 rounded-full ${timer?.isOvertime ? 'bg-rose-500 animate-pulse' : timer?.isOpenTime ? 'bg-blue-500' : 'bg-amber-500'}`} />
-                {timer?.isOvertime ? 'Overtime' : timer?.isOpenTime ? 'Open Time' : 'In Use'}
+                {stop?.reached ? 'Play stopped' : timer?.isOvertime ? 'Overtime' : timer?.isOpenTime ? 'Open Time' : 'In Use'}
               </span>
             )}
           </div>
@@ -122,10 +131,10 @@ export function TableCard({ table, onAssign, onExtend, onEnd, onOrder, nextReser
                 <p className="text-xs text-neutral-500">{nextReservation.timeSlot}</p>
               </div>
             ) : (
-              <p className="text-xs text-neutral-500 pointer-events-none">Ready for walk-in or reservation.</p>
+              <p className="text-xs text-neutral-500 pointer-events-none">{held?'Resolve the pending transfer before using this table.':!availabilityVerified?'Refresh transfer recovery before using this table.':'Ready for walk-in or reservation.'}</p>
             )}
             <button 
-              onClick={(e) => { e.stopPropagation(); onAssign(); }} 
+              disabled={held||!availabilityVerified} onClick={(e) => { e.stopPropagation(); onAssign(); }}
               className="w-full flex items-center justify-center gap-2 py-3 bg-emerald-600/10 hover:bg-emerald-600/20 border border-emerald-600/30 text-emerald-400 rounded-xl text-sm font-semibold transition-colors"
             >
               <Play size={14} /> Start Session
@@ -147,7 +156,7 @@ export function TableCard({ table, onAssign, onExtend, onEnd, onOrder, nextReser
           <div className="text-center space-y-4 my-2">
             <p className="text-xs text-blue-400">Reserved table. Awaiting customer arrival.</p>
             <button 
-              onClick={(e) => { e.stopPropagation(); onAssign(); }} 
+              disabled={held} onClick={(e) => { e.stopPropagation(); onAssign(); }}
               className="w-full flex items-center justify-center gap-2 py-3 bg-blue-600/10 hover:bg-blue-600/20 border border-blue-600/30 text-blue-400 rounded-xl text-sm font-semibold transition-colors"
             >
               <Play size={14} /> Check-in Customer
@@ -168,6 +177,8 @@ export function TableCard({ table, onAssign, onExtend, onEnd, onOrder, nextReser
                 </div>
               </div>
               
+              {stop && <p className="mt-2 text-xs text-amber-300">{stop.reached ? 'Play limit reached. Checkout remains available; F&B orders can still be added.' : `Play stops at ${new Date(stop.latestEndTime).toLocaleString('en-PH',{timeZone:'Asia/Manila'})} (Manila).`}</p>}
+              {timer.isOpenTime && !stop && <p className="mt-2 text-xs text-neutral-500">Legacy open time: no saved stop limit.</p>}
               {/* Progress Bar */}
               <div className="mt-3 h-1.5 w-full bg-neutral-800 rounded-full overflow-hidden">
                 {timer.isOpenTime ? (
@@ -196,7 +207,7 @@ export function TableCard({ table, onAssign, onExtend, onEnd, onOrder, nextReser
             {/* Action Buttons */}
             <div className="grid grid-cols-2 gap-2 pt-2 border-t border-neutral-800/60">
               <button 
-                onClick={(e) => { e.stopPropagation(); onOrder(); }} 
+                disabled={held} onClick={(e) => { e.stopPropagation(); onOrder(); }}
                 className="col-span-2 flex items-center justify-center gap-2 py-2 bg-emerald-950/30 hover:bg-emerald-900/40 border border-emerald-800/30 text-emerald-400 rounded-lg text-xs font-semibold transition-colors"
               >
                 <Plus size={13} /> Add F&B Orders
@@ -204,13 +215,13 @@ export function TableCard({ table, onAssign, onExtend, onEnd, onOrder, nextReser
               
               <button 
                 onClick={(e) => { e.stopPropagation(); onExtend(); }} 
-                disabled={timer.isOpenTime} // Cannot extend an open-ended session
+                disabled={held||timer.isOpenTime||stop?.reached} // Cannot extend an open-ended session
                 className={`flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-semibold transition-colors ${timer.isOpenTime ? 'bg-neutral-900 text-neutral-600 opacity-50 cursor-not-allowed' : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-300'}`}
               >
                 <Clock size={13} /> Extend
               </button>
               <button 
-                onClick={(e) => { e.stopPropagation(); onEnd(); }} 
+                disabled={held} onClick={(e) => { e.stopPropagation(); onEnd(); }}
                 className="flex items-center justify-center gap-1.5 py-2.5 bg-rose-950/30 hover:bg-rose-900/40 border border-rose-800/30 text-rose-400 rounded-lg text-xs font-semibold transition-colors"
               >
                 <XSquare size={13} /> End

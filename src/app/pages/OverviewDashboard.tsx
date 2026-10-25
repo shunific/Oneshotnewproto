@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
+import { localFetch } from '../utils/localApi';
+import { useState, useRef } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { useNavigate } from 'react-router';
 import {
@@ -36,18 +37,15 @@ export function OverviewDashboard() {
   const { 
     tables, queue, reservations, watchlist, 
     staffUsers, promoCodes, announcements, closedDates, rates, 
-    isSystemOffline, refreshLiveMonitor
+    staffProfile,availableTables,heldTableIds,reservationMoveError
   } = useAppContext() as any;
   const navigate = useNavigate();
 
   // ── Connectivity & Local Backup State ─────────────────────────
   const [isSyncing, setIsSyncing] = useState(false);
-  const [lastSync, setLastSync] = useState<Date>(new Date());
-  const [isBrowserOffline, setIsBrowserOffline] = useState(!navigator.onLine);
   const [isBackingUp, setIsBackingUp] = useState(false);
   const [backupSuccess, setBackupSuccess] = useState(false);
-  const [offlineSince, setOfflineSince] = useState<Date | null>(null);
-
+  const backupInFlight = useRef(false);
   // 🟢 TOAST STATE WITH 5S TIMER & FADE OUT
   const [toastState, setToastState] = useState<{msg: string, type: 'success' | 'error' | 'loading'} | null>(null);
   const toastTimeout = useRef<NodeJS.Timeout | null>(null);
@@ -60,70 +58,51 @@ export function OverviewDashboard() {
     }
   };
 
-  useEffect(() => {
-    const handleOnline = () => { setIsBrowserOffline(false); setOfflineSince(null); };
-    const handleOffline = () => { setIsBrowserOffline(true); setOfflineSince(new Date()); };
 
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, []);
-
-  const isFullyOffline = isBrowserOffline || isSystemOffline;
-
-  useEffect(() => {
-    if (isFullyOffline && !offlineSince) setOfflineSince(new Date());
-    else if (!isFullyOffline && offlineSince) setOfflineSince(null);
-  }, [isFullyOffline, offlineSince]);
-
-  const handleRunLocalBackup = () => {
+  const handleRunLocalBackup = async () => {
+    if (backupInFlight.current) return;
+    if (!staffProfile?.isAdmin) { flash('Administrator required to download a full backup.', 'error'); return; }
+    backupInFlight.current = true;
     setIsBackingUp(true);
     setBackupSuccess(false);
+    let url: string | undefined;
     try {
-      const backupPayload = { timestamp: new Date().toISOString(), tables, queue, reservations, watchlist, staffUsers, promoCodes, announcements, closedDates, rates };
-      const blob = new Blob([JSON.stringify(backupPayload, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
+      const response = await localFetch('http://localhost:3001/api/backup');
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(response.status === 403 ? 'Administrator required to download a full backup.' : data.error || 'The local backup could not be downloaded.');
+      }
+      const blob = await response.blob();
+      if (blob.size < 100 || await blob.slice(0, 16).text() !== 'SQLite format 3\0') throw new Error('The server did not return a valid database backup.');
+      url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `oneshot-staff-backup-${format(new Date(), 'yyyy-MM-dd_HHmm')}.json`;
+      link.download = `oneshot-backup-${format(new Date(), 'yyyy-MM-dd_HHmmss')}.sqlite`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-
       setBackupSuccess(true);
-      setTimeout(() => setBackupSuccess(false), 3000);
-    } catch (err) {
-      console.error('Backup failed:', err);
+      flash('Backup download started. Keep it private: it contains account and customer data.', 'success');
+      setTimeout(() => setBackupSuccess(false), 5000);
+    } catch (error: any) {
+      flash(error.message || 'The local backup could not be downloaded.', 'error');
     } finally {
+      if (url) { const completedUrl = url; setTimeout(() => URL.revokeObjectURL(completedUrl), 1000); }
+      backupInFlight.current = false;
       setIsBackingUp(false);
     }
   };
 
   const handleManualSync = async () => {
-    if (typeof window !== 'undefined' && window.location.hostname !== 'localhost') {
-      flash("Action Denied: Cloud Backup must be run from the physical computer at the bar, not from the public Vercel website.", "error");
-      return;
-    }
-
+    if (isSyncing) return;
     setIsSyncing(true);
-    flash("Uploading local data to cloud...", "loading");
     try {
-      const res = await fetch('http://localhost:3001/api/sync-to-cloud', { method: 'POST' });
-      const data = await res.json();
-      
-      if (!res.ok) throw new Error(data.details || 'Supabase rejected the sync payload.');
-
-      if (refreshLiveMonitor) await refreshLiveMonitor();
-      setLastSync(new Date());
-      flash("Database successfully backed up to Cloud.", "success");
-      
-    } catch (e: any) {
-      flash(`Sync Failed: ${e.message}`, "error");
+      const response = await localFetch('http://localhost:3001/api/sync-to-cloud', { method: 'POST' });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Cloud sync is not configured.');
+      flash('Cloud status checked. This version operates locally; no cloud backup has been confirmed.', 'error');
+    } catch (error: any) {
+      flash(error.message || 'Cloud status could not be checked.', 'error');
     } finally {
       setIsSyncing(false);
     }
@@ -131,19 +110,20 @@ export function OverviewDashboard() {
 
   const activeWatchlist = watchlist?.filter((w: any) => w.status === 'active' && !w.isArchived) || [];
 
-  const available = tables.filter((t: any) => t.isActive && t.status === 'available').length;
+  const available = availableTables.length;
   const occupied = tables.filter((t: any) => t.isActive && t.status === 'occupied').length;
   const reserved = tables.filter((t: any) => t.isActive && t.status === 'reserved').length;
   const waiting = queue.filter((q: any) => q.status === 'waiting').length;
 
   const waitingQueue = queue.filter((q: any) => q.status === 'waiting');
-  const occupiedWithSession = tables.filter((t: any) => t.isActive && t.status === 'occupied' && t.session);
+  const occupiedWithSession = tables.filter((t: any) => t.isActive && t.status === 'occupied' && t.session && !heldTableIds.has(t.id));
 
   const sortedEndTimes = occupiedWithSession
     .map((t: any) => addMinutes(new Date(t.session!.startTime), t.session!.durationMinutes || 0))
     .sort((a: any, b: any) => a.getTime() - b.getTime());
 
   const estimateWaitForPosition = (position: number): string => {
+    if(reservationMoveError)return 'Check transfer recovery';
     const slotsNeeded = position - available;
     if (slotsNeeded <= 0) return 'Now';
     if (slotsNeeded > sortedEndTimes.length) return 'TBD';
@@ -198,6 +178,7 @@ export function OverviewDashboard() {
 
  return (
     <div className="space-y-6 relative">
+      {reservationMoveError&&<p role="alert" className="rounded-xl border border-amber-900 p-4 text-sm text-amber-300">Table availability needs verification. Open Table Monitor and refresh transfer recovery before assigning a table.</p>}
       
       {/* 🟢 TOP-RIGHT FLOATING TOAST WITH 5S TIMER & FADE OUT */}
       {toastState && (
@@ -244,71 +225,24 @@ export function OverviewDashboard() {
         </div>
       )}
 
-      {/* ── System Connectivity & Database Backup Banner ── */}
       <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-        <div className="flex items-start sm:items-center gap-3">
-          <div className={`p-2.5 rounded-xl flex-shrink-0 ${
-            isFullyOffline ? 'bg-amber-500/10 text-amber-400' : 'bg-emerald-500/10 text-emerald-400'
-          }`}>
-            {isFullyOffline ? <RefreshCw size={22} className="animate-spin" /> : <Wifi size={22} />}
-          </div>
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-neutral-300">
-                System Status
-              </span>
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                isFullyOffline 
-                  ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' 
-                  : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-              }`}>
-                {isFullyOffline ? 'RECONNECTING TO CLOUD...' : 'ONLINE & SYNCED'}
-              </span>
-              <span className="text-neutral-700 hidden sm:inline">|</span>
-              <span className="text-[11px] text-neutral-400 font-medium flex items-center gap-1">
-                <Database size={11} className="text-emerald-500" /> Local Database Active
-              </span>
-            </div>
-            <p className="text-xs text-neutral-500 mt-1">
-              {isFullyOffline
-                ? `Cloud disconnected${offlineSince ? ` since ${format(offlineSince, 'hh:mm a')}` : ''}. Continually attempting to reconnect...`
-                : `Connected to Cloud Server. Last cloud sync completed at ${format(lastSync, 'hh:mm a')}.`}
-            </p>
-          </div>
+        <div>
+          <p className="text-xs font-bold text-amber-400">Cloud sync not configured</p>
+          <p className="text-xs text-neutral-400 mt-1">This version uses the local database. No cloud backup has been confirmed.</p>
+          <p className="text-xs text-neutral-500 mt-1">Full backups contain private account and customer data. Keep them in a safe place.</p>
         </div>
-
-        <div className="flex flex-wrap items-center gap-2 self-end lg:self-auto">
-          {backupSuccess && (
-            <span className="text-xs font-semibold text-emerald-400 flex items-center gap-1.5 mr-1 animate-fade-in">
-              <CheckCircle2 size={14} /> Local JSON Saved
-            </span>
-          )}
-          
-          <button
-            onClick={handleManualSync}
-            disabled={isSyncing}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all border ${
-              isSyncing 
-                ? 'bg-neutral-900 text-neutral-500 border-neutral-800 cursor-wait' 
-                : 'bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-400 border-emerald-600/20'
-            }`}
-          >
+        <div className="flex flex-wrap items-center gap-2">
+          {backupSuccess && <span role="status" className="text-xs text-emerald-400">Backup download started</span>}
+          <button onClick={handleManualSync} disabled={isSyncing} className="flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold border border-neutral-700 disabled:opacity-50">
             <RefreshCw size={14} className={isSyncing ? 'animate-spin' : ''} />
-            <span>{isSyncing ? 'Syncing to Cloud...' : 'Run Cloud Backup'}</span>
+            {isSyncing ? 'Checking…' : 'Check cloud status'}
           </button>
-
-          <button
-            onClick={handleRunLocalBackup}
-            disabled={isBackingUp}
-            className="flex items-center gap-2 px-3.5 py-2 bg-neutral-900 hover:bg-neutral-800 border border-neutral-700/60 text-neutral-200 text-xs font-semibold rounded-lg transition-colors disabled:opacity-50"
-          >
-            {isBackingUp ? (
-              <RefreshCw size={14} className="animate-spin text-amber-400" />
-            ) : (
-              <Download size={14} className="text-amber-400" />
-            )}
-            <span>Local Backup</span>
+          {staffProfile?.isAdmin && (
+          <button onClick={handleRunLocalBackup} disabled={isBackingUp} className="flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold border border-neutral-700 disabled:opacity-50">
+            {isBackingUp ? <RefreshCw size={14} className="animate-spin" /> : <Download size={14} />}
+            {isBackingUp ? 'Preparing backup…' : 'Download Local Backup'}
           </button>
+          )}
         </div>
       </div>
 
@@ -345,7 +279,7 @@ export function OverviewDashboard() {
 
       {/* Stat Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label="Available Tables" value={available} sub={`of ${tables.length} total`} color="text-emerald-400" icon={TableProperties} onClick={() => navigate('/staff/tables')} />
+        <StatCard label="Available Tables" value={reservationMoveError?'—':available} sub={reservationMoveError?'Check transfer recovery':`of ${tables.length} total`} color="text-emerald-400" icon={TableProperties} onClick={() => navigate('/staff/tables')} />
         <StatCard label="Occupied" value={occupied} sub={`${reserved} reserved`} color="text-amber-400" icon={TableProperties} onClick={() => navigate('/staff/tables')} />
         <StatCard label="Waiting Queue" value={waiting} sub="FCFS order" color="text-purple-400" icon={Users} onClick={() => navigate('/staff/queue')} />
         <StatCard label="Overtime Tables" value={overtimeTables.length} sub="Requires attention" color="text-rose-400" icon={Clock} onClick={() => navigate('/staff/tables')} />
@@ -373,9 +307,10 @@ export function OverviewDashboard() {
               <div
                 key={t.id}
                 onClick={() => navigate('/staff/tables')}
-                title={`${t.name}${t.session ? ` — ${t.session.customerName}` : ''} (${t.status})`}
+                title={`${t.name}${t.session ? ` — ${t.session.customerName}` : ''} (${heldTableIds.has(t.id)?'transfer held':t.status})`}
                 className={`aspect-square rounded-lg flex flex-col items-center justify-center text-center px-1 leading-tight cursor-pointer border transition-all text-[10px] font-bold
-                  ${t.status === 'maintenance' ? 'bg-neutral-800/80 border-neutral-700 text-neutral-400 opacity-70' :
+                  ${heldTableIds.has(t.id)||reservationMoveError ? 'bg-neutral-800/80 border-amber-800 text-amber-300' :
+                    t.status === 'maintenance' ? 'bg-neutral-800/80 border-neutral-700 text-neutral-400 opacity-70' :
                     isOvertime ? 'bg-rose-500/20 border-rose-500 text-rose-400 animate-pulse' :
                     isAlert ? 'bg-rose-950/40 border-rose-500/50 text-rose-400' :
                     t.status === 'occupied' ? 'bg-amber-950/40 border-amber-800/40 text-amber-400' :
@@ -384,6 +319,7 @@ export function OverviewDashboard() {
                 `}
               >
                 {t.name.replace(/table\s*/i, '')}
+                {heldTableIds.has(t.id)&&<span className="mt-1">Transfer held</span>}
               </div>
             );
           })}
@@ -523,39 +459,7 @@ export function OverviewDashboard() {
 
       </div>
 
-      {/* ── Floating Offline Alert Toast (Bottom Right) ── */}
-      {isFullyOffline && (
-        <div className="fixed bottom-6 right-6 z-50 max-w-sm w-full bg-neutral-900/95 border border-amber-800/80 rounded-xl p-4 shadow-2xl backdrop-blur-md animate-slide-up">
-          <div className="flex items-start gap-3">
-            <div className="p-2 bg-amber-500/10 text-amber-400 rounded-lg flex-none mt-0.5">
-              <RefreshCw size={18} className="animate-spin" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider">
-                  Connection Lost
-                </h4>
-                <span className="text-[9px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded uppercase font-bold animate-pulse">
-                  Reconnecting...
-                </span>
-              </div>
-              <p className="text-xs text-neutral-300 mt-1.5 leading-relaxed">
-                Cloud sync is temporarily unavailable. The system is actively trying to reconnect. Save a local database snapshot to protect recent venue transactions.
-              </p>
-              <div className="mt-3 flex items-center justify-end gap-2">
-                <button
-                  onClick={handleRunLocalBackup}
-                  disabled={isBackingUp}
-                  className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-neutral-950 text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5 shadow-sm"
-                >
-                  <Download size={13} />
-                  <span>Local Backup</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+
 
     </div>
   );

@@ -1,0 +1,3 @@
+module.exports = function reservationSession(updates = {}) {
+ return {customerName:'QA reservation',customerEmail:'qa@example.test',customerPhone:'09000000000',partySize:2,startTime:new Date(Date.now()-10*60000).toISOString(),durationMinutes:120,isOpenTime:false,hourlyRate:null,overtimeRate:300,pricingVersion:2,reservationId:'QA-reservation',reservationPricing:{claimId:'11111111-1111-4111-8111-111111111111',reservationId:'QA-reservation',ownerUserId:'22222222-2222-4222-8222-222222222222',sourceRevision:4,claimRevision:5,durationMinutes:120,grossCents:30101,discountCents:10001,netCents:20100,verifiedPaidCents:4020},amountPaid:40.20,isPaid:false,paymentStatus:'payLater',orders:[{id:'drink',price:25,qty:1}],...updates};
+};

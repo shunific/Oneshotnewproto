@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import logoImg from '../../assets/40eb82831843e17a3c48a360fd80f0aaaa58ddc8.png';
 import { useAppContext } from '../context/AppContext';
 import { Table, QueueItem } from '../context/AppContext';
 import { Clock, Users, X, Sparkles } from 'lucide-react';
@@ -47,14 +48,16 @@ function getSessionTimer(table: Table): {
 }
 
 // ── Single Table Card ──────────────────────────────────────────
-function TableCard({ table }: { table: Table }) {
+function TableCard({ table, held, availabilityVerified }: { table: Table; held:boolean; availabilityVerified:boolean }) {
   const timer = getSessionTimer(table);
+  const badge=table.name.match(/\d+/)?.[0].slice(0,3)||table.name.trim().split(/\s+/).map(word=>word[0]).slice(0,2).join('').toUpperCase();
+  if(held||(table.status==='available'&&!availabilityVerified))return <div className="rounded-2xl border-2 border-amber-800 bg-amber-950/30 p-5 text-center text-amber-300"><p className="break-words text-sm font-semibold">{table.name}</p><p className="mt-3 font-bold">{held?'TRANSFER HELD':'CHECK AVAILABILITY'}</p><p className="mt-2 text-xs">Resolve transfer recovery in Table Monitor.</p>{table.session&&<p className="mt-3 text-sm">{timer.label}</p>}</div>;
 
   if (table.status === 'maintenance') {
     return (
       <div className="bg-orange-950/40 border-2 border-orange-800/40 rounded-2xl p-5 flex flex-col items-center gap-3 opacity-60">
         <div className="w-10 h-10 rounded-xl bg-orange-600/20 border border-orange-600/30 flex items-center justify-center">
-          <span className="text-orange-500 font-black text-lg">{table.name.replace('Table ', '')}</span>
+          <span className="text-orange-500 font-black text-lg">{badge}</span>
         </div>
         <div className="text-center">
           <p className="text-xs text-neutral-400 font-semibold uppercase tracking-wider">{table.name}</p>
@@ -72,7 +75,7 @@ function TableCard({ table }: { table: Table }) {
     return (
       <div className="relative bg-emerald-950/20 border-2 border-emerald-800/30 rounded-2xl p-5 flex flex-col items-center gap-3 overflow-hidden">
         <div className="w-10 h-10 rounded-xl bg-emerald-600/20 border border-emerald-600/30 flex items-center justify-center">
-          <span className="text-emerald-500 font-black text-lg">{table.name.replace('Table ', '')}</span>
+          <span className="text-emerald-500 font-black text-lg">{badge}</span>
         </div>
         <div className="text-center">
           <p className="text-xs text-neutral-400 font-semibold uppercase tracking-wider">{table.name}</p>
@@ -90,7 +93,7 @@ function TableCard({ table }: { table: Table }) {
     return (
       <div className="bg-sky-950/40 border-2 border-sky-800/40 rounded-2xl p-5 flex flex-col items-center gap-3">
         <div className="w-10 h-10 rounded-xl bg-sky-600/20 border border-sky-600/30 flex items-center justify-center">
-          <span className="text-sky-400 font-black text-lg">{table.name.replace('Table ', '')}</span>
+          <span className="text-sky-400 font-black text-lg">{badge}</span>
         </div>
         <div className="text-center">
           <p className="text-xs text-neutral-400 font-semibold uppercase tracking-wider">{table.name}</p>
@@ -130,7 +133,7 @@ function TableCard({ table }: { table: Table }) {
     <div className={`relative border-2 rounded-2xl p-5 flex flex-col gap-3 overflow-hidden ${colorClass}`}>
       <div className="flex items-start justify-between">
         <div className="w-9 h-9 rounded-xl bg-black/20 border border-white/10 flex items-center justify-center flex-shrink-0">
-          <span className="font-black text-white">{table.name.replace('Table ', '')}</span>
+          <span className="font-black text-white">{badge}</span>
         </div>
         <div className={`text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border ${badgeClass}`}>
           {isOvertime ? '⚠ OVERTIME' : isOpenTime ? 'OPEN TIME' : 'IN USE'}
@@ -192,7 +195,7 @@ function QueueRow({ item, position, estWait }: { item: QueueItem; position: numb
       {item.status === 'called' ? (
         <div className="flex items-center gap-1.5 bg-emerald-600/20 border border-emerald-600/30 px-2.5 py-1 rounded-full flex-shrink-0">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="text-xs text-emerald-400 font-semibold">Proceed to Table</span>
+          <span className="text-xs text-emerald-400 font-semibold">Proceed to counter</span>
         </div>
       ) : (
         <div className="text-right flex-shrink-0 flex flex-col items-end">
@@ -211,7 +214,7 @@ function QueueRow({ item, position, estWait }: { item: QueueItem; position: numb
 // ── Main Component ─────────────────────────────────────────────
 export function LiveMonitor() {
   // 🟢 Extract refreshLiveMonitor and rates from context
-  const { tables, queue, refreshLiveMonitor, rates } = useAppContext();
+  const { tables, availableTables, heldTableIds, reservationMoveError, queue, refreshLiveMonitor, rates } = useAppContext();
   const [tick, setTick] = useState(0);
   const [now, setNow] = useState(new Date());
 
@@ -232,7 +235,8 @@ export function LiveMonitor() {
 
   // --- GLOBAL AI WAIT-TIME ESTIMATOR ---
   const calculateAIWaitTime = (position: number) => {
-    const activeTables = tables.filter(t => t.status === 'occupied' && t.session);
+    if(reservationMoveError||heldTableIds.size)return 'Check transfer recovery';
+    const activeTables = tables.filter(t => t.isActive && t.status === 'occupied' && t.session);
     if (activeTables.length === 0) return "0 mins";
 
     const remainingTimes = activeTables.map(t => {
@@ -252,9 +256,9 @@ export function LiveMonitor() {
     return m > 0 ? `${h}h ${m}m` : `${h}h`;
   };
 
-  const availableCount = tables.filter(t => t.status === 'available').length;
-  const occupiedCount = tables.filter(t => t.status === 'occupied').length;
-  const reservedCount = tables.filter(t => t.status === 'reserved').length;
+  const availableCount = reservationMoveError?'—':availableTables.length;
+  const occupiedCount = tables.filter(t => t.isActive && t.status === 'occupied').length;
+  const reservedCount = tables.filter(t => t.isActive && t.status === 'reserved').length;
   const waitingQueue = queue.filter(q => q.status === 'waiting' || q.status === 'called');
 
   const timeStr = now.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
@@ -266,7 +270,7 @@ export function LiveMonitor() {
       <header className="flex-none bg-black/60 border-b border-neutral-800/80 px-6 py-4 flex items-center justify-between backdrop-blur-sm">
         <div className="flex items-center gap-4">
           <img 
-            src="/electron/icon.ico" 
+            src={logoImg}
             alt="One Shot Logo" 
             className="w-10 h-10 object-contain rounded-xl flex-shrink-0 bg-neutral-900 border border-neutral-800 p-0.5 shadow-lg shadow-emerald-950/20" 
           />
@@ -325,8 +329,8 @@ export function LiveMonitor() {
             <h2 className="text-sm font-bold text-neutral-300 uppercase tracking-widest">Table Status</h2>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3">
-            {tables.map(table => (
-              <TableCard key={table.id} table={table} />
+            {tables.filter(table=>table.isActive).map(table => (
+              <TableCard key={table.id} table={table} held={heldTableIds.has(table.id)} availabilityVerified={availableTables.some(available=>available.id===table.id)} />
             ))}
           </div>
 

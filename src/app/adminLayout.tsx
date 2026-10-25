@@ -1,3 +1,4 @@
+import { localFetch } from './utils/localApi';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router';
 import {
@@ -238,8 +239,7 @@ export function AdminLayout() {
       setPendingNav('STAFF_PORTAL');
       return;
     }
-    sessionStorage.setItem('oneshot_staff_auth', 'true');
-    window.location.href = '/staff';
+    navigate('/staff');
   };
 
   const confirmNavigation = () => {
@@ -248,8 +248,7 @@ export function AdminLayout() {
       adminLogout();
       navigate('/');
     } else if (pendingNav === 'STAFF_PORTAL') {
-      sessionStorage.setItem('oneshot_staff_auth', 'true');
-      window.location.href = '/staff';
+      navigate('/staff');
     } else if (pendingNav) {
       navigate(pendingNav);
     }
@@ -261,7 +260,7 @@ export function AdminLayout() {
     <>
       {isLocked && <LockScreen onUnlock={handleUnlockTerminal} />}
       
-      <div className={`flex h-screen w-full bg-neutral-950 text-neutral-100 overflow-hidden transition-all duration-300 ${isLocked ? 'pointer-events-none blur-md select-none opacity-50' : ''}`}>
+      <div ref={node => { if (node) node.inert = isLocked; }} aria-hidden={isLocked || undefined} className={`flex h-screen w-full bg-neutral-950 text-neutral-100 overflow-hidden transition-all duration-300 ${isLocked ? 'pointer-events-none blur-md select-none opacity-50' : ''}`}>
         
         {sidebarOpen && <div className="fixed inset-0 z-30 bg-black/60 lg:hidden" onClick={() => setSidebarOpen(false)} />}
 

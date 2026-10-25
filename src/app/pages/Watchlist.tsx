@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { ShieldAlert, Search, Plus, X, AlertTriangle, Scale, Archive, Link as LinkIcon, CheckCircle, RefreshCw } from 'lucide-react';
+import { ShieldAlert, Search, Plus, X, AlertTriangle, Scale, Archive, Link as LinkIcon, CheckCircle, RefreshCw, Pencil } from 'lucide-react';
 import { format } from 'date-fns';
 
 const REASON_CFG = {
@@ -16,6 +16,8 @@ export function Watchlist() {
   const [filter, setFilter] = useState<'active' | 'resolved' | 'archived' | 'all'>('active');
   
   const [showModal, setShowModal] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
   const [form, setForm] = useState({ name: '', reason: 'debt', description: '', evidenceLink: '' });
   const [confirmResolveId, setConfirmResolveId] = useState<string | null>(null);
 
@@ -51,16 +53,44 @@ export function Watchlist() {
     return true;
   });
 
-  const handleSave = (e: React.FormEvent) => {
+  const openEntry = (item?: any) => {
+    setEditingId(item?.id || null);
+    setForm(item ? { name: item.name, reason: item.reason, description: item.description, evidenceLink: item.evidenceLink || '' } : { name: '', reason: 'debt', description: '', evidenceLink: '' });
+    setShowModal(true);
+  };
+
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSaving) return;
     if (!form.name.trim() || !form.description.trim()) {
-      flash("Name and description are required.", "error");
+      flash('Name and description are required.', 'error');
       return;
     }
-    addWatchlistItem({ name: form.name.trim(), reason: form.reason as any, description: form.description.trim(), evidenceLink: form.evidenceLink, dateAdded: new Date(), status: 'active' });
-    flash("New entry added to the security watchlist.", "success");
-    setShowModal(false);
-    setForm({ name: '', reason: 'debt', description: '', evidenceLink: '' });
+    setIsSaving(true);
+    try {
+      const details = { name: form.name.trim(), reason: form.reason as any, description: form.description.trim(), evidenceLink: form.evidenceLink.trim() };
+      if (editingId) await updateWatchlistItem(editingId, details);
+      else await addWatchlistItem({ ...details, dateAdded: new Date(), status: 'active' });
+      flash(editingId ? 'Watchlist entry updated.' : 'New entry added to the security watchlist.', 'success');
+      setShowModal(false);
+      setEditingId(null);
+      setForm({ name: '', reason: 'debt', description: '', evidenceLink: '' });
+    } catch (error) {
+      flash(error instanceof Error ? error.message : 'Entry could not be saved. Please retry.', 'error');
+    } finally { setIsSaving(false); }
+  };
+
+  const handleStatusChange = async (id: string, action: 'resolve' | 'reopen' | 'archive') => {
+    if (isSaving) return;
+    setIsSaving(true);
+    try {
+      if (action === 'archive') await deleteWatchlistItem(id);
+      else await updateWatchlistItem(id, action === 'resolve' ? { status: 'resolved', resolvedDate: new Date(), isArchived: true } : { status: 'active', resolvedDate: null, isArchived: false });
+      setConfirmResolveId(null);
+      flash(action === 'resolve' ? 'Case marked as resolved and moved to archives.' : action === 'reopen' ? 'Case re-opened.' : 'Case manually archived.', 'success');
+    } catch (error) {
+      flash(error instanceof Error ? error.message : 'Case could not be saved. Please retry.', 'error');
+    } finally { setIsSaving(false); }
   };
 
   return (
@@ -119,7 +149,7 @@ export function Watchlist() {
             <h2 className="text-2xl font-black text-white flex items-center gap-2"><ShieldAlert className="text-rose-500" /> Security Watchlist</h2>
             <p className="text-sm text-neutral-500 mt-1">Confidential internal registry for security and debt tracking.</p>
           </div>
-          <button onClick={() => setShowModal(true)} className="bg-rose-600 hover:bg-rose-500 text-white px-5 py-2.5 rounded-xl font-semibold flex items-center gap-2 transition-colors flex-shrink-0 w-full md:w-auto justify-center">
+          <button disabled={isSaving} onClick={() => openEntry()} className="bg-rose-600 hover:bg-rose-500 text-white px-5 py-2.5 rounded-xl font-semibold flex items-center gap-2 transition-colors flex-shrink-0 w-full md:w-auto justify-center">
             <Plus size={16} /> Add Entry
           </button>
         </div>
@@ -180,6 +210,7 @@ export function Watchlist() {
               )}
               
               <div className="mt-auto space-y-3">
+                <button disabled={isSaving} onClick={() => openEntry(item)} className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-white disabled:opacity-50"><Pencil size={14}/> Edit Entry</button>
                 <div className="flex items-center justify-between text-[10px] text-neutral-500 border-t border-neutral-800 pt-3">
                   <span>Added: {format(new Date(item.dateAdded), 'MMM d, yyyy')}</span>
                   {item.resolvedDate && <span className="text-emerald-500">Resolved: {format(new Date(item.resolvedDate), 'MMM d, yyyy')}</span>}
@@ -188,12 +219,7 @@ export function Watchlist() {
                   <div className="flex gap-2">
                     {confirmResolveId === item.id ? (
                       <button 
-                        onClick={() => {
-                          // 🟢 Automatically archive when resolved
-                          updateWatchlistItem(item.id, { status: 'resolved', resolvedDate: new Date(), isArchived: true });
-                          setConfirmResolveId(null);
-                          flash("Case marked as resolved and moved to archives.", "success");
-                        }} 
+                        disabled={isSaving} onClick={() => handleStatusChange(item.id, 'resolve')}
                         className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-500 text-xs font-bold py-2 rounded-lg transition-colors flex justify-center items-center gap-1.5 shadow-lg shadow-emerald-900/40"
                       >
                         <CheckCircle size={14}/> Sure to Resolve?
@@ -207,10 +233,7 @@ export function Watchlist() {
                       </button>
                     )}
                     <button 
-                      onClick={() => {
-                        deleteWatchlistItem(item.id);
-                        flash("Case manually archived.", "success");
-                      }} 
+                      disabled={isSaving} onClick={() => handleStatusChange(item.id, 'archive')}
                       className="px-3 bg-neutral-900 hover:bg-rose-900/50 border border-neutral-800 text-neutral-400 hover:text-rose-500 rounded-lg transition-colors" 
                       title="Move to History/Archive"
                     >
@@ -221,10 +244,7 @@ export function Watchlist() {
                 {item.status === 'resolved' && (
                   <div className="flex gap-2">
                     <button 
-                      onClick={() => {
-                        updateWatchlistItem(item.id, { status: 'active', resolvedDate: null, isArchived: false });
-                        flash("Case re-opened.", "success");
-                      }} 
+                      disabled={isSaving} onClick={() => handleStatusChange(item.id, 'reopen')}
                       className="flex-1 bg-neutral-900 border border-neutral-700 text-neutral-400 hover:text-white text-xs font-semibold py-2 rounded-lg transition-colors"
                     >
                       Re-open Case
@@ -240,8 +260,8 @@ export function Watchlist() {
       {showModal && (
         <div className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-neutral-950 border border-rose-900/30 rounded-2xl w-full max-w-md p-6 shadow-2xl">
-            <h3 className="text-lg font-bold text-rose-500 flex items-center gap-2 mb-4"><AlertTriangle size={18}/> New Watchlist Entry</h3>
-            <form onSubmit={handleSave} className="space-y-4">
+            <h3 className="text-lg font-bold text-rose-500 flex items-center gap-2 mb-4"><AlertTriangle size={18}/> {editingId ? 'Edit Watchlist Entry' : 'New Watchlist Entry'}</h3>
+            <form onSubmit={handleSave}><fieldset disabled={isSaving} className="space-y-4">
               <div>
                 <div className="flex justify-between items-center mb-1.5">
                   <label className="text-xs text-neutral-400">Individual Name / Alias *</label>
@@ -276,9 +296,9 @@ export function Watchlist() {
               </div>
               <div className="flex gap-2 pt-2">
                 <button type="button" onClick={() => setShowModal(false)} className="flex-1 bg-neutral-800 text-white py-2.5 rounded-xl text-sm font-semibold">Cancel</button>
-                <button type="submit" className="flex-1 bg-rose-600 hover:bg-rose-500 text-white py-2.5 rounded-xl text-sm font-semibold">Log Entry</button>
+                <button type="submit" className="flex-1 bg-rose-600 hover:bg-rose-500 text-white py-2.5 rounded-xl text-sm font-semibold">{isSaving ? 'Saving...' : editingId ? 'Save Changes' : 'Log Entry'}</button>
               </div>
-            </form>
+            </fieldset></form>
           </div>
         </div>
       )}

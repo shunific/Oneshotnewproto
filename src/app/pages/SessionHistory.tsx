@@ -1,4 +1,8 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
+import { localFetch } from '../utils/localApi';
+import { HistoryReceiptSummary } from '../components/HistoryReceiptSummary';
+import { projectHistoryReceipt } from '../utils/historyReceiptProjection.js';
+import { ReceiptRefundReturn } from '../components/ReceiptRefundReturn';
 import { useAppContext } from '../context/AppContext';
 import { History, Search, Calendar, Clock, DollarSign, ShoppingCart, CheckCircle, X, ChevronRight, Filter, QrCode } from 'lucide-react';
 import { format, isToday, isThisWeek, isThisMonth, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
@@ -7,24 +11,55 @@ import { format, isToday, isThisWeek, isThisMonth, isWithinInterval, startOfDay,
 const formatPHP = (amount: any) => `₱${(Number(amount) || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
 
 export function SessionHistory() {
-  const { sessionHistory, reservations, tables } = useAppContext() as any;
+  const { sessionHistory, reservations, tables, staffProfile } = useAppContext() as any;
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'table_session' | 'reservation'>('all');
   const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'week' | 'month' | 'custom'>('all');
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const [selectedRecord, setSelectedRecord] = useState<any | null>(null);
+  const [savedReceipt,setSavedReceipt]=useState<any>(null);
+  const [receiptRefresh,setReceiptRefresh]=useState(0);
+  const activeSelection=useRef('');
+  const selectionKey=selectedRecord?`${staffProfile?.id||''}:${selectedRecord.source}:${selectedRecord.id}`:'';
+  activeSelection.current=selectionKey;
+  useEffect(()=>{
+    let stopped=false;
+    const key=selectionKey;
+    setSavedReceipt(null);
+    const ended=()=>{stopped=true;setSavedReceipt(null);setSelectedRecord(null);};
+    window.addEventListener('oneshot-session-ended',ended);
+    if(selectedRecord?.source==='table_session'&&staffProfile?.id){
+      setSavedReceipt({key,state:'loading',receipt:null});
+      void (async()=>{
+        try{
+          const response=await localFetch(`http://localhost:3001/api/e-receipts/${encodeURIComponent(selectedRecord.id)}`);
+          if(stopped||activeSelection.current!==key)return;
+          if(response.status===404){setSavedReceipt({key,state:'missing',receipt:null});return;}
+          if(!response.ok)throw Error('Saved receipt unavailable.');
+          const receipt=await response.json();
+          if(stopped||activeSelection.current!==key)return;
+          projectHistoryReceipt(selectedRecord,receipt);
+          setSavedReceipt({key,state:'loaded',receipt});
+        }catch{if(!stopped&&activeSelection.current===key)setSavedReceipt({key,state:'error',receipt:null});}
+      })();
+    }
+    return()=>{stopped=true;window.removeEventListener('oneshot-session-ended',ended);};
+  },[selectedRecord,staffProfile?.id,selectionKey,receiptRefresh]);
 
   // Unify and format data safely
   const unifiedHistory = useMemo(() => {
     const tableSessions = (sessionHistory || []).map((sh: any) => ({
       id: sh.id,
+      tableId: sh.tableId,
       sortDate: new Date(sh.endTime || new Date()),
       source: 'table_session',
+      status: sh.status,
       customerName: sh.customerName || 'Walk-in Guest',
       tableName: sh.tableName || 'N/A',
       startTime: sh.startTime ? new Date(sh.startTime) : new Date(),
       endTime: sh.endTime ? new Date(sh.endTime) : new Date(),
       durationLabel: `${sh.durationMinutes || 0} mins`,
+      durationMinutes: sh.durationMinutes,
       totalAmount: Number(sh.totalAmount) || 0,
       amountPaid: Number(sh.amountPaid) || 0,
       orders: sh.orders || [],
@@ -39,6 +74,7 @@ export function SessionHistory() {
           id: r.id,
           sortDate: new Date(r.createdAt || new Date()),
           source: 'reservation',
+          status: r.status,
           customerName: r.customerName || 'Guest',
           tableName: tables?.find((t: any) => t.id === r.tableId)?.name || r.tableId || 'N/A',
           startTime: r.date ? new Date(r.date) : new Date(),
@@ -156,7 +192,9 @@ export function SessionHistory() {
                   <td className="px-4 py-3"><span className="text-sm text-neutral-400">{r.durationLabel}</span></td>
                   <td className="px-4 py-3"><span className="text-sm font-bold text-white">{formatPHP(r.totalAmount)}</span></td>
                   <td className="px-4 py-3">
-                    {r.isFullyPaid ? (
+                    {['voided', 'voided_refund_pending', 'refund_pending'].includes(r.status) ? (
+                      <span className="text-[10px] font-bold text-amber-400 uppercase">{r.status === 'voided' ? 'Voided' : r.status === 'voided_refund_pending' ? 'Voided · Return review' : 'Return review'}</span>
+                    ) : r.isFullyPaid ? (
                       <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-400 uppercase"><CheckCircle size={12}/> Settled</span>
                     ) : (
                       <span className="flex items-center gap-1 text-[10px] font-bold text-rose-400 uppercase">Unpaid / Debt</span>
@@ -177,10 +215,7 @@ export function SessionHistory() {
       {/* 🟢 THERMAL E-RECEIPT VIEWER MODAL */}
       {selectedRecord && (() => {
         const rData = selectedRecord;
-        const posOrdersTotal = (rData.orders || []).reduce((sum: number, o: any) => sum + ((Number(o.price)||0) * (Number(o.qty)||0)), 0);
-        const tableCharge = Math.max(0, rData.totalAmount - posOrdersTotal);
-        const shortfall = Math.max(0, rData.totalAmount - rData.amountPaid);
-        const refundDue = Math.max(0, rData.amountPaid - rData.totalAmount);
+        const receiptSnapshot=savedReceipt?.key===selectionKey?savedReceipt:null;
         const receiptDate = rData.endTime || rData.sortDate || new Date();
 
         return (
@@ -197,7 +232,7 @@ export function SessionHistory() {
                     {/* Header */}
                     <div className="text-center mb-5 space-y-1">
                       <p className="text-[9px] uppercase tracking-widest text-neutral-500 font-bold mb-2">History Record</p>
-                      <h2 className="text-xl font-black tracking-widest text-black">*** RECEIPT ***</h2>
+                      <h2 className="text-xl font-black tracking-widest text-black">*** SESSION SUMMARY ***</h2>
                     </div>
                     
                     {/* Meta Data */}
@@ -206,55 +241,8 @@ export function SessionHistory() {
                       <span>{format(receiptDate, 'dd/MM/yyyy - hh:mm a')}</span>
                     </div>
 
-                    {/* Items List */}
-                    <div className="space-y-3 mb-4">
-                      <div className="flex justify-between font-bold text-black">
-                        <span>{rData.source === 'reservation' ? 'TABLE RENTAL' : 'TABLE PLAY'} ({rData.durationLabel})</span>
-                        <span>{formatPHP(tableCharge)}</span>
-                      </div>
-                      
-                      {rData.orders && rData.orders.length > 0 && rData.orders.map((o: any, i: number) => (
-                        <div key={i} className="flex flex-col">
-                          <div className="flex justify-between font-bold text-black">
-                            <span className="truncate pr-2">{o.name?.toUpperCase()}</span>
-                            <span>{formatPHP((Number(o.price)||0) * (Number(o.qty)||0))}</span>
-                          </div>
-                          <span className="text-[10px] text-neutral-500 ml-2">x{o.qty} @ {formatPHP(o.price)}</span>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="border-t border-dashed border-neutral-400 my-3" />
-
-                    {/* Subtotals */}
-                    <div className="space-y-1.5 font-bold mb-3 text-black">
-                      <div className="flex justify-between"><span>SUBTOTAL</span><span>{formatPHP(rData.totalAmount)}</span></div>
-                    </div>
-
-                    <div className="border-t border-dashed border-neutral-400 my-3" />
-
-                    {/* Totals */}
-                    <div className="space-y-1.5 text-black">
-                      <div className="flex justify-between font-black text-sm">
-                        <span>TOTAL DUE</span>
-                        <span>{formatPHP(rData.totalAmount)}</span>
-                      </div>
-                      <div className="flex justify-between font-bold text-neutral-600 mt-2">
-                        <span>TENDERED</span>
-                        <span>{formatPHP(rData.amountPaid)}</span>
-                      </div>
-                      
-                      {/* DYNAMIC DEBT/CHANGE INDICATOR */}
-                      {shortfall > 0 ? (
-                        <div className="flex justify-between font-black text-rose-600 mt-1 border-t border-dashed border-neutral-400 pt-1.5">
-                          <span>UNPAID DEBT</span><span>{formatPHP(shortfall)}</span>
-                        </div>
-                      ) : (
-                        <div className="flex justify-between font-bold text-neutral-600">
-                          <span>CHANGE</span><span>{formatPHP(refundDue)}</span>
-                        </div>
-                      )}
-                    </div>
+                    <HistoryReceiptSummary record={rData} receipt={receiptSnapshot?.receipt} state={receiptSnapshot?.state||(rData.source==='table_session'?'loading':'history')} />
+                    {rData.source==='table_session'&&<button type="button" disabled={receiptSnapshot?.state==='loading'} onClick={()=>setReceiptRefresh(value=>value+1)} className="mt-3 text-[10px] font-bold text-neutral-600 underline disabled:opacity-50">Refresh saved receipt</button>}
 
                     <div className="border-t border-dashed border-neutral-400 my-4" />
 
@@ -273,6 +261,8 @@ export function SessionHistory() {
                   {/* Torn Paper Bottom */}
                   <div className="w-full h-3 bg-repeat-x flex rotate-180" style={{ backgroundImage: 'radial-gradient(circle at 4px 0, transparent 4px, #f8f9fa 5px)', backgroundSize: '8px 10px' }} />
                 </div>
+
+                {selectedRecord.source === 'table_session' && receiptSnapshot?.state==='loaded' && staffProfile?.isAdmin && <ReceiptRefundReturn key={`${staffProfile.id}:${rData.id}`} receiptId={rData.id} localStaffId={staffProfile.id} />}
 
                 {/* Action Buttons */}
                 <button onClick={() => setSelectedRecord(null)} className="mt-4 w-full bg-neutral-800 hover:bg-neutral-700 text-white font-bold py-3.5 rounded-xl transition-colors border border-neutral-700">

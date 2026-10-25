@@ -1,3 +1,5 @@
+import { PendingQueueActions } from '../components/PendingQueueActions';
+import { localFetch } from '../utils/localApi';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { 
@@ -9,7 +11,7 @@ import { formatDistanceToNow, format, isToday, isTomorrow, differenceInMinutes, 
 import { useNavigate } from 'react-router';
 
 export function Queue() {
-  const { queue, addToQueue, removeFromQueue, callQueueItem, tables, reservations, cancelReservation, reservationTerms } = useAppContext() as any;
+  const { queue, addToQueue, removeFromQueue, callQueueItem, addActivity, tables, availableTables, heldTableIds, reservationMoveError, reservations, cancelReservation, reservationTerms } = useAppContext() as any;
   const navigate = useNavigate();
   
   // 🟢 Dynamic max party size based on the current day
@@ -17,6 +19,7 @@ export function Queue() {
   const isWeekend = currentDay === 0 || currentDay === 5 || currentDay === 6;
   const maxAllowedPartySize = isWeekend ? (reservationTerms?.weekendMaxPartySize || 20) : (reservationTerms?.weekdayMaxPartySize || 20);
 
+  const queueActionInFlight=useRef(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [name, setName] = useState('');
   const [contact, setContact] = useState('');
@@ -50,7 +53,6 @@ export function Queue() {
   const checkedInReservations = reservations.filter((r: any) => r.status === 'checked-in');
   const waiting = queue.filter((q: any) => q.status === 'waiting');
   const called = queue.filter((q: any) => q.status === 'called');
-  const availableTables = tables.filter((t: any) => t.status === 'available');
 
   // ========================================================================
   // 🧠 NEURAL NETWORK AI INTEGRATION
@@ -59,10 +61,11 @@ export function Queue() {
   const [isAILoading, setIsAILoading] = useState(true);
 
   const fetchAIPrediction = useCallback(async () => {
+    if(reservationMoveError||heldTableIds.size){setAiWaitTime('Check transfer recovery');setIsAILoading(false);return;}
     setIsAILoading(true);
     try {
       const activeTables = tables.filter((t: any) => t.status === 'occupied' && t.session);
-      const freeTables = tables.filter((t: any) => t.status === 'available').length;
+      const freeTables = availableTables.length;
       
       // 1. If there are enough free tables for everyone waiting PLUS a new walk-in:
       if (freeTables > waiting.length) {
@@ -75,7 +78,7 @@ export function Queue() {
       const nextPartySize = waiting[0]?.partySize || 2;
       
       // 2. Send local venue state to the Brain.js Neural Network
-      const res = await fetch('http://localhost:3001/api/ai/predict-wait-time', {
+      const res = await localFetch('http://localhost:3001/api/ai/predict-wait-time', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -109,7 +112,7 @@ export function Queue() {
       setAiWaitTime("~45 mins (Fallback)"); 
     }
     setIsAILoading(false);
-  }, [tables, waiting, now]);
+  }, [tables, availableTables, heldTableIds, reservationMoveError, waiting, now]);
 
   // Poll the AI engine every 30 seconds for dynamic adjustments
   useEffect(() => {
@@ -142,7 +145,7 @@ export function Queue() {
     );
   };
 
-  const handleAdd = (e: React.FormEvent) => {
+  const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
       flash("Customer Name is required.", "error");
@@ -154,7 +157,10 @@ export function Queue() {
       return;
     }
     
-    addToQueue({ customerName: name.trim(), contactNumber: contact, partySize, notes });
+    if(queueActionInFlight.current)return;
+    queueActionInFlight.current=true;
+    try {
+    await addToQueue({ customerName: name.trim(), contactNumber: contact, partySize, notes });
     flash(`${name.trim()} added to the waiting queue.`, "success");
     
     setName('');
@@ -162,9 +168,11 @@ export function Queue() {
     setPartySize(2);
     setNotes('');
     setShowAddForm(false);
+    } catch(error:any){flash(error?.message||'Queue add was not confirmed. Retry the original action.','error');}
+    finally{queueActionInFlight.current=false;}
   };
 
-  const handleCallCustomer = (customerId: string, customerName: string) => {
+  const handleCallCustomer = async (customerId: string, customerName: string) => {
     // 🟢 DEFENSE 1: Zero Tables Validation Warning
     if (availableTables.length === 0) {
       if (!window.confirm(`⚠️ Wait! There are NO available tables right now.\n\nAre you sure you want to call ${customerName} to the counter? (e.g., A table is currently packing up)`)) {
@@ -177,25 +185,39 @@ export function Queue() {
       if (!window.confirm(`🚨 PRIORITY BYPASS DETECTED!\n\nYou have ${checkedInReservations.length} Checked-In Reservation(s) waiting for a table. Are you absolutely sure you want to skip them to seat a walk-in?\n\nClicking OK will log this override to the security audit trail.`)) {
         return;
       }
-      addActivity('admin_action', `⚠️ PRIORITY BYPASS: Staff bypassed waiting reservations to manually call walk-in customer: ${customerName}`);
+
     }
 
-    callQueueItem(customerId);
+    if(queueActionInFlight.current)return;
+    queueActionInFlight.current=true;
+    try {
+    const result=await callQueueItem(customerId);
+    if(!result.replayed&&checkedInReservations.length>0)addActivity('admin_action',`Staff called ${customerName} while checked-in reservations were waiting.`);
     flash(`Called ${customerName} from the queue.`, "success");
     
-    if ('speechSynthesis' in window) {
+    if (!result.replayed && 'speechSynthesis' in window) {
       window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(`${customerName}, your table is ready. Please proceed to the counter.`);
+      const utterance = new SpeechSynthesisUtterance(`${customerName}, please proceed to the counter.`);
       utterance.rate = 1.0;
       utterance.pitch = 1.0;
       utterance.volume = 1.0;
       window.speechSynthesis.speak(utterance);
     }
+    }catch(error:any){flash(error?.message||'Calling the customer was not confirmed. Retry the original action.','error');}
+    finally{queueActionInFlight.current=false;}
+  };
+  const handleRemoveCustomer = async (id:string) => {
+    if(queueActionInFlight.current)return;
+    queueActionInFlight.current=true;
+    try{await removeFromQueue(id);flash('Customer removal confirmed.','success');}
+    catch(error:any){flash(error?.message||'Removal was not confirmed. Retry the original action.','error');}
+    finally{queueActionInFlight.current=false;}
   };
 
   // 🟢 NEW: Calculate exact physical time until the closest table finishes
   const getNearestEndTime = () => {
-    const active = tables.filter((t: any) => t.status === 'occupied' && t.session && !t.session.isOpenTime && t.session.durationMinutes);
+    if(reservationMoveError||heldTableIds.size)return null;
+    const active = tables.filter((t: any) => t.isActive && t.status === 'occupied' && t.session && !heldTableIds.has(t.id) && !t.session.isOpenTime && t.session.durationMinutes);
     if (active.length === 0) return null;
     
     const remainingTimes = active.map((t: any) => {
@@ -214,6 +236,8 @@ export function Queue() {
 
   return (
     <div className="space-y-5 relative pb-20">
+      <PendingQueueActions />
+      {reservationMoveError&&<p role="alert" className="rounded-xl border border-amber-900 p-4 text-sm text-amber-300">Table availability needs verification. Open Table Monitor and refresh transfer recovery before assigning a table.</p>}
 
       {/* 🟢 TOP-RIGHT FLOATING TOAST WITH 5S TIMER & FADE OUT */}
       {toastState && (
@@ -383,8 +407,9 @@ export function Queue() {
                   </div>
                   <div className="flex items-center gap-2 flex-none">
                     <button
+                      disabled={availableTables.length===0}
                       onClick={() => {
-                        const targetTable = (r.tableId && tables.find((t: any) => t.id === r.tableId && t.status === 'available' && t.isActive)) 
+                        const targetTable = (r.tableId && availableTables.some((t: any) => t.id === r.tableId))
                           ? r.tableId 
                           : availableTables[0]?.id;
                         sessionStorage.setItem('assignCustomer', JSON.stringify({
@@ -443,8 +468,8 @@ export function Queue() {
               </div>
             </div>
             <div className="text-right relative z-10 flex flex-col items-end">
-              <span className="text-3xl font-black text-emerald-400 drop-shadow-[0_0_8px_rgba(16,185,129,0.3)]">
-                {aiWaitTime}
+              <span className={`${reservationMoveError||heldTableIds.size?'text-base text-amber-300':'text-3xl text-emerald-400'} font-black`}>
+                {reservationMoveError||heldTableIds.size?'Check transfer recovery':aiWaitTime}
               </span>
               <div className="flex flex-col items-end mt-1 space-y-1.5">
                 <span className="text-[9px] text-emerald-500/60 font-medium uppercase">Updates Live</span>
@@ -527,8 +552,7 @@ export function Queue() {
                       onClick={() => {
                         // 🟢 NEW: Delete Confirmation
                         if (window.confirm(`Are you sure you want to remove ${item.customerName} from the queue?`)) {
-                          removeFromQueue(item.id);
-                          flash("Customer removed from queue.", "success");
+                          void handleRemoveCustomer(item.id);
                         }
                       }}
                       title="Remove from queue"
@@ -556,6 +580,7 @@ export function Queue() {
                     <p className="text-xs text-neutral-500 truncate">{item.partySize} pax · {item.contactNumber}</p>
                   </div>
                   <button
+                    disabled={availableTables.length===0}
                     onClick={() => {
                       const targetTable = availableTables[0]?.id;
                       sessionStorage.setItem('assignCustomer', JSON.stringify({
@@ -577,8 +602,7 @@ export function Queue() {
                     onClick={() => {
                       // 🟢 NEW: Delete Confirmation
                       if (window.confirm(`Are you sure you want to remove ${item.customerName} from the queue?`)) {
-                        removeFromQueue(item.id);
-                        flash("Customer removed from queue.", "success");
+                        void handleRemoveCustomer(item.id);
                       }
                     }}
                     className="p-1.5 text-neutral-500 hover:text-rose-400 hover:bg-rose-950/30 rounded-lg transition-colors flex-none"
@@ -599,7 +623,7 @@ export function Queue() {
           </h2>
           {availableTables.length === 0 ? (
             <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-6 text-center">
-              <p className="text-sm text-neutral-500">No tables available</p>
+              <p className="text-sm text-neutral-500">{reservationMoveError?'Table availability needs verification':'No tables available'}</p>
               <button onClick={() => navigate('/staff/tables')} className="text-xs text-emerald-500 hover:text-emerald-400 mt-2 font-semibold transition-colors">
                 View Table Monitor →
               </button>
