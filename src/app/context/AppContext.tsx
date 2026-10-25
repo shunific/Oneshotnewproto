@@ -228,7 +228,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [isInitializing, setIsInitializing] = useState(true);
 
   // States
-  const [tables, setTables] = useState<Table[]>([]);
+  const [tables, setTables] = useState<Table[]>(() => {
+    try {
+      const cached = localStorage.getItem('oneshot_tables_cache');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {}
+    return Array.from({ length: 10 }, (_, i) => ({
+      id: `t${i + 1}`,
+      name: `Table ${i + 1}`,
+      status: 'available' as TableStatus,
+      isActive: true,
+    }));
+  });
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [pendingQueueOperations,setPendingQueueOperations]=useState<any[]>([]);
   const [queueOperationError,setQueueOperationError]=useState('');
@@ -269,6 +283,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     root.setAttribute('data-theme', theme);
     root.setAttribute('data-color', primaryColor);
   }, [theme, primaryColor]);
+
+  useEffect(() => {
+    if (tables && tables.length > 0) {
+      try {
+        localStorage.setItem('oneshot_tables_cache', JSON.stringify(tables));
+      } catch (e) {}
+    }
+  }, [tables]);
 
   const updateTheme = (newTheme: 'dark' | 'light') => {
     setTheme(newTheme);
@@ -345,7 +367,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const [tableRows, inventoryRows, queueRows, staffRows, historyRows, activityRows, feedbackRows, lostRows, watchRows, moveRows] = floor;
       if(isFloorCurrent()){
         applyPendingReservationMoves(moveRows);
-        if (tableRows) setTables(tableRows);
+        if (tableRows && tableRows.length > 0) {
+          setTables(tableRows);
+        } else {
+          try {
+            const { data: cloudTablesData } = await supabase.from('tables').select('*');
+            if (cloudTablesData && cloudTablesData.length > 0) {
+              setTables(cloudTablesData.map((t: any) => ({
+                id: String(t.id),
+                name: t.name || `Table ${t.id}`,
+                status: (t.status as TableStatus) || 'available',
+                isActive: t.isActive !== false && t.is_active !== false,
+                maintenanceReason: t.maintenanceReason || t.maintenancereason || undefined,
+                session: t.sessionData ? (typeof t.sessionData === 'string' ? JSON.parse(t.sessionData) : t.sessionData) : undefined
+              })));
+            }
+          } catch (e) {}
+        }
         if (inventoryRows) setInventory(inventoryRows);
         if (queueRows) setQueue(queueRows);
       }
@@ -441,8 +479,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
     fetchHolidays();
   }, []);
-
-  const cloudSyncTimeout = useRef<NodeJS.Timeout | null>(null);
+  const cloudSyncTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const runCloudBackup = () => {
     if (cloudSyncTimeout.current) clearTimeout(cloudSyncTimeout.current);
@@ -1146,8 +1183,52 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return saved;
   };
 
-  const addAnnouncement = async (a:Omit<Announcement,'id'|'createdAt'>)=>{await persistContentCreate('announcement',a);};
+  const updateRates = async (r: Partial<RatesConfig>) => {
+    const sanitized = { ...r } as Partial<RatesConfig>;
+    setRates(prev => ({ ...prev, ...sanitized }));
+    if (sanitized.hourlyRate !== undefined) sanitized.hourlyRate = Number(sanitized.hourlyRate) || 0;
+    if (sanitized.overtimeRate !== undefined) sanitized.overtimeRate = Number(sanitized.overtimeRate) || 0;
+    if (sanitized.weekdayHappyHourRate !== undefined) sanitized.weekdayHappyHourRate = Number(sanitized.weekdayHappyHourRate) || 0;
+    if (sanitized.weekendHappyHourRate !== undefined) sanitized.weekendHappyHourRate = Number(sanitized.weekendHappyHourRate) || 0;
+    if (sanitized.downPaymentPercent !== undefined && sanitized.downPaymentPercent !== null) {
+      let dp = Number(sanitized.downPaymentPercent) || 0;
+      dp = Math.max(0, Math.min(100, dp));
+      sanitized.downPaymentPercent = dp;
+    }
+    setRates(prev => ({ ...prev, ...sanitized }));
+    try {
+      const rows = Object.entries(sanitized).map(([k, v]) => ({
+        key_name: k,
+        setting_value: String(v ?? '')
+      }));
+      await supabase.from('system_settings').upsert(rows, { onConflict: 'key_name' });
+    } catch (e) {}
+    try {
+      const res = await syncToDB('/api/settings/rates', 'PUT', sanitized, `Updated System Rates`).catch(() => null);
+      addActivity('admin_action', 'System rates updated');
+      runCloudBackup(); 
+      return res;
+    } catch (e) { throw e; }
+  };
 
+  const updateReservationTerms = async (t: Partial<ReservationTerms>) => {
+    setReservationTerms(prev => ({ ...prev, ...t }));
+    try {
+      const rows = Object.entries(t).map(([k, v]) => ({
+        key_name: k,
+        setting_value: String(v ?? '')
+      }));
+      await supabase.from('system_settings').upsert(rows, { onConflict: 'key_name' });
+    } catch (e) {}
+    try {
+      const res = await syncToDB('/api/settings/terms', 'PUT', t, `Updated Reservation Terms`).catch(() => null); 
+      addActivity('admin_action', 'Reservation terms updated');
+      runCloudBackup(); 
+      return res;
+    } catch (e) { throw e; }
+  };
+
+  const addAnnouncement = async (a:Omit<Announcement,'id'|'createdAt'>)=>{await persistContentCreate('announcement',a);};
   const updateAnnouncement = async (id: string, u: Partial<Announcement>) => {
     const owner=identityRef.current,epoch=identityGeneration.current;
     const isCurrent=()=>!!owner&&!authMutationInFlight.current&&identityRef.current===owner&&identityGeneration.current===epoch;
@@ -1286,7 +1367,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (isCurrent()) { refreshCmsRecovery(); if (recoveryPending) setCmsSaveError('Image save confirmed, but recovery cleanup needs review. Retry only its saved original.'); }
     }
   };
- const updateSiteConfig = (patch: any) => persistCmsConfig(patch);
+  const updateSiteConfig = (patch: any) => persistCmsConfig(patch);
   const retryCmsSave = () => persistCmsConfig(null, true);
 
   if (isInitializing) {
@@ -1297,7 +1378,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
           <div className="absolute inset-0 border-4 border-emerald-500 rounded-full border-t-transparent animate-spin"></div>
         </div>
         <h1 className="text-2xl font-black text-white tracking-widest">ONE SHOT</h1>
-        <p className="text-[10px] text-emerald-500 font-bold uppercase tracking-[0.2em] mt-2 animate-pulse">Loading Application...</p>
       </div>
     );
   }

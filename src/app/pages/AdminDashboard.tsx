@@ -1,16 +1,17 @@
 import { summarizeSessionFinancials } from '../utils/sessionFinancials.js';
 import { localFetch } from '../utils/localApi';
-import { useState, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { useAppContext } from '../context/AppContext';
 import { 
   Users, Table2, Tag, Megaphone, CalendarX2, DollarSign, 
-  TrendingUp, Bell, CloudRain, Sun, Cloud, MapPin, 
+  TrendingUp, Bell, BarChart3, CloudRain, Sun, Cloud, MapPin, 
   Database, RefreshCw, CalendarDays, ArrowRight, ShieldCheck,
   Wifi, WifiOff, Download, CheckCircle2, CheckCircle, AlertTriangle, X
 } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { PesoSign } from '../components/PesoSign';
-import { format, isToday, isTomorrow } from 'date-fns';
+import { format, isToday, isTomorrow, subDays, eachDayOfInterval, isSameDay } from 'date-fns';
 
 export function AdminDashboard() {
   const { 
@@ -159,6 +160,42 @@ export function AdminDashboard() {
 
   const dynamicAlerts = getDynamicAlerts();
 
+  // ── Reporting Analytics Overview ──
+  const analytics7Days = useMemo(() => {
+    const end = new Date();
+    const start = subDays(end, 6);
+    const days = eachDayOfInterval({ start, end });
+    const history = sessionHistory || [];
+    return days.map(day => {
+      const daySessions = history.filter((h: any) => isSameDay(new Date(h.startTime || h.endTime), day));
+      const rev = daySessions.reduce((s: number, h: any) => s + (Number(h.totalAmount) || 0), 0);
+      return {
+        label: format(day, "EEE"),
+        date: format(day, "MMM dd"),
+        revenue: rev,
+        sessions: daySessions.length
+      };
+    });
+  }, [sessionHistory]);
+
+  const todayRevenue = useMemo(() => {
+    return (sessionHistory || [])
+      .filter((h: any) => isToday(new Date(h.startTime || h.endTime)))
+      .reduce((s: number, h: any) => s + (Number(h.totalAmount) || 0), 0);
+  }, [sessionHistory]);
+
+  const todayCompletedSessions = useMemo(() => {
+    return (sessionHistory || []).filter((h: any) => isToday(new Date(h.startTime || h.endTime))).length;
+  }, [sessionHistory]);
+
+  const tableUtilizationRate = useMemo(() => {
+    const active = tables.filter((t: any) => t.isActive && t.status !== "maintenance");
+    if (!active.length) return 0;
+    const occ = active.filter((t: any) => t.status === "occupied").length;
+    return Math.round((occ / active.length) * 100);
+  }, [tables]);
+
+
   return (
     <div className="space-y-6 relative">
       
@@ -302,6 +339,85 @@ export function AdminDashboard() {
         ))}
       </div>
 
+      {/* ── Reporting Analytics Overview ── */}
+      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-neutral-800 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-emerald-500/10 text-emerald-400 rounded-xl">
+              <BarChart3 size={20} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-bold text-white tracking-tight">Reporting Analytics</h2>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  Last 7 Days
+                </span>
+              </div>
+              <p className="text-xs text-neutral-500 mt-0.5">Real-time revenue performance, session count, and current floor occupancy.</p>
+            </div>
+          </div>
+          <button 
+            onClick={() => navigate("/admin/analytics")} 
+            className="self-start sm:self-auto px-3.5 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-bold rounded-xl transition-colors border border-neutral-700 flex items-center gap-1.5"
+          >
+            Open Full Analytics Suite <ArrowRight size={14} />
+          </button>
+        </div>
+
+        {/* 3 Metric Mini-Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="bg-neutral-900/60 border border-neutral-800/80 rounded-xl p-4">
+            <p className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">Today Revenue</p>
+            <p className="text-2xl font-black text-emerald-400 mt-1">₱{todayRevenue.toLocaleString("en-PH", { minimumFractionDigits: 2 })}</p>
+            <p className="text-[10px] text-neutral-500 mt-1">From completed sessions today</p>
+          </div>
+          <div className="bg-neutral-900/60 border border-neutral-800/80 rounded-xl p-4">
+            <p className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">Today Completed Sessions</p>
+            <p className="text-2xl font-black text-purple-400 mt-1">{todayCompletedSessions}</p>
+            <p className="text-[10px] text-neutral-500 mt-1">Finished table checkouts</p>
+          </div>
+          <div className="bg-neutral-900/60 border border-neutral-800/80 rounded-xl p-4">
+            <p className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">Live Table Utilization</p>
+            <p className="text-2xl font-black text-sky-400 mt-1">{tableUtilizationRate}%</p>
+            <p className="text-[10px] text-neutral-500 mt-1">Of active playable tables in use</p>
+          </div>
+        </div>
+
+        {/* 7-Day Revenue Trend Chart */}
+        <div className="space-y-2 pt-2">
+          <p className="text-xs font-bold text-neutral-400 uppercase tracking-wider">7-Day Revenue Trend (₱)</p>
+          <div className="h-56 w-full pt-2">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={analytics7Days} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="dashRevGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.4}/>
+                    <stop offset="95%" stopColor="#10b981" stopOpacity={0.0}/>
+                  </linearGradient>
+                </defs>
+                <XAxis dataKey="label" stroke="#525252" fontSize={11} tickLine={false} />
+                <YAxis stroke="#525252" fontSize={11} tickLine={false} tickFormatter={(v) => `₱${v}`} />
+                <Tooltip 
+                  content={({ active, payload, label }: any) => {
+                    if (active && payload && payload.length) {
+                      return (
+                        <div className="bg-neutral-900 border border-neutral-700 rounded-lg p-2.5 shadow-xl text-xs">
+                          <p className="text-neutral-400 font-bold mb-1">{payload[0]?.payload?.date}</p>
+                          <p className="text-emerald-400 font-bold">Revenue: ₱{Number(payload[0]?.value).toLocaleString()}</p>
+                          <p className="text-purple-400 font-semibold">{payload[0]?.payload?.sessions} sessions</p>
+                        </div>
+                      );
+                    }
+                    return null;
+                  }} 
+                />
+                <Area type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={2.5} fillOpacity={1} fill="url(#dashRevGrad)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+
       {/* ── Dynamic Layout Bottom Half ── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5 flex flex-col h-[400px]">
@@ -342,7 +458,8 @@ export function AdminDashboard() {
                 const isTodayRes = isToday(new Date(r.date));
                 const isTomorrowRes = isTomorrow(new Date(r.date));
                 const dateLabel = isTodayRes ? 'Today' : isTomorrowRes ? 'Tomorrow' : format(new Date(r.date), 'MMM d');
-                return (
+              
+  return (
                   <div key={r.id} className="p-3 bg-neutral-900/50 border border-neutral-800/60 rounded-lg hover:bg-neutral-900 transition-colors flex items-center justify-between group">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 mb-1">

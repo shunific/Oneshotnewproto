@@ -1,5 +1,6 @@
 import { localFetch } from '../utils/localApi';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useNavigate } from 'react-router';
 import { useAppContext } from '../context/AppContext';
 import { PesoSign } from '../components/PesoSign';
 import {
@@ -9,7 +10,8 @@ import {
 } from 'lucide-react';
 
 export default function AdminPolicyRatesEditor() {
-  const { rates, reservationTerms, savePolicySettings, staffProfile, theme } = useAppContext() as any;
+  const navigate = useNavigate();
+  const { rates, reservationTerms, savePolicySettings, updateRates, updateReservationTerms, staffProfile, theme, isSystemOffline, tables } = useAppContext() as any;
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -132,14 +134,18 @@ export default function AdminPolicyRatesEditor() {
   const handleHourInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     const cleanDigits = value.replace(/\D/g, '').slice(0, 3);
-    const numericValue = cleanDigits === '' ? 0 : Number(cleanDigits);
+    let numericValue = cleanDigits === '' ? 0 : Number(cleanDigits);
+    if (name === 'cancellationHours') numericValue = Math.min(24, Math.max(0, numericValue));
     setTermsForm(prev => ({ ...prev, [name]: numericValue }));
   };
 
   const handlePartySizeInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     const cleanDigits = value.replace(/\D/g, '').slice(0, 2);
-    setTermsForm(prev => ({ ...prev, [name]: cleanDigits === '' ? 0 : Number(cleanDigits) }));
+    let numericValue = cleanDigits === '' ? 0 : Number(cleanDigits);
+    if (name.includes('MaxPartySize')) numericValue = Math.min(30, Math.max(1, numericValue));
+    if (name.includes('MinPartySize')) numericValue = Math.min(30, Math.max(1, numericValue));
+    setTermsForm(prev => ({ ...prev, [name]: numericValue }));
   };
 
   const handleDownPaymentInput = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -209,7 +215,7 @@ export default function AdminPolicyRatesEditor() {
     if (minWkEnd <= 0 || maxWkEnd <= 0) { flash('Weekend party sizes must be at least 1 person.', 'error'); return; }
     if (minWkEnd > maxWkEnd) { flash(`Weekend Min party size (${minWkEnd}) cannot exceed Max (${maxWkEnd}).`, 'error'); return; }
 
-    if (cancelHrs > 168) { flash('Cancellation grace period cannot exceed 7 days (168 hours).', 'error'); return; }
+    if (cancelHrs > 24) { flash('Cancellation grace period cannot exceed 24 hours.', 'error'); return; }
 
     setShowSummaryModal(true);
   };
@@ -415,29 +421,24 @@ export default function AdminPolicyRatesEditor() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-6 p-4 bg-neutral-950 rounded-lg border border-neutral-800/50 mb-4">
-              <div className="space-y-3">
-                <h3 className="text-sm font-bold text-emerald-500 border-b border-neutral-800 pb-2">WEEKDAYS (Mon-Thu)</h3>
-                <div>
-                  <label className="block text-xs text-neutral-400 mb-1 uppercase tracking-wider">Store Opens</label>
-                  <input type="time" style={{ colorScheme: theme === 'light' ? 'light' : 'dark' }} name="weekdayStartTime" value={ratesForm.weekdayStartTime} onChange={handleRatesChange} className="w-full bg-neutral-900 border border-neutral-800 rounded p-3 text-neutral-100 focus:border-emerald-500 outline-none" />
+            {/* Weekday & Weekend Operating Hours Link Notice */}
+            <div className="p-4 bg-neutral-950/80 rounded-xl border border-neutral-800/60 mb-4 flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400">
+                  <Clock size={16} />
                 </div>
                 <div>
-                  <label className="block text-xs text-neutral-400 mb-1 uppercase tracking-wider">Store Closes</label>
-                  <input type="time" style={{ colorScheme: theme === 'light' ? 'light' : 'dark' }} name="weekdayEndTime" value={ratesForm.weekdayEndTime} onChange={handleRatesChange} className="w-full bg-neutral-900 border border-neutral-800 rounded p-3 text-neutral-100 focus:border-emerald-500 outline-none" />
-                </div>
-              </div>
-              <div className="space-y-3">
-                <h3 className="text-sm font-bold text-emerald-500 border-b border-neutral-800 pb-2">WEEKENDS (Fri-Sun)</h3>
-                <div>
-                  <label className="block text-xs text-neutral-400 mb-1 uppercase tracking-wider">Store Opens</label>
-                  <input type="time" style={{ colorScheme: theme === 'light' ? 'light' : 'dark' }} name="weekendStartTime" value={ratesForm.weekendStartTime} onChange={handleRatesChange} className="w-full bg-neutral-900 border border-neutral-800 rounded p-3 text-neutral-100 focus:border-emerald-500 outline-none" />
-                </div>
-                <div>
-                  <label className="block text-xs text-neutral-400 mb-1 uppercase tracking-wider">Store Closes</label>
-                  <input type="time" style={{ colorScheme: theme === 'light' ? 'light' : 'dark' }} name="weekendEndTime" value={ratesForm.weekendEndTime} onChange={handleRatesChange} className="w-full bg-neutral-900 border border-neutral-800 rounded p-3 text-neutral-100 focus:border-emerald-500 outline-none" />
+                  <p className="text-xs font-bold text-neutral-200">Daily Store Operating Hours</p>
+                  <p className="text-[11px] text-neutral-500">Opening & closing schedules have been moved to Site Settings.</p>
                 </div>
               </div>
+              <button 
+                type="button"
+                onClick={() => navigate('/admin/site-settings')}
+                className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold rounded-lg transition-colors border border-neutral-700 cursor-pointer"
+              >
+                Configure in Site Settings &rarr;
+              </button>
             </div>
 
             <div className="mt-4">

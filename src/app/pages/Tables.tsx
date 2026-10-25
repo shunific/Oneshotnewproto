@@ -2,6 +2,32 @@ import { localFetch } from '../utils/localApi';
 import { loadOpenTimeAvailability, reviewedOpenTimeLimit, openTimeStop } from '../utils/openTimeAvailability.js';
 import { PendingQueueActions } from '../components/PendingQueueActions';
 import { previewSessionBill, selectWalkInStartPricing } from '../../../session-billing.mjs';
+
+// 🟢 Web Audio API Session End Chime (Works offline, cross-platform)
+const playSessionEndSound = () => {
+  try {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextClass) return;
+    const ctx = new AudioContextClass();
+    const playTone = (freq: number, start: number, duration: number) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, ctx.currentTime + start);
+      gain.gain.setValueAtTime(0.3, ctx.currentTime + start);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + duration);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(ctx.currentTime + start);
+      osc.stop(ctx.currentTime + start + duration);
+    };
+    playTone(659.25, 0, 0.25);    // E5
+    playTone(830.61, 0.2, 0.35);  // G#5
+    playTone(987.77, 0.45, 0.55); // B5
+  } catch (err) {
+    console.error('Failed to play session end sound:', err);
+  }
+};
 import { useState, useEffect, useRef } from 'react';
 import { useAppContext, SessionOrder } from '../context/AppContext';
 import { TableCard } from '../components/TableCard';
@@ -59,13 +85,33 @@ const PayMethodBtn = ({ value, current, icon: Icon, label, onChange }: { value: 
 
 export function Tables() {
   const { 
-    tables, queue, reservations, assignTable, extendSession, migrateSession, checkoutTable,
+    tables = [], queue, reservations, assignTable, extendSession, migrateSession, checkoutTable, freeTable,
     inventory, submitTableOrders, voidTableOrder, retryPendingOrder, addInventoryItem, updateInventoryItem,
-    staffProfile, rates, reservationTerms,
-    addActivity,
-    seatQueueCustomer, updateReservationStatus, forceFullSync,
-    pendingReservationMoves,reservationMoveError,heldTableIds,availableTables,recoverReservationTransfer,refreshReservationTransfers
+    staffProfile, rates, reservationTerms, staffUsers, hashPassword,
+    addSessionHistory, addActivity, addWatchlistItem,
+    seatQueueCustomer, removeFromQueue, updateReservationStatus, forceFullSync,
+    pendingReservationMoves, reservationMoveError, heldTableIds, availableTables, recoverReservationTransfer, refreshReservationTransfers
   } = useAppContext() as any;
+
+  // 🟢 Audio alert when any table session ends
+  const notifiedSessionsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = new Date();
+      (tables || []).forEach((t: any) => {
+        if (t.status === "occupied" && t.session && !t.session.isOpenTime && t.session.startTime && t.session.durationMinutes) {
+          const endTime = addMinutes(new Date(t.session.startTime), t.session.durationMinutes);
+          const secsLeft = differenceInSeconds(endTime, now);
+          const sessionKey = `${t.id}-${t.session.startTime}`;
+          if (secsLeft <= 0 && !notifiedSessionsRef.current.has(sessionKey)) {
+            notifiedSessionsRef.current.add(sessionKey);
+            playSessionEndSound();
+          }
+        }
+      });
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [tables]);
   
   const [filter, setFilter]       = useState<FilterStatus>('all');
   const [search, setSearch]       = useState('');
@@ -327,7 +373,7 @@ export function Tables() {
     const availData = getAvailableDurations(tableId);
     const defaultMins = availData.opts.length > 0 ? availData.opts[0] : 60;
     setDurationMinutes(defaultMins);
-    setAmountPaid(((defaultMins / 60) * effectiveHourly).toFixed(2));
+    setAmountPaid(Math.round((defaultMins / 60) * effectiveHourly).toString());
     setPaymentOption('payNow');
   };
 
@@ -339,8 +385,13 @@ export function Tables() {
         if (durationMinutes > availData.maxMins) {
           const newMins = availData.opts.length > 0 ? availData.opts[0] : 60;
           setDurationMinutes(newMins);
-          setAmountPaid(((newMins / 60) * effectiveHourly).toFixed(2));
+          setAmountPaid(Math.round((newMins / 60) * effectiveHourly).toString());
         }
+      } else if (durationMinutes === 'open' && (isOpenTimeDisabled || availData.maxMins < 1440)) {
+          const newMins = availData.opts.length > 0 ? availData.opts[0] : 60;
+          setDurationMinutes(newMins);
+          setAmountPaid(Math.round((newMins / 60) * effectiveHourly).toString());
+          setPaymentOption('payNow');
       }
     }
   }, [reservations, assigningTableId, effectiveHourly]);
@@ -427,10 +478,10 @@ export function Tables() {
     if (c.kind === 'reservation') {
       const mins = c.durationHours * 60;
       const finalMins = Math.min(mins, availData.maxMins); // Enforce max gap
-      setDurationMinutes(finalMins); setAmountPaid(((finalMins / 60) * effectiveHourly).toFixed(2));
+      setDurationMinutes(finalMins); setAmountPaid(Math.round((finalMins / 60) * effectiveHourly).toString());
     } else {
       const defaultMins = availData.opts.length > 0 ? availData.opts[0] : 60;
-      setDurationMinutes(defaultMins); setAmountPaid(((defaultMins / 60) * effectiveHourly).toFixed(2));
+      setDurationMinutes(defaultMins); setAmountPaid(Math.round((defaultMins / 60) * effectiveHourly).toString());
     }
   };
 
@@ -1329,7 +1380,7 @@ export function Tables() {
                           } else {
                             const d = Number(val);
                             setDurationMinutes(d);
-                            if (paymentOption === 'payNow') setAmountPaid(((d / 60) * effectiveHourly).toFixed(2));
+                            if (paymentOption === 'payNow') setAmountPaid(Math.round((d / 60) * effectiveHourly).toString());
                           }
                         }}
                         className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
@@ -1383,13 +1434,17 @@ export function Tables() {
                         <input
                           type="number"
                           max="999999"
+                          step="1"
+                          onWheel={e => e.currentTarget.blur()}
                           value={amountPaid}
-                          onChange={e => { if (e.target.value.length <= 7) setAmountPaid(e.target.value); }}
+                          onChange={e => {
+                            const val = e.target.value.replace(/\D/g, "");
+                            if (val.length <= 7) setAmountPaid(val);
+                          }}
                           className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
-                          placeholder={`₱${(((durationMinutes as number) / 60) * effectiveHourly).toFixed(2)}`}
-                          step="0.01"
+                          placeholder={`₱${Math.round(((durationMinutes as number) / 60) * effectiveHourly)}`}
                         />
-                        <p className="text-[10px] text-neutral-600">Suggested: {formatPHP(((durationMinutes as number) / 60) * effectiveHourly)} for {(durationMinutes as number) < 60 ? `${durationMinutes}min` : `${(durationMinutes as number) / 60}hr`}</p>
+                        <p className="text-[10px] text-neutral-600">Suggested: ₱{Math.round(((durationMinutes as number) / 60) * effectiveHourly)} (whole number) for {(durationMinutes as number) < 60 ? `${durationMinutes}min` : `${(durationMinutes as number) / 60}hr`}</p>
                       </div>
                     )}
 
