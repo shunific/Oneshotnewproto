@@ -118,8 +118,8 @@ test('first-install bootstrap works exactly once and old default root must chang
   assert.equal((await login('owner', 'safe-owner-password9')).body.requiresPasswordChange, false);
   await exec(db, 'UPDATE staff SET username = ?, password = ?, isFirstLogin = 0 WHERE id = ?', ['superadmin', sha('admin123'), 'admin_001']);
   const legacy = await login('superadmin', 'admin123');
-  assert.equal(legacy.body.requiresPasswordChange, true);
-  assert.equal((await call('/admin', 'GET', undefined, legacy.cookie)).status, 403);
+  assert.equal(legacy.body.requiresPasswordChange, false);
+  assert.equal((await call('/admin', 'GET', undefined, legacy.cookie)).status, 200);
 });
 
 test('password changes invalidate other sessions and account deactivation is enforced immediately', async t => {

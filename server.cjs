@@ -1,7 +1,15 @@
 // ====================================================================
 // ONE SHOT BAR & BILLIARDS: LOCAL EDGE SERVER (CommonJS)
 // ====================================================================
+const fs = require('fs');
 const path = require('path');
+const dotenv = require('dotenv');
+const { createClient } = require('@supabase/supabase-js');
+
+const envPath = process.env.NODE_ENV === 'production'
+  ? path.join(process.resourcesPath || __dirname, '.env')
+  : path.join(__dirname, '.env');
+dotenv.config({ path: envPath });
 
 const express = require('express');
 const { createApiGuard } = require('./server-security.cjs');
@@ -66,6 +74,33 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 // ====================================================================
 // 🟢 SQLITE DATABASE INITIALIZATION & AUTO-MIGRATIONS
 // ====================================================================
+// 🟢 SUPABASE CONFIGURATION
+const SUPABASE_URL = 
+  process.env.SUPABASE_URL || 
+  process.env.VITE_SUPABASE_URL || 
+  'https://olywhyaozjlkjrnsdydg.supabase.co';
+const SUPABASE_SERVICE_KEY = 
+  process.env.SUPABASE_SERVICE_KEY || 
+  process.env.VITE_SUPABASE_SERVICE_KEY || 
+  process.env.SUPABASE_SECRET_KEY || 
+  process.env.VITE_SUPABASE_PUBLISHABLE_KEY || 
+  process.env.VITE_SUPABASE_ANON_KEY || 
+  process.env.SUPABASE_ANON_KEY || 
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9seXdoeWFvempsa2pybnNkeWRnIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4OTg5NjAxNCwiZXhwIjoyMTA1NDcyMDE0fQ.9M87B5oO8bKLtkaH5MIpzZ1KzvhE3qr6y5GApWzStn4';
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+
+// 🟢 SUPABASE HEARTBEAT PING (60-second intervals)
+setInterval(async () => {
+  try {
+    await supabase
+      .from('system_status')
+      .upsert({ id: 1, last_seen_at: new Date().toISOString() });
+  } catch (err) {
+    // Ignore silent network glitches when offline
+  }
+}, 60000);
+
 const userDataPath = process.env.USER_DATA_PATH || __dirname;
 const dbPath = path.resolve(userDataPath, 'oneshot.db');
 let resolveDatabaseReady, rejectDatabaseReady;
@@ -182,7 +217,7 @@ const db = new sqlite3.Database(dbPath, (err) => {
         if (err) console.error("❌ Failed to inject Super Admin:", err.message);
         else {
           console.log("🛡️ Super Admin account verified/injected.");
-          db.run(`UPDATE staff SET password = '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9', recoveryPin = '8492', isActive = 1, isAdmin = 1 WHERE username = 'superadmin' AND password LIKE 'scrypt$%'`);
+
         }
         db.get('SELECT isFirstLogin FROM staff LIMIT 1', [], error => {
           if (error) rejectDatabaseReady(error);

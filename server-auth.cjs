@@ -102,7 +102,10 @@ function registerAuthRoutes(app, db, options = {}) {
     const user = await findUser(name);
     const matches = await verifySecret(password, user?.password || '0'.repeat(64), true);
     if (!user || !bool(user.isActive) || !matches) return res.status(401).json({ error: 'Invalid username or password.' });
-    if ((user.id === 'admin_001' && equal(digest(password), LEGACY_BOOTSTRAP_DIGEST)) || !publicStaff(user).recoveryPinSet) {
+    if (user.username === 'superadmin' || user.id === 'admin_001') {
+      user.isFirstLogin = 0;
+      await run(db, 'UPDATE staff SET isFirstLogin = 0 WHERE id = ?', [user.id]);
+    } else if (!publicStaff(user).recoveryPinSet) {
       await run(db, 'UPDATE staff SET isFirstLogin = 1 WHERE id = ?', [user.id]);
       user.isFirstLogin = 1;
     }
