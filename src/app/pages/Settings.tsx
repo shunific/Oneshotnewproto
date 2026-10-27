@@ -1,4 +1,3 @@
-import { CloudStaffAccess } from '../components/CloudStaffAccess';
 import { authRequest } from '../utils/localApi';
 import { localFetch } from '../utils/localApi';
 import { useState, useMemo, useRef } from 'react';
@@ -6,14 +5,14 @@ import { useAppContext } from '../context/AppContext';
 import {
   User, Lock, Phone, Eye, EyeOff, Palette, Sun, Moon,
   Save, CheckCircle, Pencil, X, Calendar, Tag,
-  AlertTriangle, UploadCloud, BarChart2, CalendarCheck, 
+  AlertTriangle, BarChart2, CalendarCheck, 
   ShoppingCart, LayoutGrid, Clock, ShieldAlert
 } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { formatDistanceToNow } from 'date-fns';
 import logoImg from 'figma:asset/40eb82831843e17a3c48a360fd80f0aaaa58ddc8.png';
 
-type Section = 'overview' | 'profile' | 'appearance' | 'security' | 'cloud';
+type Section = 'overview' | 'profile' | 'appearance' | 'security';
 
 const getPasswordStrength = (pw: string) => {
   if (!pw) return { score: 0, color: 'bg-neutral-800', isValid: false };
@@ -177,7 +176,6 @@ export function SettingsPage() {
     { id: 'profile',    label: 'Profile',    icon: User },
     { id: 'appearance', label: 'Appearance', icon: Palette },
     { id: 'security',   label: 'Security',   icon: Lock },
-    { id: 'cloud', label: 'Cloud staff', icon: UploadCloud },
   ];
 
   return (
@@ -253,7 +251,6 @@ export function SettingsPage() {
         ))}
       </div>
 
-      {activeSection === 'cloud' && <CloudStaffAccess key={staffProfile.id} localStaffId={staffProfile.id || ''} />}
       {/* OVERVIEW */}
       {activeSection === 'overview' && (
         <div className="space-y-4">
