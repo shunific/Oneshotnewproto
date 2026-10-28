@@ -467,7 +467,7 @@ export function AdminAnnouncements() {
                   className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors">Cancel</button>
                 <button type="submit"
                   className="flex-1 bg-amber-600 hover:bg-amber-500 text-white text-sm rounded-xl font-semibold py-2.5 flex items-center justify-center gap-2 shadow-lg shadow-amber-900/20">
-                  {editingId ? <><Pencil size={14} /> Update</> : <><Plus size={14} /> {form.isActive ? 'Save Locally' : 'Save Local Schedule'}</>}
+                  {editingId ? <><Pencil size={14} /> Update</> : <><Plus size={14} /> {form.isActive ? 'Post' : 'Post Schedule'}</>}               
                 </button>
               </div>
             </fieldset></form>

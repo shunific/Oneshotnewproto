@@ -920,7 +920,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const activeUser = serverUserData || valid;
 
       setAdminLoggedIn(true);
+      setStaffLoggedIn(true);
       sessionStorage.setItem('oneshot_admin_auth', 'true');
+      sessionStorage.setItem('oneshot_staff_auth', 'true');
       const expiryTime = new Date().getTime() + (12 * 60 * 60 * 1000);
       sessionStorage.setItem('oneshot_auth_expiry', expiryTime.toString());
       sessionStorage.removeItem('oneshot_is_locked');
