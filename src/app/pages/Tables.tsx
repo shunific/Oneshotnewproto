@@ -90,7 +90,7 @@ export function Tables() {
     staffProfile, rates, reservationTerms, staffUsers, hashPassword,
     addSessionHistory, addActivity, addWatchlistItem,
     seatQueueCustomer, removeFromQueue, updateReservationStatus, forceFullSync,
-    pendingReservationMoves, reservationMoveError, heldTableIds, availableTables, recoverReservationTransfer, refreshReservationTransfers
+    pendingReservationMoves, reservationMoveError, heldTableIds, availableTables = [], recoverReservationTransfer, refreshReservationTransfers
   } = useAppContext() as any;
 
   // 🟢 Audio alert when any table session ends

@@ -172,9 +172,9 @@ export function AdminTableManagement() {
     event:       'bg-purple-500/10 text-purple-400 border-purple-500/20',
   };
 
-  const activeCount   = tables.filter((t: any) => t.isActive).length;
-  const inactiveCount = tables.filter((t: any) => !t.isActive || t.status === 'maintenance').length;
-  const occupiedCount = tables.filter((t: any) => t.status === 'occupied').length;
+  const activeCount   = (tables || []).filter((t: any) => t.isActive).length;
+  const inactiveCount = (tables || []).filter((t: any) => !t.isActive || t.status === 'maintenance').length;
+  const occupiedCount = (tables || []).filter((t: any) => t.status === 'occupied').length;
   
   // 🟢 NEW: Utilization Calculation
   const utilization = activeCount > 0 ? Math.round((occupiedCount / activeCount) * 100) : 0;

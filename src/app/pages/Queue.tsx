@@ -192,10 +192,10 @@ export function Queue() {
     queueActionInFlight.current=true;
     try {
     const result=await callQueueItem(customerId);
-    if(!result.replayed&&checkedInReservations.length>0)addActivity('admin_action',`Staff called ${customerName} while checked-in reservations were waiting.`);
+    if(!result?.replayed&&checkedInReservations.length>0)addActivity('admin_action',`Staff called ${customerName} while checked-in reservations were waiting.`);
     flash(`Called ${customerName} from the queue.`, "success");
     
-    if (!result.replayed && 'speechSynthesis' in window) {
+    if (!result?.replayed && 'speechSynthesis' in window) {
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(`${customerName}, please proceed to the counter.`);
       utterance.rate = 1.0;
