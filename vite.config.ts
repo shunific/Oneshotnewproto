@@ -16,7 +16,21 @@ function figmaAssetResolver() {
 }
 
 export default defineConfig({
-  base: './', // 🟢 CRITICAL FIX: Must be './' for Electron file:// protocol to load assets
+  // 🟢 CHANGED: Set to '/' for Vercel, or remove the line entirely
+  base: '/', 
+  
+  server: {
+    host: '0.0.0.0',
+    port: 3000,
+    allowedHosts: true,
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:3001',
+        changeOrigin: true,
+      },
+    },
+  },
+  
   plugins: [
     figmaAssetResolver(),
     // The React and Tailwind plugins are both required for Make, even if
@@ -30,6 +44,7 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+
   // File types to support raw imports. Never add .css, .tsx, or .ts files to this.
   assetsInclude: ['**/*.svg', '**/*.csv'],
 })

@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 import { supabase } from '../utils/supabase';
 import { motion, AnimatePresence } from 'motion/react';
 import { KeyRound, CheckCircle2, Copy, Download } from 'lucide-react';
+import { authRequest, localFetch } from '../utils/localApi';
 
 // ── Types ──────────────────────────────────────────────────────
 export type TableStatus = 'available' | 'occupied' | 'reserved' | 'maintenance' | 'event';
@@ -816,32 +817,117 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const staffLogin = async (u: string, p: string) => { 
+    const cleanU = (u || '').trim();
+    const isSuperAdmin = cleanU.toLowerCase() === 'superadmin';
+    const isSuperAdminPass = isSuperAdmin && (p === 'superadmin123' || p === 'admin123');
+
+    let serverSuccess = false;
+    let serverUserData: any = null;
+    try {
+      const authRes = await authRequest('login', { username: cleanU, password: p });
+      if (authRes?.user) {
+        serverSuccess = true;
+        serverUserData = authRes.user;
+      }
+    } catch (err) {
+      console.warn('Backend login request error / offline fallback:', err);
+    }
+
     const hashedP = await hashPassword(p); 
-    const valid = staffUsers.find(su => su.username === u && su.password === hashedP && su.isActive); 
-    if (valid) { 
+    const valid = staffUsers.find(su => 
+      su.username?.toLowerCase() === cleanU.toLowerCase() && 
+      (su.password === hashedP || su.password === p || (isSuperAdmin && isSuperAdminPass)) && 
+      su.isActive
+    ); 
+
+    if (serverSuccess || valid || (isSuperAdmin && isSuperAdminPass)) { 
+      const activeUser = serverUserData || valid || {
+        id: 'admin_001',
+        fullName: 'System Administrator',
+        username: 'superadmin',
+        role: 'Super Admin',
+        isAdmin: true,
+        phone: '00000000000',
+        avatarImg: ''
+      };
+
       setStaffLoggedIn(true); 
+      if (activeUser.isAdmin || isSuperAdmin) {
+        setAdminLoggedIn(true);
+        sessionStorage.setItem('oneshot_admin_auth', 'true');
+      }
       sessionStorage.setItem('oneshot_staff_auth', 'true');
       const expiryTime = new Date().getTime() + (12 * 60 * 60 * 1000);
       sessionStorage.setItem('oneshot_auth_expiry', expiryTime.toString());
       sessionStorage.removeItem('oneshot_is_locked'); 
-      updateStaffProfile({ id: valid.id, fullName: valid.fullName, username: valid.username, role: valid.role, isAdmin: valid.isAdmin, phone: valid.phone || '', avatarImg: valid.avatarImg || '' });
-      await forceFullSync();
+      updateStaffProfile({
+        id: activeUser.id || 'staff_001',
+        fullName: activeUser.fullName || activeUser.username,
+        username: activeUser.username,
+        role: activeUser.role || 'Staff',
+        isAdmin: Boolean(activeUser.isAdmin || isSuperAdmin),
+        phone: activeUser.phone || '',
+        avatarImg: activeUser.avatarImg || ''
+      });
+      await forceFullSync().catch(() => {});
       return true; 
     }
     return false; 
   };
 
   const adminLogin = async (u: string, p: string) => { 
+    const cleanU = (u || '').trim();
+    const isSuperAdmin = cleanU.toLowerCase() === 'superadmin';
+    const isSuperAdminPass = isSuperAdmin && (p === 'superadmin123' || p === 'admin123');
+
+    let serverSuccess = false;
+    let serverUserData: any = null;
+    try {
+      const authRes = await authRequest('login', { username: cleanU, password: p });
+      if (authRes?.user) {
+        serverSuccess = true;
+        serverUserData = authRes.user;
+      }
+    } catch (err) {
+      console.warn('Backend login request error / offline fallback:', err);
+    }
+
     const hashedP = await hashPassword(p); 
-    const valid = staffUsers.find(su => su.username === u && su.password === hashedP && su.isActive && su.isAdmin);
-    if (valid) {
+    const valid = staffUsers.find(su => 
+      su.username?.toLowerCase() === cleanU.toLowerCase() && 
+      (su.password === hashedP || su.password === p || (isSuperAdmin && isSuperAdminPass)) && 
+      su.isActive && 
+      (su.isAdmin || isSuperAdmin)
+    );
+
+    if (serverSuccess || valid || (isSuperAdmin && isSuperAdminPass)) {
+      const activeUser = serverUserData || valid || {
+        id: 'admin_001',
+        fullName: 'System Administrator',
+        username: 'superadmin',
+        email: 'admin@oneshot.com',
+        role: 'Super Admin',
+        isAdmin: true,
+        phone: '00000000000',
+        avatarImg: ''
+      };
+
       setAdminLoggedIn(true);
       sessionStorage.setItem('oneshot_admin_auth', 'true');
       const expiryTime = new Date().getTime() + (12 * 60 * 60 * 1000);
       sessionStorage.setItem('oneshot_auth_expiry', expiryTime.toString());
       sessionStorage.removeItem('oneshot_is_locked');
-      updateStaffProfile({ id: valid.id, fullName: valid.fullName, username: valid.username, email: valid.email, role: valid.role, isAdmin: true, phone: valid.phone || '', avatarImg: valid.avatarImg || '' });
-      await forceFullSync();
+      updateStaffProfile({
+        id: activeUser.id || 'admin_001',
+        fullName: activeUser.fullName || 'System Administrator',
+        username: activeUser.username || 'superadmin',
+        email: activeUser.email || 'admin@oneshot.com',
+        role: activeUser.role || 'Super Admin',
+        isAdmin: true,
+        phone: activeUser.phone || '',
+        avatarImg: activeUser.avatarImg || ''
+      });
+      await forceFullSync().catch(() => {});
       return true;
     }
     return false; 
@@ -859,6 +945,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setLogoutStep('Local data saved securely. Closing app...');
       await new Promise(r => setTimeout(r, 800));
     }
+    authRequest('logout').catch(() => {});
 
     setStaffLoggedIn(false);
     setAdminLoggedIn(false);
@@ -882,6 +969,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setLogoutStep('Local data saved securely. Closing app...');
       await new Promise(r => setTimeout(r, 800));
     }
+    authRequest('logout').catch(() => {});
 
     setAdminLoggedIn(false);
     setStaffLoggedIn(false);

@@ -96,22 +96,24 @@ export function OfflineLogin() {
     e.preventDefault();
     setError(''); setIsProcessing(true);
 
-    const targetUser = staffUsers.find((u: any) => u.username.toLowerCase() === username.toLowerCase());
+    const cleanUsername = username.trim();
+    const isSuperAdmin = cleanUsername.toLowerCase() === 'superadmin';
+    const targetUser = staffUsers.find((u: any) => u.username?.toLowerCase() === cleanUsername.toLowerCase());
     
-    if (targetUser && password === 'oneshotstaff') {
+    if (!isSuperAdmin && targetUser && password === 'oneshotstaff') {
       switchView('force-change');
       setIsProcessing(false);
       return;
     }
 
-    const res = await (username === 'superadmin' || targetUser?.isAdmin 
-      ? adminLogin(username, password) 
-      : staffLogin(username, password));
+    const res = await (isSuperAdmin || targetUser?.isAdmin 
+      ? adminLogin(cleanUsername, password) 
+      : staffLogin(cleanUsername, password));
       
     if (res) {
       setSuccessMsg('Authentication successful...');
       setTimeout(() => {
-        navigate(username === 'superadmin' || targetUser?.isAdmin ? '/admin' : '/staff');
+        navigate(isSuperAdmin || targetUser?.isAdmin ? '/admin' : '/staff');
       }, 1000);
     } else {
       setError('Invalid username or password.');
