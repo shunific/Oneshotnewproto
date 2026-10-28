@@ -19,22 +19,22 @@ export default function AdminPolicyRatesEditor() {
   const [policyLoadError, setPolicyLoadError] = useState('');
   const [policyWarning, setPolicyWarning] = useState(false);
   const [policyBaseline, setPolicyBaseline] = useState<any>(null);
-  const savedRates = policyBaseline?.rates || rates;
-  const savedTerms = policyBaseline?.terms || reservationTerms;
+  const savedRates = policyBaseline?.rates || (rates || {});
+  const savedTerms = policyBaseline?.terms || (reservationTerms || {});
 
   const [ratesForm, setRatesForm] = useState({
-    ...rates,
-    downPaymentPercent: rates.downPaymentPercent ?? 50,
-    overtimeRate: rates.overtimeRate ?? rates.hourlyRate ?? 0,
+    ...(rates || {}),
+    downPaymentPercent: (rates || {}).downPaymentPercent ?? 50,
+    overtimeRate: (rates || {}).overtimeRate ?? (rates || {}).hourlyRate ?? 0,
   });
 
   const [termsForm, setTermsForm] = useState({
-    ...reservationTerms,
-    weekdayMinPartySize: reservationTerms.weekdayMinPartySize ?? 1,
-    weekdayMaxPartySize: reservationTerms.weekdayMaxPartySize ?? 8,
-    weekendMinPartySize: reservationTerms.weekendMinPartySize ?? 1,
-    weekendMaxPartySize: reservationTerms.weekendMaxPartySize ?? 8,
-    cancellationHours: reservationTerms.cancellationHours ?? 24
+    ...(reservationTerms || {}),
+    weekdayMinPartySize: (reservationTerms || {}).weekdayMinPartySize ?? 1,
+    weekdayMaxPartySize: (reservationTerms || {}).weekdayMaxPartySize ?? 8,
+    weekendMinPartySize: (reservationTerms || {}).weekendMinPartySize ?? 1,
+    weekendMaxPartySize: (reservationTerms || {}).weekendMaxPartySize ?? 8,
+    cancellationHours: (reservationTerms || {}).cancellationHours ?? 24
   });
 
   const [showSummaryModal, setShowSummaryModal] = useState(false);

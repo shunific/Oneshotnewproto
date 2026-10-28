@@ -186,7 +186,7 @@ export function AdminAnnouncements() {
 
   return (
     <div className="space-y-5">
-      <PendingContentCreate kind="announcement" pending={pendingContentCreates.find((item: any) => item.kind === 'announcement')} storageError={contentCreateError} onRetry={recoverAnnouncementCreate} />
+      <PendingContentCreate kind="announcement" pending={(pendingContentCreates || []).find((item: any) => item.kind === 'announcement')} storageError={contentCreateError} onRetry={recoverAnnouncementCreate} />
       {/* 🟢 TOP-RIGHT FLOATING TOAST */}
       {toast && (
         <div className="fixed top-6 right-6 z-[9999] animate-in slide-in-from-top-4 fade-in duration-300" style={{ animation: 'toast-fade-out 5s forwards' }}>
