@@ -214,7 +214,7 @@ function QueueRow({ item, position, estWait }: { item: QueueItem; position: numb
 // ── Main Component ─────────────────────────────────────────────
 export function LiveMonitor() {
   // 🟢 Extract refreshLiveMonitor and rates from context
-  const { tables, availableTables, heldTableIds, reservationMoveError, queue, refreshLiveMonitor, rates } = useAppContext();
+  const { tables = [], availableTables = [], heldTableIds, reservationMoveError, queue = [], refreshLiveMonitor, rates } = useAppContext();
   const [tick, setTick] = useState(0);
   const [now, setNow] = useState(new Date());
 

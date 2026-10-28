@@ -85,8 +85,8 @@ const PayMethodBtn = ({ value, current, icon: Icon, label, onChange }: { value: 
 
 export function Tables() {
   const { 
-    tables = [], queue, reservations, assignTable, extendSession, migrateSession, checkoutTable, freeTable,
-    inventory, submitTableOrders, voidTableOrder, retryPendingOrder, addInventoryItem, updateInventoryItem,
+    tables = [], queue = [], reservations = [], assignTable, extendSession, migrateSession, checkoutTable, freeTable,
+    inventory = [], submitTableOrders, voidTableOrder, retryPendingOrder, addInventoryItem, updateInventoryItem,
     staffProfile, rates, reservationTerms, staffUsers, hashPassword,
     addSessionHistory, addActivity, addWatchlistItem,
     seatQueueCustomer, removeFromQueue, updateReservationStatus, forceFullSync,
