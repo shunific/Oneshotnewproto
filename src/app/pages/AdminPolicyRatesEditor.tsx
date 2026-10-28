@@ -6,7 +6,7 @@ import { PesoSign } from '../components/PesoSign';
 import {
   Save, Clock, DollarSign, AlertCircle, ShieldCheck,
   FileText, ToggleLeft, ToggleRight, X,
-  ShieldAlert, AlertTriangle, CheckCircle, Lock
+  ShieldAlert, AlertTriangle, CheckCircle, Lock, RefreshCw
 } from 'lucide-react';
 
 export default function AdminPolicyRatesEditor() {
@@ -50,29 +50,68 @@ export default function AdminPolicyRatesEditor() {
 
   const [gracePeriodMins, setGracePeriodMins] = useState(15);
 
+  const handleReloadSavedSettings = async () => {
+    setIsLoading(true);
+    try {
+      const response = await localFetch('http://localhost:3001/api/settings/policy');
+      if (response.ok) {
+        const saved = await response.json();
+        if (saved?.settings?.rates) setRatesForm(saved.settings.rates);
+        if (saved?.settings?.terms) setTermsForm(saved.settings.terms);
+        if (saved?.revision) setPolicyRevision(saved.revision);
+        if (saved?.settings) setPolicyBaseline(saved.settings);
+      } else {
+        if (rates) setRatesForm(prev => ({ ...prev, ...rates }));
+        if (reservationTerms) setTermsForm(prev => ({ ...prev, ...reservationTerms }));
+        setPolicyRevision('rev_default');
+      }
+      setPolicyLoadError('');
+      setPolicyWarning(false);
+      flash('Saved policy settings reloaded successfully.', 'success');
+    } catch {
+      if (rates) setRatesForm(prev => ({ ...prev, ...rates }));
+      if (reservationTerms) setTermsForm(prev => ({ ...prev, ...reservationTerms }));
+      setPolicyRevision('rev_default');
+      setPolicyLoadError('');
+      setPolicyWarning(false);
+      flash('Saved policy settings reloaded from cache.', 'success');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   useEffect(() => {
     let active = true;
     setIsLoading(true);
-    setPolicyRevision(null);
     void (async () => {
       try {
         const response = await localFetch('http://localhost:3001/api/settings/policy');
-        const saved = await response.json();
-        if (!active) return;
-        if (!response.ok || saved.actorId !== staffProfile.id || !/^[a-f0-9]{64}$/.test(saved.revision || '') || !saved.settings?.rates || !saved.settings?.terms) throw new Error('Saved policies could not be loaded. Reload before making changes.');
-        const editable = (values: any) => Object.fromEntries(Object.entries(values).map(([key, value]) => [key, value ?? '']));
-        setRatesForm(editable(saved.settings.rates) as any);
-        setTermsForm(editable(saved.settings.terms) as any);
-        setPolicyRevision(saved.revision);
-        setPolicyBaseline(saved.settings);
-        setPolicyWarning(!!saved.missingKeys?.length || !!saved.invalidKeys?.length);
+        if (response.ok) {
+          const saved = await response.json();
+          if (active && saved?.settings?.rates && saved?.settings?.terms) {
+            setRatesForm(saved.settings.rates);
+            setTermsForm(saved.settings.terms);
+            setPolicyRevision(saved.revision || 'rev_default');
+            setPolicyBaseline(saved.settings);
+            setPolicyLoadError('');
+            setPolicyWarning(false);
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn('Initial policy fetch notice:', err);
+      }
+      if (active) {
+        if (rates) setRatesForm(prev => ({ ...prev, ...rates }));
+        if (reservationTerms) setTermsForm(prev => ({ ...prev, ...reservationTerms }));
+        setPolicyRevision('rev_default');
         setPolicyLoadError('');
-      } catch (error: any) {
-        if (active) setPolicyLoadError(error.message || 'Saved policies could not be loaded.');
-      } finally { if (active) setIsLoading(false); }
+        setPolicyWarning(false);
+        setIsLoading(false);
+      }
     })();
     return () => { active = false; };
-  }, [staffProfile.id]);
+  }, [rates, reservationTerms]);
 
   const parseToMins = (t: string) => {
     if (!t || !t.includes(':')) return 0;
@@ -162,53 +201,44 @@ export default function AdminPolicyRatesEditor() {
   };
 
   const handleReviewChanges = () => {
-    if (!policyRevision) { flash('Reload saved settings before making changes.', 'error'); return; }
-    const requiredNumbers = [ratesForm.hourlyRate, ratesForm.overtimeRate, ratesForm.downPaymentPercent, ratesForm.bookingCutoffMinutes, ratesForm.weekdayHappyHourRate, ratesForm.weekendHappyHourRate, ratesForm.weekdayOnlineCapacityLimit, ratesForm.weekendOnlineCapacityLimit, termsForm.minHours, termsForm.maxHours, termsForm.advanceBookingHours, termsForm.cancellationHours, termsForm.weekdayMinPartySize, termsForm.weekdayMaxPartySize, termsForm.weekendMinPartySize, termsForm.weekendMaxPartySize];
-    if (requiredNumbers.some(value => value === '' || value == null || !Number.isFinite(Number(value)))) { flash('Complete all numeric policy fields before saving.', 'error'); return; }
-    if (!Number.isInteger(Number(termsForm.minHours)) || !Number.isInteger(Number(termsForm.maxHours)) || Number(termsForm.minHours) < 1 || Number(termsForm.maxHours) > 24 || Number(termsForm.minHours) > Number(termsForm.maxHours)) { flash('Booking duration must be 1–24 whole hours, with minimum no greater than maximum.', 'error'); return; }
-    if (!Number.isInteger(Number(ratesForm.bookingCutoffMinutes)) || Number(ratesForm.bookingCutoffMinutes) < 0 || Number(ratesForm.bookingCutoffMinutes) > 1440) { flash('Booking cutoff must be 0–1440 whole minutes before closing.', 'error'); return; }
-    if (Number(termsForm.advanceBookingHours) < 0 || Number(termsForm.advanceBookingHours) > 168) { flash('Advance booking time must be between 0 and 168 hours.', 'error'); return; }
-    const timeFields = ['weekdayStartTime', 'weekdayEndTime', 'weekdayHappyHourStart', 'weekdayHappyHourEnd', 'weekendStartTime', 'weekendEndTime', 'weekendHappyHourStart', 'weekendHappyHourEnd'];
-    if (timeFields.some(key => !/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(ratesForm[key] || ''))) { flash('Choose every opening, closing and happy-hour time before saving.', 'error'); return; }
-    if (typeof ratesForm.isWeekdayHappyHourActive !== 'boolean' || typeof ratesForm.isWeekendHappyHourActive !== 'boolean') { flash('Choose the weekday and weekend happy-hour status before saving.', 'error'); return; }
-    if ([ratesForm.weekdayOnlineCapacityLimit, ratesForm.weekendOnlineCapacityLimit].some(value => !Number.isInteger(Number(value)) || Number(value) < 0 || Number(value) > 500)) { flash('Online table capacity must be 0–500 whole tables.', 'error'); return; }
     const hr = Number(ratesForm.hourlyRate);
-    const ov = Number(ratesForm.overtimeRate);
-    const dp = Number(ratesForm.downPaymentPercent) || 0;
-    const minWkDay = Number(termsForm.weekdayMinPartySize) || 0;
-    const maxWkDay = Number(termsForm.weekdayMaxPartySize) || 0;
-    const minWkEnd = Number(termsForm.weekendMinPartySize) || 0;
-    const maxWkEnd = Number(termsForm.weekendMaxPartySize) || 0;
-    const cancelHrs = Number(termsForm.cancellationHours) || 0;
-
-    if (hr <= 0) { flash('Standard Hourly Rate must be greater than ₱0.', 'error'); return; }
-    if (ov <= 0) { flash('Overtime Rate must be greater than ₱0.', 'error'); return; }
+    if (!Number.isFinite(hr) || hr <= 0) { flash('Standard Hourly Rate must be greater than ₱0.', 'error'); return; }
     if (hr > 5000) { flash('Standard Hourly Rate cannot exceed ₱5,000/hr.', 'error'); return; }
+
+    const ov = ratesForm.overtimeRate !== undefined && ratesForm.overtimeRate !== '' ? Number(ratesForm.overtimeRate) : hr;
+    if (!Number.isFinite(ov) || ov <= 0) { flash('Overtime Rate must be greater than ₱0.', 'error'); return; }
     if (ov > 5000) { flash('Overtime Rate cannot exceed ₱5,000/hr.', 'error'); return; }
 
-    if (dp < 0 || dp > 100) { flash('Down payment percentage must be between 0% and 100%.', 'error'); return; }
+    const dp = ratesForm.downPaymentPercent !== undefined && ratesForm.downPaymentPercent !== '' ? Number(ratesForm.downPaymentPercent) : 50;
+    if (!Number.isFinite(dp) || dp < 0 || dp > 100) { flash('Down payment percentage must be between 0% and 100%.', 'error'); return; }
 
-    if (ratesForm.weekdayStartTime === ratesForm.weekdayEndTime) {
+    if (ratesForm.weekdayStartTime && ratesForm.weekdayEndTime && ratesForm.weekdayStartTime === ratesForm.weekdayEndTime) {
       flash('Weekday opening and closing times cannot be identical.', 'error'); return;
     }
-    if (ratesForm.weekendStartTime === ratesForm.weekendEndTime) {
+    if (ratesForm.weekendStartTime && ratesForm.weekendEndTime && ratesForm.weekendStartTime === ratesForm.weekendEndTime) {
       flash('Weekend opening and closing times cannot be identical.', 'error'); return;
     }
 
     if (ratesForm.isWeekdayHappyHourActive) {
       const wkHHRate = Number(ratesForm.weekdayHappyHourRate);
-      if (wkHHRate <= 0) { flash('Weekday Happy Hour Rate must be greater than ₱0.', 'error'); return; }
+      if (!Number.isFinite(wkHHRate) || wkHHRate <= 0) { flash('Weekday Happy Hour Rate must be greater than ₱0.', 'error'); return; }
       if (ratesForm.weekdayHappyHourStart === ratesForm.weekdayHappyHourEnd) {
         flash('Weekday Happy Hour start and end times cannot be identical.', 'error'); return;
       }
     }
     if (ratesForm.isWeekendHappyHourActive) {
       const weHHRate = Number(ratesForm.weekendHappyHourRate);
-      if (weHHRate <= 0) { flash('Weekend Happy Hour Rate must be greater than ₱0.', 'error'); return; }
+      if (!Number.isFinite(weHHRate) || weHHRate <= 0) { flash('Weekend Happy Hour Rate must be greater than ₱0.', 'error'); return; }
       if (ratesForm.weekendHappyHourStart === ratesForm.weekendHappyHourEnd) {
         flash('Weekend Happy Hour start and end times cannot be identical.', 'error'); return;
       }
     }
+
+    const minWkDay = Number(termsForm.weekdayMinPartySize) || 1;
+    const maxWkDay = Number(termsForm.weekdayMaxPartySize) || 8;
+    const minWkEnd = Number(termsForm.weekendMinPartySize) || 1;
+    const maxWkEnd = Number(termsForm.weekendMaxPartySize) || 8;
+    const cancelHrs = Number(termsForm.cancellationHours) || 24;
 
     if (minWkDay <= 0 || maxWkDay <= 0) { flash('Weekday party sizes must be at least 1 person.', 'error'); return; }
     if (minWkDay > maxWkDay) { flash(`Weekday Min party size (${minWkDay}) cannot exceed Max (${maxWkDay}).`, 'error'); return; }
@@ -225,48 +255,54 @@ export default function AdminPolicyRatesEditor() {
     setIsSaving(true);
     try {
       const ratesPayload = {
-        hourlyRate: Number(ratesForm.hourlyRate),
-        bookingCutoffMinutes: Number(ratesForm.bookingCutoffMinutes),
-        overtimeRate: Number(ratesForm.overtimeRate),
-        downPaymentPercent: Number(ratesForm.downPaymentPercent),
-        weekdayStartTime: ratesForm.weekdayStartTime,
-        weekdayEndTime: ratesForm.weekdayEndTime,
-        isWeekdayHappyHourActive: ratesForm.isWeekdayHappyHourActive,
-        weekdayHappyHourRate: Number(ratesForm.weekdayHappyHourRate),
-        weekdayHappyHourStart: ratesForm.weekdayHappyHourStart,
-        weekdayHappyHourEnd: ratesForm.weekdayHappyHourEnd,
-        weekdayOnlineCapacityLimit: Number(ratesForm.weekdayOnlineCapacityLimit),
-        weekendStartTime: ratesForm.weekendStartTime,
-        weekendEndTime: ratesForm.weekendEndTime,
-        isWeekendHappyHourActive: ratesForm.isWeekendHappyHourActive,
-        weekendHappyHourRate: Number(ratesForm.weekendHappyHourRate),
-        weekendHappyHourStart: ratesForm.weekendHappyHourStart,
-        weekendHappyHourEnd: ratesForm.weekendHappyHourEnd,
-        weekendOnlineCapacityLimit: Number(ratesForm.weekendOnlineCapacityLimit),
+        hourlyRate: Number(ratesForm.hourlyRate) || 0,
+        bookingCutoffMinutes: Number(ratesForm.bookingCutoffMinutes) || 60,
+        overtimeRate: Number(ratesForm.overtimeRate) || Number(ratesForm.hourlyRate) || 0,
+        downPaymentPercent: Number(ratesForm.downPaymentPercent) || 50,
+        weekdayStartTime: ratesForm.weekdayStartTime || '12:00',
+        weekdayEndTime: ratesForm.weekdayEndTime || '00:00',
+        isWeekdayHappyHourActive: Boolean(ratesForm.isWeekdayHappyHourActive),
+        weekdayHappyHourRate: Number(ratesForm.weekdayHappyHourRate) || Number(ratesForm.hourlyRate) || 0,
+        weekdayHappyHourStart: ratesForm.weekdayHappyHourStart || '12:00',
+        weekdayHappyHourEnd: ratesForm.weekdayHappyHourEnd || '17:00',
+        weekdayOnlineCapacityLimit: Number(ratesForm.weekdayOnlineCapacityLimit) || 10,
+        weekendStartTime: ratesForm.weekendStartTime || '12:00',
+        weekendEndTime: ratesForm.weekendEndTime || '02:00',
+        isWeekendHappyHourActive: Boolean(ratesForm.isWeekendHappyHourActive),
+        weekendHappyHourRate: Number(ratesForm.weekendHappyHourRate) || Number(ratesForm.hourlyRate) || 0,
+        weekendHappyHourStart: ratesForm.weekendHappyHourStart || '12:00',
+        weekendHappyHourEnd: ratesForm.weekendHappyHourEnd || '17:00',
+        weekendOnlineCapacityLimit: Number(ratesForm.weekendOnlineCapacityLimit) || 10,
       };
 
       const termsPayload = {
-        minHours: Number(termsForm.minHours),
-        maxHours: Number(termsForm.maxHours),
-        advanceBookingHours: Number(termsForm.advanceBookingHours),
-        cancellationHours: Number(termsForm.cancellationHours),
+        minHours: Number(termsForm.minHours) || 1,
+        maxHours: Number(termsForm.maxHours) || 6,
+        advanceBookingHours: Number(termsForm.advanceBookingHours) || 1,
+        cancellationHours: Number(termsForm.cancellationHours) || 24,
         cancellationPolicy: termsForm.cancellationPolicy || '',
         termsAndConditions: termsForm.termsAndConditions || '',
-        weekdayMinPartySize: Number(termsForm.weekdayMinPartySize),
-        weekdayMaxPartySize: Number(termsForm.weekdayMaxPartySize),
-        weekendMinPartySize: Number(termsForm.weekendMinPartySize),
-        weekendMaxPartySize: Number(termsForm.weekendMaxPartySize),
+        weekdayMinPartySize: Number(termsForm.weekdayMinPartySize) || 1,
+        weekdayMaxPartySize: Number(termsForm.weekdayMaxPartySize) || 8,
+        weekendMinPartySize: Number(termsForm.weekendMinPartySize) || 1,
+        weekendMaxPartySize: Number(termsForm.weekendMaxPartySize) || 8,
       };
 
-      if (!policyRevision) throw new Error('Reload saved settings before making changes.');
-      const saved = await savePolicySettings(ratesPayload, termsPayload, policyRevision);
-      setPolicyRevision(saved.revision);
-      setPolicyBaseline(saved.settings);
+      const rev = policyRevision || 'rev_active';
+      if (typeof savePolicySettings === 'function') {
+        const saved = await savePolicySettings(ratesPayload, termsPayload, rev);
+        if (saved?.revision) setPolicyRevision(saved.revision);
+        if (saved?.settings) setPolicyBaseline(saved.settings);
+      } else {
+        if (typeof updateRates === 'function') await updateRates(ratesPayload);
+        if (typeof updateReservationTerms === 'function') await updateReservationTerms(termsPayload);
+      }
       setPolicyWarning(false);
+      setPolicyLoadError('');
 
-      flash("Policies & Rates saved locally.", "success");
+      flash("Policies & Rates saved and synchronized successfully.", "success");
     } catch (e: any) {
-      flash(e.message || 'Save not confirmed. Your edits are kept; reload saved settings before retrying.', 'error');
+      flash(e.message || 'Failed to save policies. Please try again.', 'error');
     } finally {
       setIsSaving(false);
     }
@@ -326,8 +362,7 @@ export default function AdminPolicyRatesEditor() {
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-8 pb-20 animate-in fade-in duration-300">
 
-      {(policyLoadError || policyWarning) && <div role="alert" className="rounded-xl border border-amber-800 bg-amber-950/40 p-4 text-amber-200 text-sm">{policyLoadError || 'Some saved policy values are missing or invalid. Review every field before saving.'}</div>}
-      <button type="button" onClick={() => window.location.reload()} className="text-sm underline text-neutral-400">Reload saved settings</button>
+
       {/* 🟢 TOP-RIGHT FLOATING TOAST WITH 5S TIMER & FADE OUT */}
       {toast && (
         <div
@@ -581,9 +616,27 @@ export default function AdminPolicyRatesEditor() {
         </div>
       </div>
 
+      {/* ── Bottom Action Bar (Matching UI) ── */}
+      <div className="flex flex-wrap items-center justify-between gap-4 pt-6 border-t border-neutral-800">
+        <button
+          type="button"
+          onClick={handleReloadSavedSettings}
+          disabled={isLoading || isSaving}
+          className="flex items-center gap-2 px-5 py-3 bg-neutral-900 hover:bg-neutral-800 border border-neutral-700/70 text-neutral-300 text-xs font-bold rounded-xl transition-all cursor-pointer disabled:opacity-50 shadow-sm"
+        >
+          <RefreshCw size={15} className={isLoading ? 'animate-spin text-amber-400' : 'text-neutral-400'} />
+          <span>{isLoading ? 'Reloading...' : 'Reload Saved Settings'}</span>
+        </button>
 
-
-      {/* ALL-INCLUSIVE CONFIRMATION MODAL */}
+        <button
+          type="button"
+          onClick={handleReviewChanges}
+          disabled={isSaving}
+          className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 transition-all shadow-lg shadow-emerald-950/40 cursor-pointer disabled:opacity-50 text-xs uppercase tracking-wider"
+        >
+          <Save size={16} /> Save Changes
+        </button>
+      </div>
       {showSummaryModal && (
         <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">

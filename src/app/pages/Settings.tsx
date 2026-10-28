@@ -6,7 +6,7 @@ import {
   User, Lock, Phone, Eye, EyeOff, Palette, Sun, Moon,
   Save, CheckCircle, Pencil, X, Calendar, Tag,
   AlertTriangle, BarChart2, CalendarCheck, 
-  ShoppingCart, LayoutGrid, Clock, ShieldAlert
+  ShoppingCart, LayoutGrid, Clock, ShieldAlert, Upload
 } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { formatDistanceToNow } from 'date-fns';
@@ -226,7 +226,7 @@ export function SettingsPage() {
             <img src={pendingAvatar || (avatarImg ? (avatarImg.startsWith('http') ? avatarImg : `http://localhost:3001${avatarImg}`) : logoImg)} onError={(e) => { e.currentTarget.src = logoImg; }} alt="Profile Avatar" className="w-full h-full object-cover" />
             <label className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center cursor-pointer transition-opacity">
               <input type="file" accept="image/*" className="hidden" onChange={e => { const file = e.target.files?.[0]; if (file) { setPendingFile(file); setPendingAvatar(URL.createObjectURL(file)); } }} />
-              <UploadCloud size={16} className="text-white mb-1" />
+              <Upload size={16} className="text-white mb-1" />
               <span className="text-[10px] text-white font-semibold">Change</span>
             </label>
           </div>

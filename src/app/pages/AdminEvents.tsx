@@ -1,4 +1,3 @@
-import { PendingContentCreate } from '../components/PendingContentCreate';
 import { useState, useRef, useEffect, useMemo } from 'react';
 import {
   Calendar as CalendarIcon, Plus, Trash2, Edit2, Tag, Paperclip, X, Link,
@@ -13,8 +12,9 @@ import { Input } from '../components/ui/input';
 import { useAppContext, generateRandomPromoCode } from '../context/AppContext';
 import type { Event, PromoCode, ClosedDate, Reservation } from '../context/AppContext';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isBefore, startOfDay, addMonths, subMonths } from 'date-fns';
+import { supabase } from '../utils/supabase';
 
-const EVENT_TYPES = ['Tournament', 'League', 'Other'];
+const EVENT_TYPES = ['Tournament', 'League', 'Other']; 
 const todayStart = startOfDay(new Date());
 
 type FormState = {
@@ -34,9 +34,9 @@ type PromoForm = {
   hasStart: boolean; startDate: string;
 };
 
-type ClosureForm = {
-  reason: string; isFullDay: boolean; openTime: string; closeTime: string;
-  type: 'specific' | 'weekly'; dayOfWeek: number;
+type ClosureForm = { 
+  reason: string; isFullDay: boolean; openTime: string; closeTime: string; 
+  type: 'specific' | 'weekly'; dayOfWeek: number; 
 };
 
 type ActionModalData = {
@@ -46,9 +46,9 @@ type ActionModalData = {
 
 const emptyClosureForm: ClosureForm = { reason: '', isFullDay: true, openTime: '12:00', closeTime: '22:00', type: 'specific', dayOfWeek: 0 };
 
-const emptyEventForm: FormState = {
-  title: '', dates: [], type: 'Tournament', description: '', isWholeDay: false,
-  startTime: '18:00', endTime: '22:00', registrationLink: '', bracketLink: '',
+const emptyEventForm: FormState = { 
+  title: '', dates: [], type: 'Tournament', description: '', isWholeDay: false, 
+  startTime: '18:00', endTime: '22:00', registrationLink: '', bracketLink: '', 
   minParticipants: '8', maxParticipants: '32',
   slotsFull: false, attachments: [],
   selectedTableIds: []
@@ -57,12 +57,12 @@ const emptyEventForm: FormState = {
 const emptyPromoForm: PromoForm = { code: '', discountPercent: 10, description: '', isLimitedUses: true, maxUsage: 100, deleteWhenDepleted: false, isActive: true, hasExpiry: false, expiresAt: '', hasStart: false, startDate: '' };
 
 export function AdminEvents() {
-  const {
-    events, addEvent, updateEvent, deleteEvent,
-    promoCodes, addPromoCode, updatePromoCode, togglePromoCode, deletePromoCode, pendingContentCreates, contentCreateError, retryContentCreate,
-    closedDates, addClosedDate, removeClosedDate, updateClosedDate, pendingVenueCreates = [], venueCreateError = '', retryVenueCreate,
+  const { 
+    events, addEvent, updateEvent, deleteEvent, 
+    promoCodes, addPromoCode, updatePromoCode, togglePromoCode, deletePromoCode,
+    closedDates, addClosedDate, removeClosedDate, updateClosedDate,
     reservations, updateReservation, updateReservationStatus, tables,
-    rates
+    rates 
   } = useAppContext() as any;
 
   const [activeTab, setActiveTab] = useState<'calendar' | 'events' | 'promos'>('calendar');
@@ -70,17 +70,14 @@ export function AdminEvents() {
   const [dayActionDate, setDayActionDate] = useState<Date | null>(null);
   const [toast, setToast] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
   const toastTimeout = useRef<NodeJS.Timeout | null>(null);
-
+  
   // Event Form State
   const [showEventModal, setShowEventModal] = useState(false);
-  const [cancelEventModal, setCancelEventModal] = useState<{ id: string; title: string; date: string; record: any } | null>(null);
+  const [cancelEventModal, setCancelEventModal] = useState<{ id: string; title: string; date: string } | null>(null);
   const [eventCancelReason, setEventCancelReason] = useState('Schedule conflict / unforeseen circumstances');
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
-  const [eventOriginalRecord,setEventOriginalRecord]=useState<any>(null);
-  const [venueSaving,setVenueSaving]=useState(false);
-  const venueInFlight=useRef(false);
   const [eventForm, setEventForm] = useState<FormState>(emptyEventForm);
-  const [modalMonth, setModalMonth] = useState(new Date());
+  const [modalMonth, setModalMonth] = useState(new Date()); 
   const [expandedAttachments, setExpandedAttachments] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -91,14 +88,11 @@ export function AdminEvents() {
   const [promoForm, setPromoForm] = useState<PromoForm>(emptyPromoForm);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const [openPromoDropdownId, setOpenPromoDropdownId] = useState<string | null>(null);
-  const [promoSaving, setPromoSaving] = useState(false);
-  const promoInFlight = useRef(false);
   const promoDropdownRef = useRef<HTMLDivElement | null>(null);
 
   // Closure Form State
   const [showClosureModal, setShowClosureModal] = useState(false);
   const [editingClosureId, setEditingClosureId] = useState<string | null>(null);
-  const [closureOriginalRecord,setClosureOriginalRecord]=useState<any>(null);
   const [closureForm, setClosureForm] = useState<ClosureForm>(emptyClosureForm);
   const [closureDateStr, setClosureDateStr] = useState('');
 
@@ -160,7 +154,7 @@ export function AdminEvents() {
       toastTimeout.current = setTimeout(() => setToast(null), 5000);
     };
   const dateKey = (d: Date) => format(d, 'yyyy-MM-dd');
-
+  
   const closedMap = new Map(
     closedDates
       .filter((c: any) => c.type !== 'weekly' && c.date && !isNaN(new Date(c.date).getTime()))
@@ -187,7 +181,7 @@ export function AdminEvents() {
     });
     return acc;
   }, {} as Record<string, Event[]>);
-
+  
   const promosMap = promoCodes.reduce((acc: any, p: any) => {
     if(p.expiresAt) {
       const d = format(new Date(p.expiresAt), 'yyyy-MM-dd');
@@ -205,10 +199,9 @@ export function AdminEvents() {
   };
 
   const openEventCreate = (prefillDate?: Date) => {
-    if(venueInFlight.current)return;
-    setEditingEventId(null);setEventOriginalRecord(null);
+    setEditingEventId(null);
     const initialDates = prefillDate ? [dateKey(prefillDate)] : [];
-
+    
     setEventForm({
       ...emptyEventForm,
       dates: initialDates,
@@ -220,7 +213,6 @@ export function AdminEvents() {
   };
 
   const openEventEdit = (ev: any) => {
-    if(venueInFlight.current)return;
     const eventDates = ev.date ? ev.date.split(',').map((d: string) => d.trim()) : [];
     const lastDate = [...eventDates].sort((a, b) => new Date(a).getTime() - new Date(b).getTime()).pop();
     const isPastEvent = lastDate ? isBefore(new Date(lastDate), todayStart) : false;
@@ -230,52 +222,50 @@ export function AdminEvents() {
     if (isPastEvent) { flash("Editing is disabled: This event is already completed.", "error"); return; }
     if (isOngoingEvent) { flash("Editing is disabled: This event is currently ongoing.", "error"); return; }
 
-    setEditingEventId(ev.id);setEventOriginalRecord(JSON.parse(JSON.stringify(ev)));
+    setEditingEventId(ev.id);
     const durationParts = ev.duration ? ev.duration.split(' - ') : [];
     const savedDates = ev.date ? ev.date.split(',') : [];
     const isWholeDay = ev.duration === 'Whole Day';
-
+    
     setEventForm({
-      title: ev.title,
-      dates: savedDates,
-      type: ev.type,
+      title: ev.title, 
+      dates: savedDates, 
+      type: ev.type, 
       description: ev.description,
       isWholeDay: isWholeDay,
       startTime: isWholeDay ? '12:00' : (durationParts[0] || '18:00'),
       endTime: isWholeDay ? '22:00' : (durationParts[1] || '22:00'),
-      registrationLink: ev.registrationLink ?? '',
-      bracketLink: ev.bracketLink ?? '',
-      minParticipants: ev.minParticipants?.toString() ?? '',
-      maxParticipants: ev.maxParticipants?.toString() ?? '',
-      slotsFull: ev.slotsFull ?? false,
+      registrationLink: ev.registrationLink ?? '', 
+      bracketLink: ev.bracketLink ?? '', 
+      minParticipants: ev.minParticipants?.toString() ?? '8',
+      maxParticipants: ev.maxParticipants?.toString() ?? '32',
+      slotsFull: ev.slotsFull ?? false, 
       attachments: ev.attachments ?? [],
       selectedTableIds: ev.eventTableIds ?? []
     });
-
+    
     if (savedDates.length > 0) setModalMonth(new Date(savedDates[0]));
-    setDayActionDate(null);
+    setDayActionDate(null); 
     setShowEventModal(true);
   };
 
   const openClosureCreate = (d: Date) => {
-    if(venueInFlight.current)return;
-    setEditingClosureId(null);setClosureOriginalRecord(null);
+    setEditingClosureId(null); 
     const isActionToday = isSameDay(d, new Date());
-    setClosureForm({
-      ...emptyClosureForm,
+    setClosureForm({ 
+      ...emptyClosureForm, 
       dayOfWeek: d.getDay(),
       isFullDay: isActionToday ? true : emptyClosureForm.isFullDay,
       type: isActionToday ? 'specific' : emptyClosureForm.type
     });
-    setClosureDateStr(dateKey(d));
-    setDayActionDate(null);
+    setClosureDateStr(dateKey(d)); 
+    setDayActionDate(null); 
     setShowClosureModal(true);
   };
-
+  
   const openClosureEdit = (c: ClosedDate) => {
-    if(venueInFlight.current)return;
-    setEditingClosureId(c.id);setClosureOriginalRecord(JSON.parse(JSON.stringify(c)));
-    setClosureForm({
+    setEditingClosureId(c.id); 
+    setClosureForm({ 
       reason: c.reason, isFullDay: c.isFullDay, openTime: c.openTime || '12:00', closeTime: c.closeTime || '22:00',
       type: c.type || 'specific', dayOfWeek: c.dayOfWeek ?? 0
     });
@@ -283,35 +273,32 @@ export function AdminEvents() {
   };
 
   const openPromoCreate = (prefillDate?: Date) => {
-    if (promoInFlight.current) return;
     setEditingPromoId(null);
     setPromoForm({ ...emptyPromoForm, hasStart: !!prefillDate, startDate: prefillDate ? `${dateKey(prefillDate)}T00:00` : '' });
     setDayActionDate(null); setShowPromoModal(true);
   };
-
+  
   const openPromoEdit = (p: any) => {
-    if (promoInFlight.current) return;
     setEditingPromoId(p.id);
-    setPromoForm({
-      code: p.code,
-      discountPercent: p.discountPercent ?? p.discount_percent ?? 10,
-      description: p.description || '',
-      isLimitedUses: p.isLimitedUses !== false && p.is_limited_uses !== 0,
-      maxUsage: p.maxUsage ?? p.max_usage ?? 100,
+    setPromoForm({ 
+      code: p.code, 
+      discountPercent: p.discountPercent ?? p.discount_percent ?? 10, 
+      description: p.description || '', 
+      isLimitedUses: p.isLimitedUses !== false && p.is_limited_uses !== 0, 
+      maxUsage: p.maxUsage ?? p.max_usage ?? 100, 
       deleteWhenDepleted: p.deleteWhenDepleted || false,
-      isActive: p.isActive !== false && p.is_active !== 0,
-      hasExpiry: !!(p.expiresAt || p.expires_at),
+      isActive: p.isActive !== false && p.is_active !== 0, 
+      hasExpiry: !!(p.expiresAt || p.expires_at), 
       expiresAt: (p.expiresAt || p.expires_at) ? format(new Date(p.expiresAt || p.expires_at), "yyyy-MM-dd'T'HH:mm") : '',
-      hasStart: !!(p.startDate || p.start_date),
-      startDate: (p.startDate || p.start_date) ? format(new Date(p.startDate || p.start_date), "yyyy-MM-dd'T'HH:mm") : ''
+      hasStart: !!(p.startDate || p.start_date), 
+      startDate: (p.startDate || p.start_date) ? format(new Date(p.startDate || p.start_date), "yyyy-MM-dd'T'HH:mm") : '' 
     });
     setDayActionDate(null); setShowPromoModal(true);
   };
 
   const saveEvent = async () => {
-    if(venueInFlight.current)return;
-    if (!eventForm.title || eventForm.dates.length === 0) {
-      flash("Please provide a title and select at least one date.", "error"); return;
+    if (!eventForm.title || eventForm.dates.length === 0) { 
+      flash("Please provide a title and select at least one date.", "error"); return; 
     }
 
     if (!eventForm.description || !eventForm.description.trim()) {
@@ -334,14 +321,14 @@ export function AdminEvents() {
     }
 
     if (eventForm.type === 'Tournament' || eventForm.type === 'League') {
-      const minP = Number(eventForm.minParticipants);
-      const maxP = Number(eventForm.maxParticipants);
+      const minP = parseInt(eventForm.minParticipants) || 0;
+      const maxP = parseInt(eventForm.maxParticipants) || 0;
 
       if (!eventForm.minParticipants || !eventForm.maxParticipants) {
         alert("Both Min Participants and Max Participants are required for Tournaments and Leagues.");
         return;
       }
-      if (!Number.isSafeInteger(minP) || !Number.isSafeInteger(maxP) || minP <= 0 || maxP <= 0) {
+      if (minP <= 0 || maxP <= 0) {
         alert("Min and Max participants must be greater than 0.");
         return;
       }
@@ -380,20 +367,20 @@ export function AdminEvents() {
         }
 
         const [evStartStr = '18:00', evEndStr = '22:00'] = ev.duration.split('-').map((s: string) => s.trim());
-
+        
         const newStart = parseTime(eventForm.startTime);
         let newEnd = parseTime(eventForm.endTime);
-        if (newEnd <= newStart) newEnd += 24 * 60;
+        if (newEnd <= newStart) newEnd += 24 * 60; 
 
         const evStart = parseTime(evStartStr);
         let evEnd = parseTime(evEndStr);
-        if (evEnd <= evStart) evEnd += 24 * 60;
+        if (evEnd <= evStart) evEnd += 24 * 60; 
 
         return newStart < evEnd && newEnd > evStart;
       });
 
-     if (conflictingEvent) {
-      flash(`Schedule Conflict!\n\n"${conflictingEvent.title}" is already scheduled on ${d} (${conflictingEvent.duration || 'Whole Day'}). Please pick a different date or time.`, "error"); return;
+     if (conflictingEvent) { 
+      flash(`Schedule Conflict!\n\n"${conflictingEvent.title}" is already scheduled on ${d} (${conflictingEvent.duration || 'Whole Day'}). Please pick a different date or time.`, "error"); return; 
      }
     }
 
@@ -410,77 +397,104 @@ export function AdminEvents() {
     }
 
     const isConfirmed = window.confirm(
-      editingEventId
-        ? `Are you sure you want to update "${eventForm.title}"?`
+      editingEventId 
+        ? `Are you sure you want to update "${eventForm.title}"?` 
         : `Are you sure you want to create the event "${eventForm.title}"?`
     );
-
+    
     if (!isConfirmed) return;
 
     const payload: any = {
-      title: eventForm.title,
-      date: eventForm.dates.join(','),
-      type: eventForm.type,
+      title: eventForm.title, 
+      date: eventForm.dates.join(','), 
+      type: eventForm.type, 
       description: eventForm.description,
       duration: eventForm.isWholeDay ? 'Whole Day' : `${eventForm.startTime} - ${eventForm.endTime}`,
-      registrationLink: eventForm.registrationLink || null,
-      bracketLink: eventForm.bracketLink || null,
-      minParticipants: eventForm.minParticipants !== '' ? Number(eventForm.minParticipants) : null,
-      maxParticipants: eventForm.maxParticipants !== '' ? Number(eventForm.maxParticipants) : null,
-      slotsFull: eventForm.slotsFull,
-      attachments: eventForm.attachments,
+      registrationLink: eventForm.registrationLink || undefined,
+      bracketLink: eventForm.bracketLink || undefined,
+      minParticipants: eventForm.minParticipants ? parseInt(eventForm.minParticipants) : undefined,
+      maxParticipants: eventForm.maxParticipants ? parseInt(eventForm.maxParticipants) : undefined,
+      slotsFull: eventForm.slotsFull, 
+      attachments: eventForm.attachments.length ? eventForm.attachments : undefined,
       eventTableIds: eventForm.selectedTableIds
     };
 
-    venueInFlight.current=true;setVenueSaving(true);
-    try{
-      if(editingEventId)await updateEvent(editingEventId,payload,eventOriginalRecord);
-      else await addEvent(payload);
-      setShowEventModal(false);flash('Event saved on this POS. Hosted publishing is separate.');
-    }catch(error:any){flash(error?.message||'Event save is unconfirmed. Your form is kept.','error');}
-    finally{venueInFlight.current=false;setVenueSaving(false);}
+    if (editingEventId) {
+      updateEvent(editingEventId, payload);
+    } else {
+      addEvent(payload);
+      
+      // 🟢 Tag event as verified booking in the database for each selected table
+      if (eventForm.selectedTableIds.length > 0) {
+        const reservationsToCreate: any[] = [];
+        for (const d of eventForm.dates) {
+          for (const tId of eventForm.selectedTableIds) {
+            const resId = `EVT-${Date.now().toString().slice(-6)}-${Math.floor(Math.random()*1000)}`;
+            
+            let durationHours = 10;
+            if (!eventForm.isWholeDay) {
+              const startMins = parseTime(eventForm.startTime);
+              let endMins = parseTime(eventForm.endTime);
+              if (endMins <= startMins) endMins += 24 * 60;
+              durationHours = Math.max(1, Math.round((endMins - startMins) / 60));
+            }
+
+            reservationsToCreate.push({
+              id: resId,
+              customerName: `EVENT: ${eventForm.title}`,
+              contactNumber: 'ADMIN',
+              email: 'admin@oneshot.com',
+              date: new Date(d).toISOString(),
+              timeSlot: eventForm.isWholeDay ? '12:00' : eventForm.startTime,
+              durationHours: durationHours,
+              partySize: parseInt(eventForm.maxParticipants) || 10,
+              tableId: tId,
+              status: 'confirmed',
+              totalAmount: 0,
+              downPaymentAmount: 0,
+              downPaymentPaid: 1,
+              balancePaid: 1,
+              paymentRef: 'EVENT',
+              rescheduleCount: 0,
+              createdAt: new Date().toISOString()
+            });
+          }
+        }
+
+        if (reservationsToCreate.length > 0) {
+          const { error } = await supabase.from('reservations').insert(reservationsToCreate);
+          if (error) {
+            console.error("Failed to tag event reservations:", error);
+          } else {
+            flash("Event created and automatically tagged as confirmed bookings on selected tables.", "success");
+          }
+        }
+      }
+    }
+    
+    setShowEventModal(false);
+    flash('Event saved successfully!');
   };
 
-  const saveClosure = async (e:React.FormEvent) => {
-    e.preventDefault();if(venueInFlight.current)return;
-    if(!closureForm.isFullDay&&closureForm.openTime===closureForm.closeTime){flash('Open time and Close time cannot be the same for partial closures.','error');return;}
-    const payload={...closureForm,date:closureForm.type==='weekly'?'':closureDateStr};
-    venueInFlight.current=true;setVenueSaving(true);
-    try{
-      if(editingClosureId)await updateClosedDate(editingClosureId,payload,closureOriginalRecord);
-      else await addClosedDate(payload);
-      setShowClosureModal(false);flash('Closure saved on this POS. Hosted publishing is separate.');
-    }catch(error:any){flash(error?.message||'Closure save is unconfirmed. Your form is kept.','error');}
-    finally{venueInFlight.current=false;setVenueSaving(false);}
-  };
-  const deleteClosure=async()=>{
-    if(!editingClosureId||venueInFlight.current)return;venueInFlight.current=true;setVenueSaving(true);
-    try{await removeClosedDate(editingClosureId,closureOriginalRecord);setShowClosureModal(false);flash('Closure deleted on this POS.');}
-    catch(error:any){flash(error?.message||'Closure deletion is unconfirmed. Reopen the saved record before retrying.','error');}
-    finally{venueInFlight.current=false;setVenueSaving(false);}
-  };
-  const confirmEventCancellation=async()=>{
-    if(!cancelEventModal||venueInFlight.current)return;venueInFlight.current=true;setVenueSaving(true);
-    try{
-      await updateEvent(cancelEventModal.id,{isCancelled:true,cancelReason:eventCancelReason,eventTableIds:[]},cancelEventModal.record);
-      setCancelEventModal(null);flash('Event cancellation saved on this POS. Hosted bookings and participant notifications must be handled separately.');
-    }catch(error:any){flash(error?.message||'Event cancellation is unconfirmed. Review the saved event before retrying.','error');}
-    finally{venueInFlight.current=false;setVenueSaving(false);}
-  };
-  const recoverVenueCreate=async(kind:string)=>{
-    if(venueInFlight.current)return;venueInFlight.current=true;setVenueSaving(true);
-    try{const saved=await retryVenueCreate(kind);if(kind==='event'&&!editingEventId)setShowEventModal(false);if(kind==='closure'&&!editingClosureId)setShowClosureModal(false);flash('Original calendar create confirmed on this POS.');return saved;}
-    catch(error:any){if(error?.code==='VENUE_CREATE_RECONCILE'){if(kind==='event'&&!editingEventId)setShowEventModal(false);if(kind==='closure'&&!editingClosureId)setShowClosureModal(false);}flash(error?.message||'Original calendar create is unconfirmed.','error');throw error;}
-    finally{venueInFlight.current=false;setVenueSaving(false);}
+  const saveClosure = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!closureForm.isFullDay && closureForm.openTime === closureForm.closeTime) { 
+  flash("Open time and Close time cannot be the same for partial closures.", "error"); return; 
+}
+
+    const payload = {
+      ...closureForm,
+      date: closureForm.type === 'weekly' ? '' : closureDateStr
+    };
+    if (editingClosureId) updateClosedDate(editingClosureId, payload);
+    else addClosedDate({ ...payload, date: payload.date || '' });
+    setShowClosureModal(false); flash('Closure saved successfully!');
   };
 
   const preparePromoSave = (e: React.FormEvent) => {
     e.preventDefault();
-    if (promoInFlight.current) return;
-    if (!Number.isInteger(promoForm.discountPercent) || promoForm.discountPercent < 1 || promoForm.discountPercent > 100) { flash('Discount must be between 1% and 100%.', 'error'); return; }
-    if (!promoForm.code.trim() || !promoForm.description.trim()) { flash('Code and description are required.', 'error'); return; }
-    if ((promoForm.hasStart && !promoForm.startDate) || (promoForm.hasExpiry && !promoForm.expiresAt)) { flash('Choose the selected start and expiry dates.', 'error'); return; }
-
+    if (!promoForm.code || !promoForm.description) return;
+    
     if (promoForm.hasExpiry && promoForm.expiresAt) {
        if (new Date(promoForm.expiresAt) <= new Date()) { flash("Expiry date must be set in the future.", "error"); return; }
     }
@@ -488,57 +502,26 @@ export function AdminEvents() {
     if (promoForm.hasStart && promoForm.hasExpiry && promoForm.startDate && promoForm.expiresAt) {
       if (new Date(promoForm.expiresAt) <= new Date(promoForm.startDate)) { flash("Expiry date must be after the start date.", "error"); return; }
     }
-    setShowPromoConfirm(true);
+    setShowPromoConfirm(true); 
   };
 
-  const executePromoSave = async () => {
-    if (promoInFlight.current) return;
-    if (!Number.isInteger(promoForm.discountPercent) || promoForm.discountPercent < 1 || promoForm.discountPercent > 100) { flash('Discount must be between 1% and 100%.', 'error'); return; }
-    promoInFlight.current = true; setPromoSaving(true);
-    try {
+  const executePromoSave = () => {
     const payload: any = {
-      code: promoForm.code.trim().toUpperCase(), discountPercent: promoForm.discountPercent, description: promoForm.description.trim(),
+      code: promoForm.code.toUpperCase(), discountPercent: promoForm.discountPercent, description: promoForm.description, 
       isActive: promoForm.isActive, isLimitedUses: promoForm.isLimitedUses,
       maxUsage: promoForm.isLimitedUses ? promoForm.maxUsage : 999999,
       deleteWhenDepleted: promoForm.isLimitedUses ? promoForm.deleteWhenDepleted : false,
-      startDate: promoForm.hasStart && promoForm.startDate ? new Date(promoForm.startDate) : null,
-      expiresAt: promoForm.hasExpiry && promoForm.expiresAt ? new Date(promoForm.expiresAt) : null,
+      startDate: promoForm.hasStart && promoForm.startDate ? new Date(promoForm.startDate) : undefined,
+      expiresAt: promoForm.hasExpiry && promoForm.expiresAt ? new Date(promoForm.expiresAt) : undefined,
     };
-    if (editingPromoId) await updatePromoCode(editingPromoId, payload);
-    else await addPromoCode(payload);
-
+    if (editingPromoId) updatePromoCode(editingPromoId, payload);
+    else addPromoCode(payload);
+    
     setEditingPromoId(null);
     setPromoForm(emptyPromoForm);
     setShowPromoConfirm(false);
-    setShowPromoModal(false);
-    flash('Promo code saved locally.');
-    } catch (error) {
-      if ((error as any)?.code === 'CONTENT_CREATE_RECONCILE') { setShowPromoConfirm(false); setShowPromoModal(false); }
-      flash(error instanceof Error ? error.message : 'Promo could not be saved. Please retry.', 'error');
-    }
-    finally { promoInFlight.current = false; setPromoSaving(false); }
-  };
-
-  const recoverPromoCreate = async () => {
-    try {
-      const saved = await retryContentCreate('promo');
-      setShowPromoModal(false); setShowPromoConfirm(false); setEditingPromoId(null); setPromoForm(emptyPromoForm);
-      flash('Original promo create confirmed locally.'); return saved;
-    } catch (error) {
-      if ((error as any)?.code === 'CONTENT_CREATE_RECONCILE') { setShowPromoModal(false); setShowPromoConfirm(false); }
-      flash(error instanceof Error ? error.message : 'Original promo could not be confirmed.', 'error'); throw error;
-    }
-  };
-
-  const mutatePromo = async (id: string, action: 'toggle' | 'delete') => {
-    if (promoInFlight.current) return;
-    promoInFlight.current = true; setPromoSaving(true);
-    try {
-      if (action === 'toggle') await togglePromoCode(id); else await deletePromoCode(id);
-      setOpenPromoDropdownId(null);
-      flash(action === 'toggle' ? 'Promo visibility saved locally.' : 'Promo deleted locally.');
-    } catch (error) { flash(error instanceof Error ? error.message : 'Promo action failed. Please retry.', 'error'); }
-    finally { promoInFlight.current = false; setPromoSaving(false); }
+    setShowPromoModal(false); 
+    flash('Promo code saved successfully!');
   };
 
   const isImage = (dataUrl: string) => dataUrl.startsWith('data:image/');
@@ -605,7 +588,7 @@ export function AdminEvents() {
               const key = dateKey(day);
               const isPast = isBefore(day, todayStart);
               const isToday = isSameDay(day, new Date());
-
+              
               const dayCls = closedMap.get(key) || weeklyClosures.find((c: any) => c.dayOfWeek === day.getDay());
               const dayEvs = eventsMap[key] || [];
               const dayPrs = promosMap[key] || [];
@@ -614,7 +597,7 @@ export function AdminEvents() {
               return (
                 <button
                   key={key}
-                  disabled={isPast}
+                  disabled={isPast} 
                   onClick={() => setDayActionDate(day)}
                   className={`relative aspect-square rounded-xl p-1.5 flex flex-col items-start transition-all border
                     ${isPast ? 'bg-neutral-950 border-neutral-900/40 text-neutral-700 cursor-not-allowed opacity-40' : 'bg-neutral-900 border-neutral-800 hover:border-neutral-600 cursor-pointer'}
@@ -625,16 +608,16 @@ export function AdminEvents() {
                   <span className={`font-semibold text-xs ${isToday ? 'text-amber-400' : isPast ? 'text-neutral-600' : 'text-neutral-300'}`}>
                     {format(day, 'd')}
                   </span>
-
+                  
                   <div className="mt-auto w-full space-y-0.5 overflow-hidden">
                     {dayCls && <div className="w-full text-[8px] bg-rose-500/20 text-rose-400 rounded px-1 truncate font-semibold">Closed</div>}
-
+                    
                     {!dayCls && dayRes.length > 0 && (
                       <div className="w-full text-[8px] bg-blue-500/20 text-blue-400 rounded px-1 truncate font-semibold border border-blue-500/30">
                         {dayRes.length} Rsv
                       </div>
                     )}
-
+                    
                     {!dayCls && dayEvs.map((e: any) => (
                       <div key={e.id} className={`w-full text-[8px] rounded px-1 truncate font-semibold ${e.type === 'Holiday' ? 'bg-sky-500/20 text-sky-400' : 'bg-amber-500/20 text-amber-400'}`}>
                         {e.title}
@@ -676,7 +659,7 @@ export function AdminEvents() {
             const isSelected = eventForm.dates.includes(key);
             const isPastOrToday = isBefore(day, todayStart) || isSameDay(day, todayStart);
             const isDisabled = isPastOrToday && !isSelected;
-
+            
             return (
               <button
                 type="button"
@@ -720,15 +703,15 @@ export function AdminEvents() {
             const attachments = ev.attachments ?? [];
             const imageAttachments = attachments.filter(isImage);
             const fileAttachments = attachments.filter((a: any) => !isImage(a));
-
+            
             const eventDates = ev.date ? ev.date.split(',') : [];
             const sortedDates = [...eventDates].sort((a,b) => new Date(a).getTime() - new Date(b).getTime());
             const lastDate = sortedDates[sortedDates.length - 1];
-
+            
             const isPastEvent = lastDate ? isBefore(new Date(lastDate), todayStart) : false;
 
-            const dateDisplay = eventDates.length > 1
-              ? `${new Date(eventDates[0]).toLocaleDateString()} (+${eventDates.length - 1} days)`
+            const dateDisplay = eventDates.length > 1 
+              ? `${new Date(eventDates[0]).toLocaleDateString()} (+${eventDates.length - 1} days)` 
               : eventDates.length === 1 ? new Date(eventDates[0]).toLocaleDateString() : 'No date';
 
             return (
@@ -767,7 +750,7 @@ export function AdminEvents() {
                   {ev.maxParticipants && (
                     <div className="flex items-center gap-1.5 text-xs text-neutral-500 mb-2 font-medium">
                       <Users size={11} />
-                      <span>Min {ev.minParticipants ?? '—'} – Max {ev.maxParticipants} participants</span>
+                      <span>Min {ev.minParticipants || 8} – Max {ev.maxParticipants} participants</span>
                     </div>
                   )}
 
@@ -776,7 +759,7 @@ export function AdminEvents() {
                       <Link size={11} className="flex-shrink-0" /><span className="truncate">Registration Form</span>
                     </a>
                   )}
-
+                  
                   {ev.bracketLink && (
                     <a href={ev.bracketLink} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-xs text-emerald-400 hover:text-emerald-300 mb-3 truncate">
                       <Network size={11} className="flex-shrink-0" /><span className="truncate">View Brackets</span>
@@ -829,12 +812,12 @@ export function AdminEvents() {
                           );
                         })()}
 
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 px-2.5 text-rose-500 hover:text-rose-400 hover:bg-rose-950/30 font-semibold text-xs flex items-center gap-1"
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="h-8 px-2.5 text-rose-500 hover:text-rose-400 hover:bg-rose-950/30 font-semibold text-xs flex items-center gap-1" 
                           onClick={() => {
-                            setCancelEventModal({ id: ev.id, title: ev.title, date: dateDisplay, record: JSON.parse(JSON.stringify(ev)) });
+                            setCancelEventModal({ id: ev.id, title: ev.title, date: dateDisplay });
                             setEventCancelReason('Schedule conflict / unforeseen circumstances');
                           }}
                         >
@@ -954,7 +937,7 @@ export function AdminEvents() {
                       </button>
 
                       <button
-                        disabled={promoSaving} onClick={() => mutatePromo(pc.id, 'toggle')}
+                        onClick={() => { setOpenPromoDropdownId(null); togglePromoCode(pc.id); }}
                         className="w-full px-4 py-2.5 text-left text-xs text-neutral-300 hover:bg-neutral-900 transition-colors flex items-center gap-2 border-t border-neutral-800/60"
                       >
                         {pc.isActive ? <PowerOff size={13} className="text-amber-400" /> : <Power size={13} className="text-emerald-400" />}
@@ -962,7 +945,7 @@ export function AdminEvents() {
                       </button>
 
                       <button
-                        disabled={promoSaving} onClick={() => mutatePromo(pc.id, 'delete')}
+                        onClick={() => { setOpenPromoDropdownId(null); deletePromoCode(pc.id); }}
                         className="w-full px-4 py-2.5 text-left text-xs text-rose-400 hover:bg-rose-950/20 transition-colors flex items-center gap-2 border-t border-neutral-800/60"
                       >
                         <Trash2 size={13} />
@@ -981,10 +964,6 @@ export function AdminEvents() {
 
   return (
     <div className="space-y-6">
-      <PendingContentCreate kind="promo" pending={pendingContentCreates.find((item: any) => item.kind === 'promo')} storageError={contentCreateError} onRetry={recoverPromoCreate} />
-      <PendingContentCreate kind="closure" pending={pendingVenueCreates.find((item:any)=>item.kind==='closure')} storageError={venueCreateError} onRetry={()=>recoverVenueCreate('closure')} />
-      <PendingContentCreate kind="event" pending={pendingVenueCreates.find((item:any)=>item.kind==='event')} storageError="" onRetry={()=>recoverVenueCreate('event')} />
-      <p className="text-xs text-neutral-400">Calendar changes are saved on this POS. Hosted publishing and customer notifications are separate.</p>
       {/* Header & Tabs */}
       <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
         <div>
@@ -1014,21 +993,21 @@ export function AdminEvents() {
       {toast && (
         <div className="fixed top-6 right-6 z-[9999] animate-in slide-in-from-top-4 fade-in duration-300">
           <div className={`relative overflow-hidden flex items-start gap-3 px-5 py-4 rounded-xl border shadow-2xl backdrop-blur-md min-w-[320px] max-w-md ${
-            toast.type === 'success'
-              ? 'bg-emerald-950/90 border-emerald-900/50 text-emerald-400'
+            toast.type === 'success' 
+              ? 'bg-emerald-950/90 border-emerald-900/50 text-emerald-400' 
               : 'bg-rose-950/90 border-rose-900/50 text-rose-400'
           }`}>
             <div className="mt-0.5 flex-shrink-0">
               {toast.type === 'success' ? <CheckCircle size={18} /> : <AlertTriangle size={18} />}
             </div>
             <span className="text-sm font-semibold leading-snug whitespace-pre-wrap pr-4">{toast.msg}</span>
-            <button
-              onClick={() => { setToast(null); if (toastTimeout.current) clearTimeout(toastTimeout.current); }}
+            <button 
+              onClick={() => { setToast(null); if (toastTimeout.current) clearTimeout(toastTimeout.current); }} 
               className="absolute top-4 right-4 text-neutral-500 hover:text-white transition-colors"
             >
               <X size={14} />
             </button>
-            <div
+            <div 
               className={`absolute bottom-0 left-0 h-1 ${toast.type === 'success' ? 'bg-emerald-500' : 'bg-rose-500'}`}
               style={{ animation: 'toast-shrink 5s linear forwards' }}
             />
@@ -1049,11 +1028,11 @@ export function AdminEvents() {
             {renderCalendar()}
           </div>
           <div className="space-y-4">
-
+            
             {/* Action Required Carousel for Staff */}
             {(() => {
-              const pendingActions = reservations.filter((r: any) =>
-                r.status === 'pending' ||
+              const pendingActions = reservations.filter((r: any) => 
+                r.status === 'pending' || 
                 r.status === 'pending-refund' ||
                 r.status === 'pending-reschedule'
               ).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -1072,21 +1051,21 @@ export function AdminEvents() {
                             <p className="text-[10px] text-neutral-500 font-mono">{r.id}</p>
                           </div>
                           <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border ${
-                            r.status === 'pending-refund' ? 'bg-rose-900/30 text-rose-400 border-rose-800' :
+                            r.status === 'pending-refund' ? 'bg-rose-900/30 text-rose-400 border-rose-800' : 
                             r.status === 'pending-reschedule' ? 'bg-violet-900/30 text-violet-400 border-violet-800' :
                             'bg-amber-900/30 text-amber-400 border-amber-800'
                           }`}>
                             {r.status === 'pending-refund' ? 'Refund Req.' : r.status === 'pending-reschedule' ? 'Resched. Req.' : 'Verify Receipt'}
                           </span>
                         </div>
-
+                        
                         {r.status === 'pending-refund' ? (
                           <>
                             <p className="text-[10px] text-neutral-400 mb-2 leading-relaxed">
                               Needs ₱{r.downPaymentAmount?.toFixed(2) || '0.00'} GCash refund.<br/>
                               Contact: <strong className="text-amber-400 bg-amber-500/10 px-1 rounded">{r.contactNumber}</strong>
                             </p>
-                            <button onClick={() => { setActionModal({ type: 'refund', reservation: r }); setCallSummary(''); setShowDenyInput(false); }}
+                            <button onClick={() => { setActionModal({ type: 'refund', reservation: r }); setCallSummary(''); setShowDenyInput(false); }} 
                               className="w-full bg-rose-600/20 hover:bg-rose-600/40 text-rose-400 border border-rose-700/50 text-[10px] font-bold py-1.5 rounded transition-colors"
                             >
                               Process Refund
@@ -1098,7 +1077,7 @@ export function AdminEvents() {
                               Requested manual reschedule.<br/>
                               Contact: <strong className="text-amber-400 bg-amber-500/10 px-1 rounded">{r.contactNumber}</strong>
                             </p>
-                            <button onClick={() => { setActionModal({ type: 'reschedule', reservation: r }); setCallSummary(''); setShowDenyInput(false); }}
+                            <button onClick={() => { setActionModal({ type: 'reschedule', reservation: r }); setCallSummary(''); setShowDenyInput(false); }} 
                               className="w-full bg-violet-600/20 hover:bg-violet-600/40 text-violet-400 border border-violet-700/50 text-[10px] font-bold py-1.5 rounded transition-colors"
                             >
                               Process Reschedule
@@ -1169,7 +1148,7 @@ export function AdminEvents() {
                     </div>
                   </div>
                 )})}
-                {promoCodes.filter((p: any) => p.expiresAt && !isBefore(new Date(p.expiresAt), todayStart)).sort((a:any,b:any)=>new Date(a.expiresAt!).getTime() - new Date(b.expiresAt!).getTime()).slice(0,3).map((p: any) => (
+                {promoCodes.filter((p: any) => p.expiresAt && !isBefore(new Date(p.expiresAt), todayStart)).sort((a:any,b:any)=>a.expiresAt!.localeCompare(b.expiresAt!)).slice(0,3).map((p: any) => (
                   <div key={p.id} className="flex gap-3">
                     <div className="w-1 bg-violet-500 rounded-full" />
                     <div>
@@ -1194,12 +1173,12 @@ export function AdminEvents() {
               </h3>
               <button onClick={() => setActionModal(null)} className="p-1.5 text-neutral-500 hover:text-white rounded-lg transition-colors"><X size={15}/></button>
             </div>
-
+            
             <div className="p-5 flex-1 overflow-y-auto space-y-4">
               <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-3 text-xs text-neutral-300">
                 <p><strong>Customer:</strong> {actionModal.reservation.customerName}</p>
                 <p className="mt-1">
-                  <strong>Contact:</strong>
+                  <strong>Contact:</strong> 
                   <span className="bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded font-bold ml-1 tracking-wider inline-flex items-center gap-1">
                     <Phone size={10}/> {actionModal.reservation.contactNumber}
                   </span>
@@ -1221,12 +1200,12 @@ export function AdminEvents() {
                   {showDenyInput && (
                     <div className="bg-rose-950/20 border border-rose-900/40 p-4 rounded-xl space-y-3 mt-4 animate-in slide-in-from-top-2">
                       <label className="text-xs text-rose-400 font-bold uppercase tracking-wider block">Reason for Cancellation</label>
-                      <Input
+                      <Input 
                         autoFocus
-                        value={callSummary}
-                        onChange={e => setCallSummary(e.target.value)}
-                        placeholder="e.g. Invalid receipt, amount mismatch"
-                        className="bg-neutral-950 border-rose-800 text-neutral-200 text-xs h-10"
+                        value={callSummary} 
+                        onChange={e => setCallSummary(e.target.value)} 
+                        placeholder="e.g. Invalid receipt, amount mismatch" 
+                        className="bg-neutral-950 border-rose-800 text-neutral-200 text-xs h-10" 
                       />
                       <div className="flex gap-2">
                         <button onClick={() => setShowDenyInput(false)} className="flex-1 py-2 bg-neutral-900 text-neutral-400 rounded-lg text-xs font-semibold hover:bg-neutral-800 transition-colors">Back</button>
@@ -1237,7 +1216,7 @@ export function AdminEvents() {
                             setActionModal(null);
                             setShowDenyInput(false);
                             setCallSummary('');
-                          }}
+                          }} 
                           className="flex-1 py-2 bg-rose-600 text-white rounded-lg text-xs font-bold shadow-lg hover:bg-rose-500 transition-colors"
                         >
                           Confirm Deny
@@ -1259,12 +1238,12 @@ export function AdminEvents() {
                   </div>
                   <div>
                     <label className="text-xs text-neutral-400 font-bold uppercase tracking-wider block mb-2">Call Summary / Admin Notes <span className="text-rose-500">*</span></label>
-                    <textarea
+                    <textarea 
                       autoFocus
-                      value={callSummary}
-                      onChange={e => setCallSummary(e.target.value)}
-                      placeholder={actionModal.type === 'refund' ? "e.g. Customer requested refund via GCash. Sent ₱500 to 09123456789." : "e.g. Customer requested reschedule to Friday 8PM."}
-                      className="w-full bg-neutral-900 border border-neutral-700 rounded-xl p-3 text-xs text-neutral-200 focus:border-amber-500 outline-none resize-none h-24"
+                      value={callSummary} 
+                      onChange={e => setCallSummary(e.target.value)} 
+                      placeholder={actionModal.type === 'refund' ? "e.g. Customer requested refund via GCash. Sent ₱500 to 09123456789." : "e.g. Customer requested reschedule to Friday 8PM."} 
+                      className="w-full bg-neutral-900 border border-neutral-700 rounded-xl p-3 text-xs text-neutral-200 focus:border-amber-500 outline-none resize-none h-24" 
                     />
                   </div>
                 </div>
@@ -1282,7 +1261,7 @@ export function AdminEvents() {
                         updateReservationStatus(actionModal.reservation.id, 'confirmed');
                         flash("Receipt verified and booking confirmed.");
                         setActionModal(null);
-                      }}
+                      }} 
                       className="flex-[2] py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-900/30 transition-colors flex items-center justify-center gap-2"
                     >
                       <CheckCircle size={14}/> Verify & Approve
@@ -1298,7 +1277,7 @@ export function AdminEvents() {
                       }
                       flash("Marked as contacted and reservation updated successfully.");
                       setActionModal(null);
-                    }}
+                    }} 
                     className="w-full py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold shadow-lg transition-colors flex justify-center items-center gap-2"
                   >
                     <CheckCircle size={14} /> Mark as Contacted & Resolved
@@ -1323,14 +1302,14 @@ export function AdminEvents() {
               <h3 className="font-bold text-neutral-200">{format(dayActionDate, 'MMMM d, yyyy')}</h3>
               <button onClick={() => setDayActionDate(null)} className="p-1.5 text-neutral-500 hover:text-white rounded-lg transition-colors"><X size={15}/></button>
             </div>
-
+            
             <div className="p-5 space-y-4">
               {(() => {
                 const key = dateKey(dayActionDate);
                 const dayEvs = eventsMap[key] || [];
                 const dayPrs = promosMap[key] || [];
                 const dayCls = closedMap.get(key) || weeklyClosures.find((c: any) => c.dayOfWeek === dayActionDate.getDay());
-                const dayRes = resMap[key] || [];
+                const dayRes = resMap[key] || []; 
                 const hasItems = dayEvs.length || dayPrs.length || dayCls;
 
                 return (
@@ -1390,8 +1369,8 @@ export function AdminEvents() {
                               <div className="flex justify-between items-start">
                                 <span className="text-xs font-semibold text-neutral-200 truncate">{r.customerName}</span>
                                 <span className={`text-[8px] px-1.5 py-0.5 rounded border uppercase font-bold whitespace-nowrap ${
-                                  r.status === 'confirmed' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
-                                  r.status === 'pending' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
+                                  r.status === 'confirmed' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 
+                                  r.status === 'pending' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 
                                   'bg-neutral-800 text-neutral-400 border-neutral-700'
                                 }`}>
                                   {r.status}
@@ -1416,7 +1395,7 @@ export function AdminEvents() {
               })()}
 
               <p className="text-[10px] uppercase tracking-widest text-neutral-500 font-semibold border-t border-neutral-800 pt-4 mt-2">Add New</p>
-
+              
               {(() => {
                 const isActionToday = isSameDay(dayActionDate, new Date());
                 const isWeekend = dayActionDate.getDay() === 0 || dayActionDate.getDay() === 5 || dayActionDate.getDay() === 6;
@@ -1470,7 +1449,7 @@ export function AdminEvents() {
               <h3 className="font-bold text-neutral-200">{editingEventId ? 'Edit Event' : 'Create Event'}</h3>
               <button onClick={() => setShowEventModal(false)} className="p-1.5 text-neutral-500 hover:text-white"><X size={15}/></button>
             </div>
-
+            
             <div className="p-6 overflow-y-auto flex-1">
               {(() => {
                 const conflicts = eventForm.dates.reduce((acc, d) => acc + (resMap[d] || []).length, 0);
@@ -1490,7 +1469,7 @@ export function AdminEvents() {
                 return null;
               })()}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-
+                
                 {/* Left Column: Calendar & Times */}
                 <div className="space-y-5">
                   <div>
@@ -1582,7 +1561,7 @@ export function AdminEvents() {
                       )}
 
                       <p className="text-[9px] text-neutral-500 italic">
-                        Selected tables are included in the saved local event schedule. This does not create or publish customer bookings.
+                        Selected tables will be automatically locked and reserved in the database for the event's duration upon saving.
                       </p>
                     </div>
                   )}
@@ -1598,7 +1577,7 @@ export function AdminEvents() {
                     </div>
                     <Input maxLength={50} value={eventForm.title} onChange={e => setEventForm({...eventForm, title: e.target.value})} placeholder="e.g. 8-Ball Championship" className="bg-neutral-950 border-neutral-800" />
                   </div>
-
+                  
                   <div>
                     <label className="text-xs font-semibold text-neutral-400 block mb-1.5">Event Type</label>
                     <select className="w-full h-10 px-3 bg-neutral-950 border border-neutral-800 rounded-md text-sm text-neutral-200 focus:outline-none focus:border-amber-500" value={eventForm.type} onChange={e => setEventForm({...eventForm, type: e.target.value})}>
@@ -1706,8 +1685,8 @@ export function AdminEvents() {
               </div>
             </div>
             <div className="p-4 border-t border-neutral-800 flex justify-end gap-3 bg-neutral-950/50 flex-none">
-              <Button disabled={venueSaving} variant="ghost" onClick={() => setShowEventModal(false)}>Cancel</Button>
-              <Button disabled={venueSaving} className="bg-amber-600 hover:bg-amber-500 text-white" onClick={saveEvent}>{editingEventId ? 'Save Changes' : 'Create Event'}</Button>
+              <Button variant="ghost" onClick={() => setShowEventModal(false)}>Cancel</Button>
+              <Button className="bg-amber-600 hover:bg-amber-500 text-white" onClick={saveEvent}>{editingEventId ? 'Save Changes' : 'Create Event'}</Button>
             </div>
           </div>
         </div>
@@ -1725,7 +1704,7 @@ export function AdminEvents() {
                     <div>
                       <h2 className="text-base font-bold text-neutral-100">{editingClosureId ? 'Edit Closure' : isActionToday ? 'Emergency Closure' : 'Mark as Closed'}</h2>
                       <p className="text-xs text-neutral-500">
-                        {closureForm.type === 'weekly'
+                        {closureForm.type === 'weekly' 
                           ? `Every ${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][closureForm.dayOfWeek]}`
                           : (closureDateStr && !isNaN(new Date(closureDateStr).getTime()) ? format(new Date(closureDateStr), 'EEEE, MMMM d, yyyy') : '')}
                       </p>
@@ -1733,7 +1712,7 @@ export function AdminEvents() {
                     <button onClick={() => setShowClosureModal(false)} className="p-2 text-neutral-500 hover:text-white"><X size={16} /></button>
                   </div>
                   <form onSubmit={saveClosure} className="p-6 space-y-4">
-
+                    
                     {(() => {
                       const conflicts = resMap[closureDateStr] || [];
                       if (conflicts.length > 0) {
@@ -1778,7 +1757,7 @@ export function AdminEvents() {
                       </div>
                       <input type="text" maxLength={50} value={closureForm.reason} onChange={e => setClosureForm(f=>({...f,reason:e.target.value}))} required autoFocus className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-rose-500" placeholder={isActionToday ? "e.g. Bad Weather, Power Outage" : "e.g. Holiday, Private Event"} />
                     </div>
-
+                    
                     {!isActionToday && (
                       <>
                         <label className="flex items-center gap-3 cursor-pointer">
@@ -1805,16 +1784,16 @@ export function AdminEvents() {
                     {isActionToday && (
                        <div className="bg-rose-950/20 border border-rose-900/40 p-3 rounded-lg flex items-start gap-2">
                           <AlertTriangle size={14} className="text-rose-500 flex-shrink-0 mt-0.5" />
-                          <p className="text-[10px] text-rose-400 leading-relaxed">This closure applies to the saved local schedule. Online publishing and existing customer bookings need separate confirmation.</p>
+                          <p className="text-[10px] text-rose-400 leading-relaxed">This emergency closure will instantly block all online reservations for the remainder of the day.</p>
                        </div>
                     )}
 
                     <div className="flex gap-2 pt-2">
                       {editingClosureId && (
-                        <button type="button" disabled={venueSaving} onClick={deleteClosure} className="px-3 py-2.5 bg-rose-950/40 hover:bg-rose-900/50 text-rose-400 border border-rose-800/50 text-sm rounded-xl transition-colors"><Trash2 size={16} /></button>
+                        <button type="button" onClick={() => { removeClosedDate(editingClosureId); setShowClosureModal(false); flash('Closure deleted.'); }} className="px-3 py-2.5 bg-rose-950/40 hover:bg-rose-900/50 text-rose-400 border border-rose-800/50 text-sm rounded-xl transition-colors"><Trash2 size={16} /></button>
                       )}
                       <button type="button" onClick={() => setShowClosureModal(false)} className="flex-1 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors">Cancel</button>
-                      <button type="submit" disabled={venueSaving} className="flex-[2] bg-rose-600 hover:bg-rose-500 text-white text-sm rounded-xl font-semibold py-2.5 transition-colors">Save</button>
+                      <button type="submit" className="flex-[2] bg-rose-600 hover:bg-rose-500 text-white text-sm rounded-xl font-semibold py-2.5 transition-colors">Save</button>
                     </div>
                   </form>
                 </>
@@ -1833,10 +1812,10 @@ export function AdminEvents() {
                 <h2 className="text-base font-bold text-neutral-100">{editingPromoId ? 'Edit Promo' : 'Create Promo Code'}</h2>
                 <p className="text-xs text-neutral-500">Standalone discount code</p>
               </div>
-              <button disabled={promoSaving} onClick={() => setShowPromoModal(false)} className="p-2 text-neutral-500 hover:text-white"><X size={16} /></button>
+              <button onClick={() => setShowPromoModal(false)} className="p-2 text-neutral-500 hover:text-white"><X size={16} /></button>
             </div>
-            <form onSubmit={preparePromoSave}><fieldset disabled={promoSaving} className="p-6 space-y-5">
-
+            <form onSubmit={preparePromoSave} className="p-6 space-y-5">
+              
               <div>
                 <div className="flex justify-between items-center mb-1.5">
                   <label className="text-xs text-neutral-400 font-medium">Promo Code *</label>
@@ -1854,7 +1833,7 @@ export function AdminEvents() {
                   {promoForm.discountPercent > 50 && <span className="text-[10px] text-rose-500 font-bold bg-rose-500/10 px-1.5 py-0.5 rounded">High Discount Warning</span>}
                 </label>
                 <div className="flex items-center gap-3">
-                  <input type="range" min={5} max={100} step={5} value={promoForm.discountPercent} onChange={e => setPromoForm(f=>({...f, discountPercent: parseInt(e.target.value)}))}
+                  <input type="range" min={5} max={100} step={5} value={promoForm.discountPercent} onChange={e => setPromoForm(f=>({...f, discountPercent: parseInt(e.target.value)}))} 
                     className={`flex-1 ${promoForm.discountPercent > 50 ? 'accent-rose-500' : 'accent-violet-500'}`} />
                   <span className={`text-xl font-black w-14 text-right ${promoForm.discountPercent > 50 ? 'text-rose-500' : 'text-violet-400'}`}>{promoForm.discountPercent}%</span>
                 </div>
@@ -1875,7 +1854,7 @@ export function AdminEvents() {
                   </div>
                   <span className="text-xs text-neutral-300 font-medium">Limit number of uses</span>
                 </label>
-
+                
                 {promoForm.isLimitedUses && (
                   <div className="pl-12 space-y-3">
                     <div>
@@ -1919,10 +1898,10 @@ export function AdminEvents() {
               </div>
 
               <div className="flex gap-3 pt-2 border-t border-neutral-800">
-                <button type="button" disabled={promoSaving} onClick={() => setShowPromoModal(false)} className="px-4 py-2.5 bg-neutral-800 text-neutral-300 text-sm rounded-xl transition-colors">Cancel</button>
+                <button type="button" onClick={() => setShowPromoModal(false)} className="px-4 py-2.5 bg-neutral-800 text-neutral-300 text-sm rounded-xl transition-colors">Cancel</button>
                 <button type="submit" className="flex-1 bg-violet-600 hover:bg-violet-500 text-white text-sm rounded-xl font-semibold py-2.5 shadow-lg shadow-violet-900/30 transition-colors">Review & Save</button>
               </div>
-            </fieldset></form>
+            </form>
           </div>
         </div>
       )}
@@ -1963,7 +1942,7 @@ export function AdminEvents() {
                    </div>
                  )}
               </div>
-
+              
               {promoForm.discountPercent > 50 && (
                 <div className="bg-rose-950/30 border border-rose-900/50 rounded-lg p-3 flex gap-2">
                   <AlertTriangle size={14} className="text-rose-500 flex-shrink-0 mt-0.5" />
@@ -1972,8 +1951,8 @@ export function AdminEvents() {
               )}
 
               <div className="flex gap-3 pt-2">
-                <button type="button" disabled={promoSaving} onClick={() => setShowPromoConfirm(false)} className="px-4 py-2.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 text-sm rounded-xl transition-colors border border-neutral-800">Back to Edit</button>
-                <button type="button" disabled={promoSaving} onClick={executePromoSave} className="flex-1 bg-violet-600 hover:bg-violet-500 text-white text-sm rounded-xl font-semibold py-2.5 shadow-lg shadow-violet-900/30 transition-colors">Confirm & Save Locally</button>
+                <button type="button" onClick={() => setShowPromoConfirm(false)} className="px-4 py-2.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 text-sm rounded-xl transition-colors border border-neutral-800">Back to Edit</button>
+                <button type="button" onClick={executePromoSave} className="flex-1 bg-violet-600 hover:bg-violet-500 text-white text-sm rounded-xl font-semibold py-2.5 shadow-lg shadow-violet-900/30 transition-colors">Confirm & Publish</button>
               </div>
             </div>
           </div>
@@ -1987,7 +1966,7 @@ export function AdminEvents() {
               <AlertTriangle size={18} className="text-rose-500" />
               <span>Confirm Event Cancellation</span>
             </div>
-
+            
             <p className="text-xs text-neutral-300 leading-relaxed">
               You are about to cancel <strong className="text-white">"{cancelEventModal.title}"</strong> scheduled for <strong className="text-amber-400">{cancelEventModal.date}</strong>.
             </p>
@@ -1995,8 +1974,8 @@ export function AdminEvents() {
             <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-3.5 space-y-1 text-xs text-neutral-400">
               <p className="font-bold text-neutral-200">What happens when an event is canceled?</p>
               <ul className="list-disc list-inside space-y-1 text-[11px] text-neutral-400 pl-1 pt-1">
-                <li>The local event allocation will be cleared after the save is confirmed.</li>
-                <li>Hosted bookings are unchanged by this local cancellation.</li>
+                <li>Allocated tournament tables will be instantly released back into the public inventory.</li>
+                <li>Online bookings and walk-ins will be re-enabled for those tables.</li>
                 <li>External participant notifications must be handled via your registration platform.</li>
               </ul>
             </div>
@@ -2025,7 +2004,19 @@ export function AdminEvents() {
               </button>
               <button
                 type="button"
-                disabled={venueSaving} onClick={confirmEventCancellation}
+                onClick={async () => {
+                  updateEvent(cancelEventModal.id, { 
+                    isCancelled: true, 
+                    cancelReason: eventCancelReason,
+                    eventTableIds: []
+                  });
+                  // Also cancel associated reservations tag
+                  const { error } = await supabase.from('reservations').update({ status: 'cancelled', cancellationReason: `Event Cancelled: ${eventCancelReason}` }).eq('paymentRef', 'EVENT').like('id', `%EVT-%`);
+                  if(error) console.error("Failed to cancel event tags", error);
+
+                  setCancelEventModal(null);
+                  flash(`Event "${cancelEventModal.title}" marked as cancelled and tables released.`);
+                }}
                 className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition-colors shadow-lg shadow-rose-950/40"
               >
                 Confirm Cancellation
