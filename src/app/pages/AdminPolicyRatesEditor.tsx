@@ -53,7 +53,7 @@ export default function AdminPolicyRatesEditor() {
   const handleReloadSavedSettings = async () => {
     setIsLoading(true);
     try {
-      const response = await localFetch('http://localhost:3001/api/settings/policy');
+      const response = await localFetch('/api/settings/policy');
       if (response.ok) {
         const saved = await response.json();
         if (saved?.settings?.rates) setRatesForm(saved.settings.rates);
@@ -85,7 +85,7 @@ export default function AdminPolicyRatesEditor() {
     setIsLoading(true);
     void (async () => {
       try {
-        const response = await localFetch('http://localhost:3001/api/settings/policy');
+        const response = await localFetch('/api/settings/policy');
         if (response.ok) {
           const saved = await response.json();
           if (active && saved?.settings?.rates && saved?.settings?.terms) {

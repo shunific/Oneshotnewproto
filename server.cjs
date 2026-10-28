@@ -475,6 +475,29 @@ const getSettingsHandler = (req, res) => {
 app.get('/api/settings/rates', getSettingsHandler);
 app.get('/api/settings/terms', getSettingsHandler);
 
+app.get('/api/settings/policy', (req, res) => {
+  db.all('SELECT keyName, settingValue FROM systemSettings ORDER BY keyName ASC', [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    const config = {};
+    rows.forEach(row => {
+      let val = row.settingValue;
+      if (val === 'true') val = true;
+      else if (val === 'false') val = false;
+      else if (!isNaN(val) && val.trim() !== '' && !val.includes(':')) val = Number(val);
+      config[row.keyName] = val;
+    });
+    const crypto = require('crypto');
+    const revision = crypto.createHash('sha256').update(JSON.stringify(rows)).digest('hex');
+    res.json({
+      settings: {
+        rates: config,
+        terms: config
+      },
+      revision
+    });
+  });
+});
+
 app.get('/api/cms', (req, res) => {
   db.all(`SELECT keyName, settingValue FROM cms`, [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
@@ -1238,9 +1261,26 @@ const updateSettingsHandler = (req, res) => {
 app.put('/api/settings/rates', updateSettingsHandler);
 app.put('/api/settings/terms', updateSettingsHandler);
 
+app.put('/api/settings/policy', (req, res) => {
+  const payload = { ...(req.body?.rates || {}), ...(req.body?.terms || {}), ...(req.body || {}) };
+  delete payload.rates;
+  delete payload.terms;
+  delete payload.expectedActorId;
+  delete payload.expectedRevision;
+  req.body = payload;
+  updateSettingsHandler(req, res);
+});
+
 const isProduction = process.env.NODE_ENV === 'production';
 if (isProduction) {
-  const distPath = path.join(__dirname, 'dist');
+  const distCandidates = [
+    path.join(__dirname, 'dist'),
+    process.resourcesPath ? path.join(process.resourcesPath, 'app.asar.unpacked', 'dist') : null,
+    process.resourcesPath ? path.join(process.resourcesPath, 'app', 'dist') : null,
+    path.join(process.cwd(), 'dist'),
+  ].filter(Boolean);
+
+  let distPath = distCandidates.find(p => fs.existsSync(p)) || path.join(__dirname, 'dist');
   app.use(express.static(distPath));
   
   app.get(/(.*)/, (req, res) => {
@@ -1319,6 +1359,19 @@ app.post('/api/debug/reset', async (req, res) => {
 // ====================================================================
 // 🚀 SERVER STARTUP
 // ====================================================================
-app.listen(PORT, () => {
-  console.log(`\n🎱 One Shot Edge Server is running on http://localhost:${PORT}`);
+const server = app.listen(PORT, () => {
+  const actualPort = server.address().port;
+  console.log(`\n🎱 One Shot Edge Server is running on http://localhost:${actualPort}`);
+  if (process.send) {
+    process.send({ type: 'backend-ready', port: Number(actualPort) });
+  }
+});
+
+server.on('error', (err) => {
+  console.error('Local server startup error:', err);
+  process.exit(1);
+});
+
+process.on('disconnect', () => {
+  process.exit(0);
 });

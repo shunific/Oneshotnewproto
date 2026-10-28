@@ -573,13 +573,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const runCloudBackup = () => {
     if (cloudSyncTimeout.current) clearTimeout(cloudSyncTimeout.current);
     cloudSyncTimeout.current = setTimeout(() => {
-      fetch('http://localhost:3001/api/sync-to-cloud', { method: 'POST' }).catch(() => {});
+      localFetch('/api/sync-to-cloud', { method: 'POST' }).catch(() => {});
     }, 1500); 
   };
 
   const syncToDB = async (endpoint: string, method: 'POST' | 'PUT' | 'DELETE', payload: any, successMsg: string) => {
     try {
-      const res = await fetch(`http://localhost:3001${endpoint}`, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const target = endpoint.startsWith('http') ? endpoint : (endpoint.startsWith('/') ? endpoint : `/${endpoint}`);
+      const res = await localFetch(target, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const text = await res.text();
       let json: any = null;
       try { json = text ? JSON.parse(text) : null; } catch (e) { json = text; }
