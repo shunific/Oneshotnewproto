@@ -24,7 +24,7 @@ const MASTER_RECOVERY_KEY = 'OSB-MASTER-KEY';
 
 export function OfflineLogin() {
   const navigate = useNavigate();
-  const { staffLogin, adminLogin, siteConfig, resetPasswordWithPin, updateStaffUser, staffUsers, staffLogout, hashPassword, resetStaffUserPassword } = useAppContext() as any;
+  const { staffLogin, adminLogin, siteConfig, resetPasswordWithPin, updateStaffUser, staffUsers, staffLogout, hashPassword, resetStaffUserPassword, resolveUserPin } = useAppContext() as any;
   
   const [view, setView] = useState<FormView>('login');
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -149,9 +149,10 @@ export function OfflineLogin() {
   };
 
   const handleDownloadPin = () => {
-    const targetUser = staffUsers.find((u: any) => u.username.toLowerCase() === username.toLowerCase());
+    const targetUser = staffUsers.find((u: any) => u.username?.toLowerCase() === username?.toLowerCase());
     if (!targetUser) return;
-    const text = `ONE SHOT BAR & BILLIARDS\n=================================\nACCOUNT RECOVERY CREDENTIALS\n=================================\n\nAccount Name : ${targetUser.fullName}\nUsername     : ${targetUser.username}\nRole         : ${targetUser.role.toUpperCase()}\n\nOFFLINE RECOVERY PIN: ${targetUser.recoveryPin}\n\n=================================\nIMPORTANT: Keep this file secure. Because this system operates offline, if you forget your password, you will strictly need this 4-digit PIN to recover your account without a Super Admin.\n`;
+    const pin = resolveUserPin(targetUser) || '0000';
+    const text = `ONE SHOT BAR & BILLIARDS\n=================================\nACCOUNT RECOVERY CREDENTIALS\n=================================\n\nAccount Name : ${targetUser.fullName}\nUsername     : ${targetUser.username}\nRole         : ${targetUser.role.toUpperCase()}\n\nOFFLINE RECOVERY PIN: ${pin}\n\n=================================\nIMPORTANT: Keep this file secure. Because this system operates offline, if you forget your password, you will strictly need this 4-digit PIN to recover your account without a Super Admin.\n`;
     const blob = new Blob([text], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -489,7 +490,7 @@ export function OfflineLogin() {
 
               {/* ── RECOVERY PIN BACKUP VIEW ── */}
               {view === 'recovery-pin' && (() => {
-                const targetUser = staffUsers.find((u: any) => u.username.toLowerCase() === username.toLowerCase());
+                const targetUser = staffUsers.find((u: any) => u.username?.toLowerCase() === username?.toLowerCase());
                 return (
                   <motion.div key="recovery-pin" initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} transition={{ duration: 0.3 }} className="w-full">
                     <div className="bg-amber-950/20 border border-amber-900/40 rounded-xl p-5 mb-5 text-center">
@@ -503,11 +504,11 @@ export function OfflineLogin() {
                       
                       <div className="bg-black/40 border border-black/50 rounded-lg p-5 mb-5">
                         <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-bold mb-1">Your Unique PIN</p>
-                        <p className="text-5xl font-mono font-black text-white tracking-[0.2em]">{targetUser?.recoveryPin || '0000'}</p>
+                        <p className="text-5xl font-mono font-black text-white tracking-[0.2em]">{resolveUserPin(targetUser) || '0000'}</p>
                       </div>
                       
                       <div className="flex gap-3">
-                        <button onClick={() => handleCopyPin(targetUser?.recoveryPin || '0000')} className="flex-1 py-3 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 rounded-xl text-xs font-bold transition-colors border border-neutral-800 flex items-center justify-center gap-2">
+                        <button onClick={() => handleCopyPin(resolveUserPin(targetUser) || '0000')} className="flex-1 py-3 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 rounded-xl text-xs font-bold transition-colors border border-neutral-800 flex items-center justify-center gap-2">
                           {copied ? <CheckCircle size={15} className="text-emerald-400" /> : <Copy size={15} />} {copied ? 'Copied!' : 'Copy PIN'}
                         </button>
                         <button onClick={handleDownloadPin} className="flex-1 py-3 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 rounded-xl text-xs font-bold transition-colors border border-neutral-800 flex items-center justify-center gap-2">

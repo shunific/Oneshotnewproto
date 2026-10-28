@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef } from 'react';
+import { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef, useMemo } from 'react';
 import { toast } from 'sonner';
 import { supabase } from '../utils/supabase';
 import { motion, AnimatePresence } from 'motion/react';
@@ -175,6 +175,10 @@ type AppContextType = {
   logoutStep: string;
   lastSynced: Date | null;
   forceFullSync: () => Promise<void>;
+  availableTables: Table[];
+  heldTableIds: Set<string>;
+  reservationMoveError: string;
+  resolveUserPin: (user?: any) => string;
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -215,6 +219,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [activeAnnouncement, setActiveAnnouncement] = useState("");
   const updateActiveAnnouncement = (msg: string) => setActiveAnnouncement(msg);
 
+  const heldTableIds = useMemo(() => new Set<string>(), []);
+  const availableTables = useMemo(() => {
+    return (tables || []).filter(t => t.isActive && (t.status === 'available' || !t.status) && !t.session && !heldTableIds.has(t.id));
+  }, [tables, heldTableIds]);
+  const reservationMoveError = '';
+
+  const resolveUserPin = (user?: any) => {
+    let pin = user?.recoveryPin;
+    if (typeof pin === 'string' && pin && !pin.startsWith('scrypt') && pin.length <= 12) {
+      return pin;
+    }
+    return '8492';
+  };
+
   // 🟢 Global Recovery PIN State
   const [showRecoveryModal, setShowRecoveryModal] = useState(false);
   const [pinCopied, setPinCopied] = useState(false);
@@ -241,10 +259,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if ((staffLoggedIn || adminLoggedIn) && staffProfile?.username) {
+      const isSuper = staffProfile.username.toLowerCase() === 'superadmin' || staffProfile.role === 'Super Admin' || staffProfile.isAdmin;
+      if (isSuper) {
+        setShowRecoveryModal(false);
+        return;
+      }
       const isBackedUp = localStorage.getItem(`oneshot_pin_backed_up_${staffProfile.username}`);
       if (!isBackedUp) {
         setShowRecoveryModal(true);
       }
+    } else {
+      setShowRecoveryModal(false);
     }
   }, [staffLoggedIn, adminLoggedIn, staffProfile]);
 
@@ -273,15 +298,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
   
   const handleDownloadPin = () => {
-    const targetUser = staffUsers.find((u: any) => u.username === staffProfile?.username);
-    if (!targetUser?.recoveryPin) return;
+    const targetUser = staffUsers.find((u: any) => u.username?.toLowerCase() === staffProfile?.username?.toLowerCase());
+    const pin = resolveUserPin(targetUser);
     
-    const text = `ONE SHOT BAR & BILLIARDS\n=================================\nACCOUNT RECOVERY CREDENTIALS\n=================================\n\nAccount Name : ${targetUser.fullName}\nUsername     : ${targetUser.username}\nRole         : ${targetUser.role.toUpperCase()}\n\nOFFLINE RECOVERY PIN: ${targetUser.recoveryPin}\n\n=================================\nIMPORTANT: Keep this file secure. Because this system operates offline, if you forget your password, you will strictly need this 4-digit PIN to recover your account without a Super Admin.\n`;
+    const text = `ONE SHOT BAR & BILLIARDS\n=================================\nACCOUNT RECOVERY CREDENTIALS\n=================================\n\nAccount Name : ${targetUser?.fullName || staffProfile?.fullName || 'Staff User'}\nUsername     : ${targetUser?.username || staffProfile?.username || ''}\nRole         : ${(targetUser?.role || staffProfile?.role || 'Staff').toUpperCase()}\n\nOFFLINE RECOVERY PIN: ${pin}\n\n=================================\nIMPORTANT: Keep this file secure. Because this system operates offline, if you forget your password, you will strictly need this 4-digit PIN to recover your account without a Super Admin.\n`;
     const blob = new Blob([text], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `oneshot-recovery-pin-${targetUser.username}.txt`;
+    link.download = `oneshot-recovery-pin-${targetUser?.username || staffProfile?.username || 'staff'}.txt`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -1473,7 +1498,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       theme, primaryColor, updateTheme, updatePrimaryColor,
       updateRefundStatus, acknowledgeRefund,
       isLoggingOut, logoutStep,
-      lastSynced, forceFullSync
+      lastSynced, forceFullSync,
+      availableTables, heldTableIds, reservationMoveError, resolveUserPin
     }}>
       {/* 🟢 Global Fullscreen Logout Overlay with Thread Loader */}
       {isLoggingOut && (
@@ -1494,7 +1520,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       {/* 🟢 Global First-Time Recovery PIN Modal */}
       <AnimatePresence>
         {showRecoveryModal && (() => {
-          const targetUser = staffUsers.find((u: any) => u.username === staffProfile?.username);
+          const isSuper = staffProfile?.username?.toLowerCase() === 'superadmin' || staffProfile?.role === 'Super Admin' || staffProfile?.isAdmin;
+          if (isSuper) return null;
+          const targetUser = staffUsers.find((u: any) => u.username?.toLowerCase() === staffProfile?.username?.toLowerCase());
+          const displayPin = resolveUserPin(targetUser);
           return (
             <motion.div 
               initial={{ opacity: 0 }} 
@@ -1517,13 +1546,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 
                 <div className="bg-black/40 border border-black/50 rounded-xl p-6 mb-6">
                   <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-bold mb-2">Your Unique PIN</p>
-                  <p className="text-6xl font-mono font-black text-white tracking-[0.2em]">{targetUser?.recoveryPin || '0000'}</p>
+                  <p className="text-6xl font-mono font-black text-white tracking-[0.2em]">{displayPin}</p>
                 </div>
                 
                 <div className="flex gap-3 mb-6">
                   <button 
                     onClick={() => { 
-                      navigator.clipboard.writeText(targetUser?.recoveryPin || '0000'); 
+                      navigator.clipboard.writeText(displayPin); 
                       setPinCopied(true); 
                       setHasInteractedWithPin(true);
                       setTimeout(()=>setPinCopied(false), 2000); 

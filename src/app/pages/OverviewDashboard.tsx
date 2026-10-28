@@ -134,7 +134,7 @@ export function OverviewDashboard() {
 
   const activeWatchlist = watchlist?.filter((w: any) => w.status === 'active' && !w.isArchived) || [];
 
-  const available = availableTables.length;
+  const available = (availableTables || []).length;
   const occupied = tables.filter((t: any) => t.isActive && t.status === 'occupied').length;
   const reserved = tables.filter((t: any) => t.isActive && t.status === 'reserved').length;
   const waiting = queue.filter((q: any) => q.status === 'waiting').length;
