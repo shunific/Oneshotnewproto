@@ -819,7 +819,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const staffLogin = async (u: string, p: string) => { 
     const cleanU = (u || '').trim();
     const isSuperAdmin = cleanU.toLowerCase() === 'superadmin';
-    const isSuperAdminPass = isSuperAdmin && (p === 'superadmin123' || p === 'admin123');
 
     let serverSuccess = false;
     let serverUserData: any = null;
@@ -836,20 +835,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const hashedP = await hashPassword(p); 
     const valid = staffUsers.find(su => 
       su.username?.toLowerCase() === cleanU.toLowerCase() && 
-      (su.password === hashedP || su.password === p || (isSuperAdmin && isSuperAdminPass)) && 
+      (su.password === hashedP || su.password === p) && 
       su.isActive
     ); 
 
-    if (serverSuccess || valid || (isSuperAdmin && isSuperAdminPass)) { 
-      const activeUser = serverUserData || valid || {
-        id: 'admin_001',
-        fullName: 'System Administrator',
-        username: 'superadmin',
-        role: 'Super Admin',
-        isAdmin: true,
-        phone: '00000000000',
-        avatarImg: ''
-      };
+    if (serverSuccess || valid) { 
+      const activeUser = serverUserData || valid;
 
       setStaffLoggedIn(true); 
       if (activeUser.isAdmin || isSuperAdmin) {
@@ -878,7 +869,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const adminLogin = async (u: string, p: string) => { 
     const cleanU = (u || '').trim();
     const isSuperAdmin = cleanU.toLowerCase() === 'superadmin';
-    const isSuperAdminPass = isSuperAdmin && (p === 'superadmin123' || p === 'admin123');
 
     let serverSuccess = false;
     let serverUserData: any = null;
@@ -895,22 +885,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const hashedP = await hashPassword(p); 
     const valid = staffUsers.find(su => 
       su.username?.toLowerCase() === cleanU.toLowerCase() && 
-      (su.password === hashedP || su.password === p || (isSuperAdmin && isSuperAdminPass)) && 
+      (su.password === hashedP || su.password === p) && 
       su.isActive && 
       (su.isAdmin || isSuperAdmin)
     );
 
-    if (serverSuccess || valid || (isSuperAdmin && isSuperAdminPass)) {
-      const activeUser = serverUserData || valid || {
-        id: 'admin_001',
-        fullName: 'System Administrator',
-        username: 'superadmin',
-        email: 'admin@oneshot.com',
-        role: 'Super Admin',
-        isAdmin: true,
-        phone: '00000000000',
-        avatarImg: ''
-      };
+    if (serverSuccess || valid) {
+      const activeUser = serverUserData || valid;
 
       setAdminLoggedIn(true);
       sessionStorage.setItem('oneshot_admin_auth', 'true');

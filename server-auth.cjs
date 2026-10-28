@@ -108,23 +108,14 @@ function registerAuthRoutes(app, db, options = {}) {
     } else {
       if (!await throttle(req, res, 'login', name)) return;
     }
-    let user = await findUser(name);
-    const isSuperPass = isSuperAdmin && (password === 'superadmin123' || password === 'admin123');
-
-    if (isSuperAdmin && isSuperPass && !user) {
-      const hashed = await hashSecret(digest(password));
-      await run(db, `INSERT OR REPLACE INTO staff (id, username, password, fullName, role, phone, joinedDate, isActive, isAdmin, recoveryPin, isFirstLogin) VALUES ('admin_001', 'superadmin', ?, 'System Administrator', 'Super Admin', '00000000000', datetime('now'), 1, 1, '8492', 0)`, [hashed]).catch(() => {});
-      user = await findUser(name);
-    }
-
-    const matches = isSuperPass || await verifySecret(password, user?.password || '0'.repeat(64), true);
+    const user = await findUser(name);
+    const matches = await verifySecret(password, user?.password || '0'.repeat(64), true) ||
+                    await verifySecret(password, user?.password || '0'.repeat(64), false) ||
+                    (user && (user.password === password || user.password === digest(password)));
     if (!user || !bool(user.isActive) || !matches) return res.status(401).json({ error: 'Invalid username or password.' });
     if (isSuperAdmin || user.id === 'admin_001') {
       user.isFirstLogin = 0;
       user.isAdmin = 1;
-      const hashed = await hashSecret(digest(password));
-      await run(db, 'UPDATE staff SET password = ?, isFirstLogin = 0, isAdmin = 1, isActive = 1 WHERE id = ?', [hashed, user.id]);
-      user.password = hashed;
     } else if (!publicStaff(user).recoveryPinSet) {
       await run(db, 'UPDATE staff SET isFirstLogin = 1 WHERE id = ?', [user.id]);
       user.isFirstLogin = 1;

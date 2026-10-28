@@ -5,16 +5,29 @@ const fs = require('fs');
 const path = require('path');
 const dotenv = require('dotenv');
 
-const envPath = process.env.NODE_ENV === 'production'
-  ? path.join(process.resourcesPath, '.env')
-  : path.join(__dirname, '.env');
+const envCandidates = [
+  process.env.NODE_ENV === 'production' && process.resourcesPath ? path.join(process.resourcesPath, '.env') : null,
+  path.join(__dirname, '.env'),
+  path.join(process.cwd(), '.env'),
+  process.resourcesPath ? path.join(process.resourcesPath, 'app', '.env') : null,
+  path.join(__dirname, '..', '.env'),
+].filter(Boolean);
 
-const envResult = dotenv.config({ path: envPath });
-
-if (envResult.error) {
-  console.error(`❌ [ENV ERROR]: Could not load ${envPath}`);
-} else {
-  console.log(`✅ [ENV]: Loaded ${Object.keys(envResult.parsed || {}).length} variables from ${envPath}`);
+let envLoaded = false;
+for (const cand of envCandidates) {
+  try {
+    if (fs.existsSync(cand)) {
+      const res = dotenv.config({ path: cand });
+      if (!res.error) {
+        console.log(`✅ [ENV]: Loaded variables from ${cand}`);
+        envLoaded = true;
+        break;
+      }
+    }
+  } catch (e) {}
+}
+if (!envLoaded) {
+  console.log('ℹ️ [ENV]: No external .env file loaded, using default and runtime configuration.');
 }
 
 const express = require('express');
@@ -72,16 +85,21 @@ const SUPABASE_SERVICE_KEY =
   process.env.VITE_SUPABASE_PUBLISHABLE_KEY || 
   process.env.VITE_SUPABASE_ANON_KEY || 
   process.env.SUPABASE_ANON_KEY || 
-  '';
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9seXdoeWFvempsa2pybnNkeWRnIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4OTg5NjAxNCwiZXhwIjoyMTA1NDcyMDE0fQ.9M87B5oO8bKLtkaH5MIpzZ1KzvhE3qr6y5GApWzStn4';
 
-if (!SUPABASE_SERVICE_KEY) {
-  console.error('❌ [CONFIG ERROR]: Supabase key is empty! Check your variable names in .env');
+let supabase = null;
+if (SUPABASE_SERVICE_KEY) {
+  try {
+    supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+    console.log('✅ Connected to Supabase Cloud.');
+  } catch (err) {
+    console.warn('⚠️ Supabase client initialization skipped:', err.message);
+  }
 }
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
 // 🟢 SUPABASE HEARTBEAT PING (60-second intervals)
 setInterval(async () => {
+  if (!supabase) return;
   try {
     await supabase
       .from('system_status')
@@ -757,6 +775,7 @@ app.post('/api/images', upload.single('image'), async (req, res) => {
   const fileName = `img_${Date.now()}_${Math.round(Math.random() * 1000)}.${fileExt}`;
 
   try {
+    if (!supabase) return res.status(503).json({ error: 'Supabase storage is unavailable.' });
     const { error: uploadError } = await supabase.storage
       .from('oneshot-assets')
       .upload(fileName, req.file.buffer, { contentType: req.file.mimetype });
@@ -1236,31 +1255,31 @@ app.post('/api/debug/reset', async (req, res) => {
     console.log("🧹 Initiating Total Day-1 Database Nuke...");
 
     // 1. WIPE CLOUD (SUPABASE)
-    // 🟢 SAFE FILTER: .not('id', 'is', null) safely wipes UUIDs and Text IDs.
-    // 🟢 SCHEMA MATCH: Only targets tables that actually exist in Supabase.
-    const cloudWipes = await Promise.all([
-      supabase.from('queue').delete().not('id', 'is', null),
-      supabase.from('reservations').delete().not('id', 'is', null),
-      supabase.from('session_history').delete().not('id', 'is', null),
-      supabase.from('activities').delete().not('id', 'is', null),
-      supabase.from('feedback').delete().not('id', 'is', null),
-      supabase.from('e_receipts').delete().not('id', 'is', null),
-      supabase.from('watchlist').delete().not('id', 'is', null),
-      supabase.from('lost_and_found').delete().not('id', 'is', null),
-      supabase.from('tables').delete().not('id', 'is', null),
-      supabase.from('inventory').delete().not('id', 'is', null),
-      supabase.from('events').delete().not('id', 'is', null),
-      supabase.from('promo_codes').delete().not('id', 'is', null),
-      supabase.from('announcements').delete().not('id', 'is', null),
-      supabase.from('closed_dates').delete().not('id', 'is', null)
-    ]);
+    if (supabase) {
+      const cloudWipes = await Promise.all([
+        supabase.from('queue').delete().not('id', 'is', null),
+        supabase.from('reservations').delete().not('id', 'is', null),
+        supabase.from('session_history').delete().not('id', 'is', null),
+        supabase.from('activities').delete().not('id', 'is', null),
+        supabase.from('feedback').delete().not('id', 'is', null),
+        supabase.from('e_receipts').delete().not('id', 'is', null),
+        supabase.from('watchlist').delete().not('id', 'is', null),
+        supabase.from('lost_and_found').delete().not('id', 'is', null),
+        supabase.from('tables').delete().not('id', 'is', null),
+        supabase.from('inventory').delete().not('id', 'is', null),
+        supabase.from('events').delete().not('id', 'is', null),
+        supabase.from('promo_codes').delete().not('id', 'is', null),
+        supabase.from('announcements').delete().not('id', 'is', null),
+        supabase.from('closed_dates').delete().not('id', 'is', null)
+      ]);
 
-    const cloudErrors = cloudWipes.filter(r => r.error).map(r => r.error.message);
-    if (cloudErrors.length > 0) {
-       console.error("⚠️ Cloud Wipe Blocked:", cloudErrors);
-       return res.status(500).json({ error: "Cloud Wipe Failed: " + cloudErrors[0] });
+      const cloudErrors = cloudWipes.filter(r => r.error).map(r => r.error.message);
+      if (cloudErrors.length > 0) {
+         console.error("⚠️ Cloud Wipe Blocked:", cloudErrors);
+         return res.status(500).json({ error: "Cloud Wipe Failed: " + cloudErrors[0] });
+      }
+      console.log("✅ Cloud Supabase Nuke Successful.");
     }
-    console.log("✅ Cloud Supabase Nuke Successful.");
 
     // 2. WIPE LOCAL SQLITE DATA
     db.serialize(() => {
