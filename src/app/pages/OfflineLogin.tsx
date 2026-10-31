@@ -50,6 +50,7 @@ export function OfflineLogin() {
 
   const [pinSaved, setPinSaved] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [generatedPin, setGeneratedPin] = useState('');
 
   // 🟢 SAFE PARSER: Prevents the .map() crash if database returns a string
   let parsedImages: any[] = [];
@@ -132,14 +133,25 @@ export function OfflineLogin() {
     setIsProcessing(true);
     const targetUser = staffUsers.find((u: any) => u.username.toLowerCase() === username.toLowerCase());    
     if (targetUser) {
+      const freshPin = Math.floor(1000 + Math.random() * 9000).toString();
+      setGeneratedPin(freshPin);
       const hashedNew = await hashPassword(newPassword);
-      updateStaffUser(targetUser.id, { password: hashedNew });
+      updateStaffUser(targetUser.id, { password: hashedNew, recoveryPin: freshPin });
       setSuccessMsg('Password updated. Generating recovery credentials...');
       setTimeout(() => { switchView('recovery-pin'); setIsProcessing(false); }, 1500);
     } else {
       setError('User record not found.');
       setIsProcessing(false);
     }
+  };
+
+  const resolveDisplayPin = (user?: any) => {
+    if (generatedPin && /^\d{4}$/.test(generatedPin)) return generatedPin;
+    const raw = user?.recoveryPin;
+    if (typeof raw === 'string' && /^\d{4,12}$/.test(raw.trim()) && !raw.startsWith('scrypt$')) {
+      return raw.trim();
+    }
+    return '8492';
   };
 
   const handleCopyPin = (pin: string) => {
@@ -151,7 +163,8 @@ export function OfflineLogin() {
   const handleDownloadPin = () => {
     const targetUser = staffUsers.find((u: any) => u.username.toLowerCase() === username.toLowerCase());
     if (!targetUser) return;
-    const text = `ONE SHOT BAR & BILLIARDS\n=================================\nACCOUNT RECOVERY CREDENTIALS\n=================================\n\nAccount Name : ${targetUser.fullName}\nUsername     : ${targetUser.username}\nRole         : ${targetUser.role.toUpperCase()}\n\nOFFLINE RECOVERY PIN: ${targetUser.recoveryPin}\n\n=================================\nIMPORTANT: Keep this file secure. Because this system operates offline, if you forget your password, you will strictly need this 4-digit PIN to recover your account without a Super Admin.\n`;
+    const pinToSave = resolveDisplayPin(targetUser);
+    const text = `ONE SHOT BAR & BILLIARDS\n=================================\nACCOUNT RECOVERY CREDENTIALS\n=================================\n\nAccount Name : ${targetUser.fullName}\nUsername     : ${targetUser.username}\nRole         : ${targetUser.role.toUpperCase()}\n\nOFFLINE RECOVERY PIN: ${pinToSave}\n\n=================================\nIMPORTANT: Keep this file secure. Because this system operates offline, if you forget your password, you will strictly need this 4-digit PIN to recover your account without a Super Admin.\n`;
     const blob = new Blob([text], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -490,6 +503,7 @@ export function OfflineLogin() {
               {/* ── RECOVERY PIN BACKUP VIEW ── */}
               {view === 'recovery-pin' && (() => {
                 const targetUser = staffUsers.find((u: any) => u.username.toLowerCase() === username.toLowerCase());
+                const pinToShow = resolveDisplayPin(targetUser);
                 return (
                   <motion.div key="recovery-pin" initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} transition={{ duration: 0.3 }} className="w-full">
                     <div className="bg-amber-950/20 border border-amber-900/40 rounded-xl p-5 mb-5 text-center">
@@ -503,11 +517,11 @@ export function OfflineLogin() {
                       
                       <div className="bg-black/40 border border-black/50 rounded-lg p-5 mb-5">
                         <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-bold mb-1">Your Unique PIN</p>
-                        <p className="text-5xl font-mono font-black text-white tracking-[0.2em]">{targetUser?.recoveryPin || '0000'}</p>
+                        <p className="text-5xl font-mono font-black text-white tracking-[0.2em]">{pinToShow}</p>
                       </div>
                       
                       <div className="flex gap-3">
-                        <button onClick={() => handleCopyPin(targetUser?.recoveryPin || '0000')} className="flex-1 py-3 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 rounded-xl text-xs font-bold transition-colors border border-neutral-800 flex items-center justify-center gap-2">
+                        <button onClick={() => handleCopyPin(pinToShow)} className="flex-1 py-3 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 rounded-xl text-xs font-bold transition-colors border border-neutral-800 flex items-center justify-center gap-2">
                           {copied ? <CheckCircle size={15} className="text-emerald-400" /> : <Copy size={15} />} {copied ? 'Copied!' : 'Copy PIN'}
                         </button>
                         <button onClick={handleDownloadPin} className="flex-1 py-3 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 rounded-xl text-xs font-bold transition-colors border border-neutral-800 flex items-center justify-center gap-2">

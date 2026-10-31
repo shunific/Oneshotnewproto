@@ -960,7 +960,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const activeUser = serverUserData || valid;
 
       setAdminLoggedIn(true);
+      setStaffLoggedIn(true);
       sessionStorage.setItem('oneshot_admin_auth', 'true');
+      sessionStorage.setItem('oneshot_staff_auth', 'true');
       const expiryTime = new Date().getTime() + (12 * 60 * 60 * 1000);
       sessionStorage.setItem('oneshot_auth_expiry', expiryTime.toString());
       sessionStorage.removeItem('oneshot_is_locked');
@@ -1524,6 +1526,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const reservationMoveError: string | null = null;
   const recoverReservationTransfer = async () => {};
   const refreshReservationTransfers = async () => {};
+  const pendingContentCreates: any[] = [];
+  const contentCreateError: string | null = null;
+  const retryContentCreate = async () => {};
+  const recoverAnnouncementCreate = async () => {};
 
   return (
     <AppContext.Provider value={{
@@ -1547,7 +1553,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       isLoggingOut, logoutStep,
       lastSynced, forceFullSync,
       availableTables, heldTableIds, pendingReservationMoves, reservationMoveError,
-      recoverReservationTransfer, refreshReservationTransfers
+      recoverReservationTransfer, refreshReservationTransfers,
+      pendingContentCreates, contentCreateError, retryContentCreate, recoverAnnouncementCreate
     }}>
       {/* 🟢 Global Fullscreen Logout Overlay with Thread Loader */}
       {isLoggingOut && (
