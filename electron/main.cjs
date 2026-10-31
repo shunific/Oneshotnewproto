@@ -1,80 +1,121 @@
-const { app, BrowserWindow, globalShortcut, dialog } = require('electron');
+const { app, BrowserWindow, globalShortcut, dialog, safeStorage } = require('electron');
+const {createDeviceKeyStore}=require('./device-key-store.cjs');
+const {createHostDeviceKeyChannel}=require('./host-device-key-channel.cjs');
+const {readNativeDeviceId}=require('./native-device-id.cjs');
 const path = require('path');
-const { fork } = require('child_process'); // 🟢 FIXED: Using standard child_process for native SQLite compatibility
+const { fork } = require('child_process');
+
+// Explicit isolated QA data path; normal launches retain the existing user data location.
+if (process.env.ONESHOT_QA_USER_DATA) app.setPath('userData', path.resolve(process.env.ONESHOT_QA_USER_DATA));
+
+// 🟢 Prevent Windows DWM & Chromium from unloading GPU buffers/textures or flashing white on Alt-Tab
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
+
 let serverProcess;
+let deviceKeyChannel;
 
 let mainWindow;
+let isQuitting = false;
+let serverReady = false;
+let serverPort = 3001;
+let cancelServerStartup;
+
+function stopServer() {
+  serverReady = false;
+  if(deviceKeyChannel){void deviceKeyChannel.close().catch(()=>{});deviceKeyChannel=null;}
+  if (cancelServerStartup) cancelServerStartup();
+  if (serverProcess && !serverProcess.killed) serverProcess.kill();
+}
 
 function startServer() {
-  const fs = require('fs');
-  const candidateServerPaths = app.isPackaged
-    ? [
-        path.join(process.resourcesPath, 'app.asar.unpacked', 'server.cjs'),
-        path.join(process.resourcesPath, 'server.cjs'),
-        path.join(process.resourcesPath, 'app', 'server.cjs'),
-        path.join(__dirname, '../server.cjs'),
-        path.join(__dirname, 'server.cjs'),
-        path.join(app.getAppPath(), 'server.cjs')
-      ]
-    : [
-        path.join(__dirname, '../server.cjs'),
-        path.join(process.cwd(), 'server.cjs')
-      ];
-
-  const serverPath = candidateServerPaths.find(p => {
-    try { return fs.existsSync(p); } catch { return false; }
-  }) || candidateServerPaths[0];
+  if (serverProcess) return Promise.reject(new Error('Backend startup is already in progress.'));
+  const requestedPort = process.env.ONESHOT_QA_PORT;
+  if (requestedPort !== undefined) {
+    if (!/^[1-9]\d{0,4}$/.test(requestedPort) || Number(requestedPort) > 65535) throw new Error('ONESHOT_QA_PORT must be an integer between 1 and 65535.');
+    serverPort = Number(requestedPort);
+  }
+  const serverPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'app.asar.unpacked', 'server.cjs')
+    : path.join(__dirname, '../server.cjs');
 
   const userDataPath = app.getPath('userData'); 
   const isDev = !app.isPackaged;
 
-  const candidateNodePaths = [
-    path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules'),
-    path.join(process.resourcesPath, 'app.asar', 'node_modules'),
-    path.join(process.resourcesPath, 'node_modules'),
-    path.join(__dirname, '../node_modules'),
-    path.join(process.cwd(), 'node_modules')
-  ];
-  const nodePath = candidateNodePaths.filter(p => {
-    try { return fs.existsSync(p); } catch { return false; }
-  }).join(path.delimiter);
-
   let serverStderr = ''; 
 
-  try {
-    serverProcess = fork(serverPath, [], {
-      stdio: 'pipe',
-      env: {
-        ...process.env,
-        NODE_PATH: nodePath || path.join(process.resourcesPath, 'app.asar', 'node_modules'),
-        PORT: '3001',
-        USER_DATA_PATH: userDataPath,
-        NODE_ENV: isDev ? 'development' : 'production'
+  const nodePath = process.resourcesPath
+    ? path.join(process.resourcesPath, 'app.asar', 'node_modules')
+    : (process.env.NODE_PATH || path.join(__dirname, '..', 'node_modules'));
+
+  serverProcess = fork(serverPath, [], {
+    stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+    env: {
+      ...process.env,
+      NODE_PATH: nodePath,
+      PORT: String(serverPort),
+      USER_DATA_PATH: userDataPath,
+      NODE_ENV: isDev ? 'development' : 'production',
+      SUPABASE_URL: process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || 'https://olywhyaozjlkjrnsdydg.supabase.co',
+      SUPABASE_SERVICE_KEY: process.env.SUPABASE_SERVICE_KEY || process.env.VITE_SUPABASE_SERVICE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9seXdoeWFvempsa2pybnNkeWRnIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4OTg5NjAxNCwiZXhwIjoyMTA1NDcyMDE0fQ.9M87B5oO8bKLtkaH5MIpzZ1KzvhE3qr6y5GApWzStn4'
+    }
+  });
+
+  const keyStore=createDeviceKeyStore({app,safeStorage,rootPath:path.join(userDataPath,'device-credentials')});
+  deviceKeyChannel=createHostDeviceKeyChannel({child:serverProcess,store:keyStore,resolveDeviceId:()=>readNativeDeviceId(path.join(userDataPath,'oneshot.db'))});
+
+  serverProcess.stdout.on('data', (data) => console.log(`[Backend]: ${data.toString()}`));
+  
+  serverProcess.stderr.on('data', (data) => {
+    const err = data.toString();
+    serverStderr += err;
+    console.error(`[Backend Error]: ${err}`);
+  });
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      failStartup(new Error('The owned local server did not become ready within 30 seconds.'));
+      stopServer();
+    }, 30000);
+    const cleanup = () => {
+      clearTimeout(timer);
+      cancelServerStartup = null;
+    };
+    const failStartup = error => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+    cancelServerStartup = () => failStartup(new Error('Backend startup was cancelled.'));
+    serverProcess.on('message', message => {
+      if (settled || isQuitting || message?.type !== 'backend-ready' || message.port !== serverPort) return;
+      settled = true;
+      serverReady = true;
+      cleanup();
+      resolve();
+    });
+    serverProcess.on('error', error => {
+      if (!settled) return failStartup(error);
+      if (!isQuitting) {
+        serverReady = false;
+        dialog.showErrorBox('Backend Server Error', error.message);
+        app.quit();
       }
     });
-
-    serverProcess.stdout?.on('data', (data) => console.log(`[Backend]: ${data.toString()}`));
-    
-    serverProcess.stderr?.on('data', (data) => {
-      const err = data.toString();
-      serverStderr += err;
-      console.error(`[Backend Error]: ${err}`);
-    });
-
-    serverProcess.on('exit', (code) => {
-      if (code !== 0 && code !== null) {
-        dialog.showErrorBox(
-          'Backend Server Crash Output',
-          `server.cjs exited with code ${code}.\n\nTried server path: ${serverPath}\n\nCrash Details:\n${serverStderr || 'No error log recorded. Process died during initialization.'}`
-        );
+    serverProcess.on('exit', (code, signal) => {
+      serverProcess = null;
+      serverReady = false;
+      const error = new Error(`server.cjs exited with code ${code}, signal ${signal || 'none'}.\n\nCrash Details:\n${serverStderr || 'No error log recorded.'}`);
+      if (!settled) return failStartup(error);
+      if (!isQuitting) {
+        dialog.showErrorBox('Backend Server Stopped', error.message);
+        app.quit();
       }
     });
-  } catch (launchErr) {
-    dialog.showErrorBox(
-      'Backend Launch Error',
-      `Failed to launch server.cjs at ${serverPath}:\n${launchErr.message}`
-    );
-  }
+  });
 }
 
 function createWindow() {
@@ -85,25 +126,42 @@ function createWindow() {
     fullscreen: false,
     alwaysOnTop: false,
     autoHideMenuBar: true,
+    backgroundColor: '#0a0a0a',
+    show: false,
     icon: path.join(__dirname, 'icon.ico'),
     webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false,
-      devTools: false
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      devTools: false,
+      backgroundThrottling: false
     }
   });
 
-  mainWindow.maximize();
+  const window = mainWindow;
+  let retryTimer;
+
+  window.maximize();
+
+  window.once('ready-to-show', () => {
+    window.show();
+  });
 
   if (!app.isPackaged) {
-    mainWindow.loadURL('http://localhost:5173');
+    window.loadURL('http://localhost:5173').catch((error) => {
+      if (!window.isDestroyed()) dialog.showErrorBox('Unable to Load Application', error.message);
+    });
   } else {
     let attempts = 0;
     const loadExpress = () => {
-      mainWindow.loadURL('http://localhost:3001').catch(() => {
+      if (window.isDestroyed() || isQuitting) return;
+      window.loadURL(`http://127.0.0.1:${serverPort}`).catch(() => {
+        if (window.isDestroyed() || isQuitting) return;
         attempts++;
         if (attempts <= 20) {
-          setTimeout(loadExpress, 1000);
+          retryTimer = setTimeout(loadExpress, 1000);
+        } else if (!window.isDestroyed() && !isQuitting) {
+          dialog.showErrorBox('Unable to Load Application', 'The local server did not become available. Please restart the application.');
         }
       });
     };
@@ -118,24 +176,47 @@ function createWindow() {
 
   mainWindow.on('blur', () => {
     globalShortcut.unregisterAll();
-    // 🟢 Automatically minimize when user clicks away from the app
-    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isMinimized()) {
-      mainWindow.minimize();
-    }
   });
 
-  mainWindow.on('closed', () => {
+  window.on('closed', () => {
+    clearTimeout(retryTimer);
+    globalShortcut.unregisterAll();
     mainWindow = null;
   });
 }
 
-app.whenReady().then(() => {
-  startServer();
-  createWindow();
-});
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
 
-app.on('window-all-closed', () => {
-  if (serverProcess) serverProcess.kill();
-  globalShortcut.unregisterAll();
-  if (process.platform !== 'darwin') app.quit();
-});
+  app.whenReady().then(async () => {
+    if (isQuitting) return;
+    await startServer();
+    if (!isQuitting && serverReady) createWindow();
+  }).catch((error) => {
+    if (!isQuitting) {
+      dialog.showErrorBox('Unable to Start Application', error.message);
+      app.quit();
+    }
+  });
+
+  app.on('activate', () => {
+    if (!isQuitting && serverReady && !mainWindow) createWindow();
+  });
+
+  app.on('before-quit', () => {
+    isQuitting = true;
+    stopServer();
+    globalShortcut.unregisterAll();
+  });
+
+  // This POS owns its backend; closing its final window ends both processes.
+  app.on('window-all-closed', () => app.quit());
+}

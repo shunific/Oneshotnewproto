@@ -1,0 +1,61 @@
+name: Build macOS Release
+
+on:
+  workflow_dispatch: # Allows one-click manual trigger from GitHub Actions tab
+  push:
+    branches:
+      - local-machine-main-tester1
+      - main
+    paths:
+      - 'electron/**'
+      - 'src/**'
+      - 'server*.cjs'
+      - '*.mjs'
+      - 'tests/**'
+      - 'scripts/verify-artifact.cjs'
+      - 'scripts/credential-boundary.cjs'
+      - 'package.json'
+      - '.github/workflows/build-mac.yml'
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Run Native Regression Tests
+        run: npm test
+
+      - name: Rebuild Native Dependencies (macOS)
+        run: npm run rebuild
+
+      - name: Build Web Assets
+        run: npm run build
+
+      - name: Build macOS Electron Package (.dmg & .zip)
+        run: npx electron-builder --mac --arm64 --publish never -c.mac.identity=null
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Verify Packaged Source and Credential Boundaries
+        run: node scripts/verify-artifact.cjs "release/mac-arm64/One Shot Management System.app"
+
+      - name: Upload macOS Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: OneShot-macOS-Installer
+          path: |
+            release/*.dmg
+            release/*.zip
+          retention-days: 30

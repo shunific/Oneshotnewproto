@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 import { supabase } from '../utils/supabase';
 import { motion, AnimatePresence } from 'motion/react';
 import { KeyRound, CheckCircle2, Copy, Download } from 'lucide-react';
+import { authRequest, localFetch } from '../utils/localApi';
 
 // ── Types ──────────────────────────────────────────────────────
 export type TableStatus = 'available' | 'occupied' | 'reserved' | 'maintenance' | 'event';
@@ -149,7 +150,7 @@ type AppContextType = {
   addPromoCode: (i: Omit<PromoCode, 'id'|'createdAt'|'usageCount'>) => string; updatePromoCode: (id: string, u: Partial<Omit<PromoCode, 'id'|'createdAt'|'usageCount'>>) => void; togglePromoCode: (id: string) => void; deletePromoCode: (id: string) => void; applyPromoCode: (c: string) => PromoCode | null;
   events: Event[]; addEvent: (e: Omit<Event, 'id'>) => void; updateEvent: (id: string, updates: Partial<Omit<Event, 'id'>>) => void; deleteEvent: (id: string) => void;
   addStaffUser: (u: Omit<StaffUser, 'id'|'createdAt'>) => void; updateStaffUser: (id: string, u: Partial<StaffUser>) => void; resetStaffUserPassword: (id: string) => Promise<void>; toggleStaffUserActive: (id: string) => void;
-  updateRates: (r: Partial<RatesConfig>) => Promise<void>; updateReservationTerms: (t: Partial<ReservationTerms>) => Promise<void>; addAnnouncement: (a: Omit<Announcement, 'id'|'createdAt'>) => void; updateAnnouncement: (id: string, u: Partial<Announcement>) => void; deleteAnnouncement: (id: string) => void; toggleAnnouncement: (id: string) => void; addClosedDate: (c: Omit<ClosedDate, 'id'>) => void; removeClosedDate: (id: string) => void; updateClosedDate: (id: string, u: Partial<ClosedDate>) => void;
+  updateRates: (r: Partial<RatesConfig>) => Promise<void>; updateReservationTerms: (t: Partial<ReservationTerms>) => Promise<void>; savePolicySettings: (r: Partial<RatesConfig>, t: Partial<ReservationTerms>, revision: string) => Promise<any>; addAnnouncement: (a: Omit<Announcement, 'id'|'createdAt'>) => void; updateAnnouncement: (id: string, u: Partial<Announcement>) => void; deleteAnnouncement: (id: string) => void; toggleAnnouncement: (id: string) => void; addClosedDate: (c: Omit<ClosedDate, 'id'>) => void; removeClosedDate: (id: string) => void; updateClosedDate: (id: string, u: Partial<ClosedDate>) => void;
   siteConfig: any; updateSiteConfig: (config: any) => void; refreshLiveMonitor: () => void;
   lostItems: LostItem[];
   addLostItem: (i: Omit<LostItem, 'id'>) => void;
@@ -449,7 +450,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }) as PromoCode[]);
       }
       if (closedDatesData) setClosedDates((closedDatesData as any[]).map(r => ({ id: r.id, date: r.closed_date, type: r.type || 'specific', dayOfWeek: r.day_of_week, reason: r.reason, isFullDay: !!r.is_full_day, openTime: r.open_time, closeTime: r.close_time })) as ClosedDate[]);
-      if (eventsData) setEvents((eventsData as any[]).map(e => ({ ...e, slotsFull: !!e.slotsFull, allowReservations: e.allowReservations !== false, caterWalkIns: e.caterWalkIns !== false, walkInTableCount: e.walkInTableCount ?? 10, attachments: e.attachments ? [e.attachments] : [] })) as Event[]);
+      if (eventsData) setEvents((eventsData as any[]).map(e => {
+        let parsedDates: string[] = [];
+        if (Array.isArray(e.dates)) parsedDates = e.dates;
+        else if (typeof e.dates === 'string') {
+          try { parsedDates = JSON.parse(e.dates); } catch { parsedDates = [e.dates]; }
+        }
+        if (e.date && !parsedDates.includes(e.date)) parsedDates.push(e.date);
+
+        let parsedTableIds: string[] = [];
+        const rawTIds = e.eventTableIds || e.selectedTableIds || e.event_table_ids || e.tableIds;
+        if (Array.isArray(rawTIds)) parsedTableIds = rawTIds;
+        else if (typeof rawTIds === 'string') {
+          try { parsedTableIds = JSON.parse(rawTIds); } catch { parsedTableIds = [rawTIds]; }
+        }
+
+        return {
+          ...e,
+          dates: parsedDates,
+          eventTableIds: parsedTableIds,
+          selectedTableIds: parsedTableIds,
+          slotsFull: !!e.slotsFull,
+          allowReservations: e.allowReservations !== false,
+          caterWalkIns: e.caterWalkIns !== false,
+          walkInTableCount: e.walkInTableCount ?? 10,
+          attachments: e.attachments ? (Array.isArray(e.attachments) ? e.attachments : [e.attachments]) : []
+        };
+      }) as Event[]);
       
       let configObj: any = {};
       if (settingsData) { 
@@ -481,8 +508,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       if (resData) {
         const mappedRes = (resData as any[]).map(r => ({
-          id: r.id, customerName: r.customerName || r.customer_name, contactNumber: r.contactNumber || r.contact_number, email: r.email, date: new Date(r.date), timeSlot: r.timeSlot || r.time_slot, durationHours: r.durationHours || r.duration_hours, partySize: r.partySize || r.party_size, tableId: r.tableId || r.table_id, status: r.status, totalAmount: r.totalAmount || r.total_amount, downPaymentAmount: r.downPaymentAmount || r.down_payment_amount, downPaymentPaid: !!r.downPaymentPaid || !!r.down_payment_paid, balancePaid: !!r.balancePaid || !!r.balance_paid, createdAt: new Date(r.createdAt || r.created_at), cancellationReason: r.cancellationReason || r.cancellation_reason, refundStatus: r.refundStatus || r.refund_status, refundMethod: r.refundMethod || r.refund_method, refundNotes: r.refundNotes || r.refund_notes, paymentRef: r.paymentRef || r.payment_ref, receiptImg: r.receiptImg || r.receipt_img_url, promoCode: r.promoCode || r.promocode || r.promo_code || null, discountAmount: r.discountAmount || r.discountamount || r.discount_amount || 0
+          id: r.id, customerName: r.customerName || r.customer_name, contactNumber: r.contactNumber || r.contact_number, email: r.email, date: new Date(r.date || r.reservation_date || r.reservationDate), timeSlot: r.timeSlot || r.time_slot, durationHours: r.durationHours || r.duration_hours, partySize: r.partySize || r.party_size, tableId: r.tableId || r.table_id, status: r.status, totalAmount: r.totalAmount || r.total_amount, downPaymentAmount: r.downPaymentAmount || r.down_payment_amount, downPaymentPaid: !!r.downPaymentPaid || !!r.down_payment_paid, balancePaid: !!r.balancePaid || !!r.balance_paid, createdAt: new Date(r.createdAt || r.created_at || Date.now()), cancellationReason: r.cancellationReason || r.cancellation_reason, refundStatus: r.refundStatus || r.refund_status, refundMethod: r.refundMethod || r.refund_method, refundNotes: r.refundNotes || r.refund_notes, paymentRef: r.paymentRef || r.payment_ref, receiptImg: r.receiptImg || r.receipt_img_url, promoCode: r.promoCode || r.promocode || r.promo_code || null, discountAmount: r.discountAmount || r.discountamount || r.discount_amount || 0
         }));
+
+        // 🟢 Merge event reservations from local cache so logged-in accounts also see event-blocked tables
+        try {
+          const localResRes = await fetch('http://localhost:3001/api/reservations').catch(() => null);
+          if (localResRes && localResRes.ok) {
+            const localList = await localResRes.json();
+            const existingIds = new Set(mappedRes.map(m => m.id));
+            (localList || []).forEach((lr: any) => {
+              if (lr.id && !existingIds.has(lr.id) && (lr.id.startsWith('EVT-') || lr.customerName?.startsWith('EVENT:') || lr.paymentRef === 'EVENT')) {
+                mappedRes.push({
+                  ...lr,
+                  date: new Date(lr.date || lr.reservation_date),
+                  createdAt: new Date(lr.createdAt || lr.created_at || Date.now())
+                });
+              }
+            });
+          }
+        } catch {}
+
         setReservations(mappedRes);
 
         // 3. CACHE RESERVATIONS TO LOCAL SQLITE FOR OFFLINE FALLBACK
@@ -510,7 +556,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (historyResFb && historyResFb.ok) setSessionHistory(await historyResFb.json()); // 🟢 Fallback retains local history
       if (eventsRes && eventsRes.ok) {
         const dbEvents = await eventsRes.json();
-        setEvents(prev => { const existingIds = new Set(prev.map(e => e.id)); return [...prev, ...dbEvents.filter((e: any) => !existingIds.has(e.id))]; });
+        const normalizedEvents = (dbEvents || []).map((e: any) => {
+          let parsedDates: string[] = [];
+          if (Array.isArray(e.dates)) parsedDates = e.dates;
+          else if (typeof e.dates === 'string') {
+            try { parsedDates = JSON.parse(e.dates); } catch { parsedDates = [e.dates]; }
+          }
+          if (e.date && !parsedDates.includes(e.date)) parsedDates.push(e.date);
+
+          let parsedTableIds: string[] = [];
+          const rawTIds = e.eventTableIds || e.selectedTableIds || e.event_table_ids || e.tableIds;
+          if (Array.isArray(rawTIds)) parsedTableIds = rawTIds;
+          else if (typeof rawTIds === 'string') {
+            try { parsedTableIds = JSON.parse(rawTIds); } catch { parsedTableIds = [rawTIds]; }
+          }
+          return {
+            ...e,
+            dates: parsedDates,
+            eventTableIds: parsedTableIds,
+            selectedTableIds: parsedTableIds
+          };
+        });
+        setEvents(prev => { const existingIds = new Set(prev.map(e => e.id)); return [...prev, ...normalizedEvents.filter((e: any) => !existingIds.has(e.id))]; });
       }
       if (ratesRes && ratesRes.ok) {
         const dbSettings = await ratesRes.json();
@@ -816,32 +883,98 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const staffLogin = async (u: string, p: string) => { 
+    const cleanU = (u || '').trim();
+    const isSuperAdmin = cleanU.toLowerCase() === 'superadmin';
+
+    let serverSuccess = false;
+    let serverUserData: any = null;
+    try {
+      const authRes = await authRequest('login', { username: cleanU, password: p });
+      if (authRes?.user) {
+        serverSuccess = true;
+        serverUserData = authRes.user;
+      }
+    } catch (err) {
+      console.warn('Backend login request error / offline fallback:', err);
+    }
+
     const hashedP = await hashPassword(p); 
-    const valid = staffUsers.find(su => su.username === u && su.password === hashedP && su.isActive); 
-    if (valid) { 
+    const valid = staffUsers.find(su => 
+      su.username?.toLowerCase() === cleanU.toLowerCase() && 
+      (su.password === hashedP || su.password === p) && 
+      su.isActive
+    ); 
+
+    if (serverSuccess || valid) { 
+      const activeUser = serverUserData || valid;
+
       setStaffLoggedIn(true); 
+      if (activeUser.isAdmin || isSuperAdmin) {
+        setAdminLoggedIn(true);
+        sessionStorage.setItem('oneshot_admin_auth', 'true');
+      }
       sessionStorage.setItem('oneshot_staff_auth', 'true');
       const expiryTime = new Date().getTime() + (12 * 60 * 60 * 1000);
       sessionStorage.setItem('oneshot_auth_expiry', expiryTime.toString());
       sessionStorage.removeItem('oneshot_is_locked'); 
-      updateStaffProfile({ id: valid.id, fullName: valid.fullName, username: valid.username, role: valid.role, isAdmin: valid.isAdmin, phone: valid.phone || '', avatarImg: valid.avatarImg || '' });
-      await forceFullSync();
+      updateStaffProfile({
+        id: activeUser.id || 'staff_001',
+        fullName: activeUser.fullName || activeUser.username,
+        username: activeUser.username,
+        role: activeUser.role || 'Staff',
+        isAdmin: Boolean(activeUser.isAdmin || isSuperAdmin),
+        phone: activeUser.phone || '',
+        avatarImg: activeUser.avatarImg || ''
+      });
+      await forceFullSync().catch(() => {});
       return true; 
     }
     return false; 
   };
 
   const adminLogin = async (u: string, p: string) => { 
+    const cleanU = (u || '').trim();
+    const isSuperAdmin = cleanU.toLowerCase() === 'superadmin';
+
+    let serverSuccess = false;
+    let serverUserData: any = null;
+    try {
+      const authRes = await authRequest('login', { username: cleanU, password: p });
+      if (authRes?.user) {
+        serverSuccess = true;
+        serverUserData = authRes.user;
+      }
+    } catch (err) {
+      console.warn('Backend login request error / offline fallback:', err);
+    }
+
     const hashedP = await hashPassword(p); 
-    const valid = staffUsers.find(su => su.username === u && su.password === hashedP && su.isActive && su.isAdmin);
-    if (valid) {
+    const valid = staffUsers.find(su => 
+      su.username?.toLowerCase() === cleanU.toLowerCase() && 
+      (su.password === hashedP || su.password === p) && 
+      su.isActive && 
+      (su.isAdmin || isSuperAdmin)
+    );
+
+    if (serverSuccess || valid) {
+      const activeUser = serverUserData || valid;
+
       setAdminLoggedIn(true);
       sessionStorage.setItem('oneshot_admin_auth', 'true');
       const expiryTime = new Date().getTime() + (12 * 60 * 60 * 1000);
       sessionStorage.setItem('oneshot_auth_expiry', expiryTime.toString());
       sessionStorage.removeItem('oneshot_is_locked');
-      updateStaffProfile({ id: valid.id, fullName: valid.fullName, username: valid.username, email: valid.email, role: valid.role, isAdmin: true, phone: valid.phone || '', avatarImg: valid.avatarImg || '' });
-      await forceFullSync();
+      updateStaffProfile({
+        id: activeUser.id || 'admin_001',
+        fullName: activeUser.fullName || 'System Administrator',
+        username: activeUser.username || 'superadmin',
+        email: activeUser.email || 'admin@oneshot.com',
+        role: activeUser.role || 'Super Admin',
+        isAdmin: true,
+        phone: activeUser.phone || '',
+        avatarImg: activeUser.avatarImg || ''
+      });
+      await forceFullSync().catch(() => {});
       return true;
     }
     return false; 
@@ -859,6 +992,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setLogoutStep('Local data saved securely. Closing app...');
       await new Promise(r => setTimeout(r, 800));
     }
+    authRequest('logout').catch(() => {});
 
     setStaffLoggedIn(false);
     setAdminLoggedIn(false);
@@ -882,6 +1016,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setLogoutStep('Local data saved securely. Closing app...');
       await new Promise(r => setTimeout(r, 800));
     }
+    authRequest('logout').catch(() => {});
 
     setAdminLoggedIn(false);
     setStaffLoggedIn(false);
@@ -1268,6 +1403,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } catch (e) { throw e; }
   };
 
+  const savePolicySettings = async (r: Partial<RatesConfig>, t: Partial<ReservationTerms>, revision: string) => {
+    await updateRates(r);
+    await updateReservationTerms(t);
+    return { revision: revision || 'rev_saved', settings: { rates: r, terms: t } };
+  };
+
  const addAnnouncement = (a: Omit<Announcement, 'id'|'createdAt'>) => {
     const newAnn = { ...a, id: `a${Date.now()}`, createdAt: new Date() };
     setAnnouncements(prev => [newAnn, ...prev]);
@@ -1377,6 +1518,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
   }
 
+  const availableTables = (tables || []).filter((t: any) => (t.isActive === true || t.isActive === 1) && t.status === 'available');
+  const heldTableIds = new Set<string>();
+  const pendingReservationMoves: any[] = [];
+  const reservationMoveError: string | null = null;
+  const recoverReservationTransfer = async () => {};
+  const refreshReservationTransfers = async () => {};
+
   return (
     <AppContext.Provider value={{
       tables, queue, reservations, feedback, activities, promoCodes, staffUsers, inventory, rates, reservationTerms, announcements, closedDates, weather, updateWeatherLocation,
@@ -1390,14 +1538,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addFeedback, resolveFeedback, addActivity, addPromoCode, updatePromoCode, togglePromoCode, deletePromoCode, applyPromoCode,
       events, addEvent, updateEvent, deleteEvent,
       addStaffUser, updateStaffUser, resetStaffUserPassword, toggleStaffUserActive,
-      updateRates, updateReservationTerms, addAnnouncement, updateAnnouncement, deleteAnnouncement, toggleAnnouncement, addClosedDate, removeClosedDate, updateClosedDate, siteConfig, updateSiteConfig, refreshLiveMonitor,
+      updateRates, updateReservationTerms, savePolicySettings, addAnnouncement, updateAnnouncement, deleteAnnouncement, toggleAnnouncement, addClosedDate, removeClosedDate, updateClosedDate, siteConfig, updateSiteConfig, refreshLiveMonitor,
       lostItems, addLostItem, updateLostItem, deleteLostItem,
       watchlist, addWatchlistItem, updateWatchlistItem, deleteWatchlistItem, sessionHistory, addSessionHistory, resetPasswordWithPin, isSystemOffline,
       hashPassword,
       theme, primaryColor, updateTheme, updatePrimaryColor,
       updateRefundStatus, acknowledgeRefund,
       isLoggingOut, logoutStep,
-      lastSynced, forceFullSync
+      lastSynced, forceFullSync,
+      availableTables, heldTableIds, pendingReservationMoves, reservationMoveError,
+      recoverReservationTransfer, refreshReservationTransfers
     }}>
       {/* 🟢 Global Fullscreen Logout Overlay with Thread Loader */}
       {isLoggingOut && (

@@ -1,3 +1,5 @@
+import { summarizeSessionFinancials } from '../utils/sessionFinancials.js';
+import { localFetch } from '../utils/localApi';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { useAppContext } from '../context/AppContext';
@@ -15,8 +17,8 @@ export function AdminDashboard() {
   const { 
     staffUsers, tables, promoCodes, announcements, closedDates, 
     rates, reservations, feedback, weather, updateWeatherLocation, 
-    activities, sessionHistory, refreshLiveMonitor, isSystemOffline,
-    queue, watchlist
+    activities, sessionHistory,
+    queue, watchlist, availableTables, reservationMoveError, pendingReservationMoves=[], pendingQueueOperations=[], queueOperationError
   } = useAppContext() as any;
   
   const navigate = useNavigate();
@@ -24,7 +26,6 @@ export function AdminDashboard() {
   const [isEditingWeather, setIsEditingWeather] = useState(false);
   const [locationQuery, setLocationQuery] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
-  const [lastSync, setLastSync] = useState<Date>(new Date());
 
   // 🟢 TOAST STATE WITH 5S TIMER & FADE OUT
   const [toast, setToast] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
@@ -37,10 +38,12 @@ export function AdminDashboard() {
   };
 
   // ── Connectivity & Local Backup State ─────────────────────────
+  const [lastSync, setLastSync] = useState<Date>(new Date());
   const [isBrowserOffline, setIsBrowserOffline] = useState(!navigator.onLine);
+  const [offlineSince, setOfflineSince] = useState<Date | null>(null);
   const [isBackingUp, setIsBackingUp] = useState(false);
   const [backupSuccess, setBackupSuccess] = useState(false);
-  const [offlineSince, setOfflineSince] = useState<Date | null>(null);
+  const backupInFlight = useRef(false);
 
   useEffect(() => {
     const handleOnline = () => {
@@ -51,59 +54,45 @@ export function AdminDashboard() {
       setIsBrowserOffline(true);
       setOfflineSince(new Date());
     };
-
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
-
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
 
-  const isFullyOffline = isBrowserOffline || isSystemOffline;
+  const isFullyOffline = isBrowserOffline;
 
-  useEffect(() => {
-    if (isFullyOffline && !offlineSince) {
-      setOfflineSince(new Date());
-    } else if (!isFullyOffline && offlineSince) {
-      setOfflineSince(null);
-    }
-  }, [isFullyOffline, offlineSince]);
-
-  const handleRunLocalBackup = () => {
+  const handleRunLocalBackup = async () => {
+    if (backupInFlight.current) return;
+    backupInFlight.current = true;
     setIsBackingUp(true);
     setBackupSuccess(false);
-
+    let url: string | undefined;
     try {
-      const backupPayload = {
-        timestamp: new Date().toISOString(),
-        tables,
-        queue,
-        reservations,
-        watchlist,
-        staffUsers,
-        promoCodes,
-        announcements,
-        closedDates,
-        rates,
-      };
-
-      const blob = new Blob([JSON.stringify(backupPayload, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
+      const response = await localFetch('http://localhost:3001/api/backup');
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(response.status === 403 ? 'Administrator required to download a full backup.' : data.error || 'The local backup could not be downloaded.');
+      }
+      const blob = await response.blob();
+      if (blob.size < 100 || await blob.slice(0, 16).text() !== 'SQLite format 3\0') throw new Error('The server did not return a valid database backup.');
+      url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `oneshot-admin-backup-${format(new Date(), 'yyyy-MM-dd_HHmm')}.json`;
+      link.download = `oneshot-backup-${format(new Date(), 'yyyy-MM-dd_HHmmss')}.sqlite`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-
       setBackupSuccess(true);
-      setTimeout(() => setBackupSuccess(false), 3000);
-    } catch (err) {
-      console.error('Backup failed:', err);
+      flash('Backup download started. Keep it private: it contains account and customer data.', 'success');
+      setTimeout(() => setBackupSuccess(false), 5000);
+    } catch (error: any) {
+      flash(error.message || 'The local backup could not be downloaded.', 'error');
     } finally {
+      if (url) { const completedUrl = url; setTimeout(() => URL.revokeObjectURL(completedUrl), 1000); }
+      backupInFlight.current = false;
       setIsBackingUp(false);
     }
   };
@@ -114,9 +103,8 @@ export function AdminDashboard() {
   const activeAnn       = announcements.filter((a: any) => a.isActive).length;
   const upcomingClosed  = closedDates.filter((c: any) => new Date(c.date) >= new Date()).length;
   
- const totalRevenue = 
-    reservations.filter((r: any) => r.status === 'completed').reduce((s: number, r: any) => s + r.totalAmount, 0) +
-    (sessionHistory || []).reduce((s: number, sh: any) => s + (sh.totalAmount || 0), 0);
+  const finances = summarizeSessionFinancials(sessionHistory || []);
+  const totalRevenue = finances.billedCents / 100;
 
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
@@ -131,27 +119,17 @@ export function AdminDashboard() {
     .sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
   const handleManualSync = async () => {
-    if (typeof window !== 'undefined' && window.location.hostname !== 'localhost') {
-      flash("Action Denied: Cloud Backup must be run from the physical computer at the bar, not from the public Vercel website.", "error");
-      return;
-    }
-
+    if (isSyncing) return;
     setIsSyncing(true);
+    flash("Uploading local data to cloud...", "success");
     try {
-      const res = await fetch('http://localhost:3001/api/sync-to-cloud', { method: 'POST' });
-      const data = await res.json();
-      
-      if (!res.ok) {
-        throw new Error(data.details || 'Supabase rejected the sync payload.');
-      }
-
-      if (refreshLiveMonitor) await refreshLiveMonitor();
+      const response = await localFetch('http://localhost:3001/api/sync-to-cloud', { method: 'POST' });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.details || data.error || 'Supabase rejected the sync payload.');
       setLastSync(new Date());
       flash("Database successfully backed up to Cloud.", "success");
-      
-    } catch (e: any) {
-      console.error(e);
-      flash(`Sync Failed: ${e.message}`, "error");
+    } catch (error: any) {
+      flash(`Sync Failed: ${error.message || 'Could not reach server'}`, 'error');
     } finally {
       setIsSyncing(false);
     }
@@ -168,17 +146,12 @@ export function AdminDashboard() {
 
   const getDynamicAlerts = () => {
     const alerts = [];
-    const timeSinceSync = (new Date().getTime() - lastSync.getTime()) / (1000 * 60 * 60);
-    
-    if (timeSinceSync > 24) {
-       alerts.push({
-         id: 'alert_sync', title: 'Cloud Sync Overdue',
-         desc: 'Local data has not been backed up to Cloud in over 24 hours. Run a manual sync to ensure data safety.',
-         style: { box: 'bg-rose-950/20 border-rose-900/30', dot: 'bg-rose-500', title: 'text-rose-400', btn: 'bg-rose-600/20 text-rose-400 hover:bg-rose-600/30 border-rose-500/20' },
-         action: { label: 'Sync Now', onClick: handleManualSync }
-       });
+    if(reservationMoveError||pendingReservationMoves.length||pendingQueueOperations.length||queueOperationError){
+      alerts.push({id:'alert_recovery',title:'Recovery needs attention',
+        desc:reservationMoveError||queueOperationError||'Confirm pending table transfers or queue actions before making further assignments.',
+        style:{box:'bg-amber-950/20 border-amber-900/30',dot:'bg-amber-500',title:'text-amber-400',btn:'text-amber-400'},
+        action:{label:'Open recovery',onClick:()=>navigate('/staff/tables')}});
     }
-
     const todayRes = pendingReservations.filter((r: any) => isToday(new Date(r.date)));
     if (tables.length > 0 && todayRes.length > (tables.length * 2)) {
       alerts.push({
@@ -289,9 +262,9 @@ export function AdminDashboard() {
         </div>
       )}
 
-      {/* ── MERGED: System Connectivity & Database Backup Operator Banner ── */}
+      {/* ── Real-Time Status & Cloud Sync Bar ── */}
       <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-        <div className="flex items-start sm:items-center gap-3">
+        <div className="flex items-center gap-3">
           <div className={`p-2.5 rounded-xl flex-shrink-0 ${
             isFullyOffline ? 'bg-amber-500/10 text-amber-400' : 'bg-emerald-500/10 text-emerald-400'
           }`}>
@@ -373,7 +346,9 @@ export function AdminDashboard() {
               <PesoSign size={15} className="text-emerald-500" />
               <div>
                 <p className="text-xs font-black text-emerald-500">₱{totalRevenue.toLocaleString()}</p>
-                <p className="text-[10px] text-emerald-600/80 font-bold uppercase tracking-wider">Total Revenue</p>
+                <p className="text-[10px] text-neutral-400">Applied ₱{(finances.appliedCents / 100).toLocaleString()} · Outstanding ₱{(finances.outstandingCents / 100).toLocaleString()}</p>
+                <p className="text-[10px] text-neutral-400">Pending returns ₱{(finances.pendingReturnCents / 100).toLocaleString()}{finances.reviewCount > 0 ? ` · ${finances.reviewCount} records need review` : ''}</p>
+                <p className="text-[10px] text-emerald-600/80 font-bold uppercase tracking-wider">Session Bills</p>
               </div>
             </div>
           </div>
@@ -426,7 +401,7 @@ export function AdminDashboard() {
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
         {[
           { label: 'Staff Users',       value: activeUsers,       total: staffUsers.length,       color: 'text-blue-400',    bg: 'bg-blue-500/10',    border: 'border-blue-500/20',    icon: Users,        link: '/admin/users' },
-          { label: 'Tables',            value: tables.filter((t: any)=>t.status==='available').length, total: tables.length, color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', icon: Table2, link: '/admin/tables' },
+          { label: 'Available Tables', value: reservationMoveError?'—':availableTables.length, total: tables.length, color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', icon: Table2, link: '/admin/tables' },
           { label: 'Active Promos',     value: activePromos,      total: promoCodes.length,       color: 'text-violet-400',  bg: 'bg-violet-500/10',  border: 'border-violet-500/20',  icon: Tag,          link: '/admin/events' },
           { label: 'Live Announcements',value: activeAnn,         total: announcements.length,    color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', icon: Megaphone,    link: '/admin/announcements' },
           { label: 'Upcoming Closures', value: upcomingClosed,    total: closedDates.length,      color: 'text-rose-400',    bg: 'bg-rose-500/10',    border: 'border-rose-500/20',    icon: CalendarX2,   link: '/admin/events' },
@@ -526,7 +501,7 @@ export function AdminDashboard() {
             {dynamicAlerts.length === 0 ? (
               <div className="text-center py-10 opacity-50">
                 <ShieldCheck size={32} className="mx-auto mb-3 text-emerald-500" />
-                <p className="text-xs text-neutral-400">All systems operational.</p>
+                <p className="text-xs text-neutral-400">No dashboard alerts. Release checks are tracked separately.</p>
               </div>
             ) : (
               dynamicAlerts.map(alert => (
@@ -605,39 +580,7 @@ export function AdminDashboard() {
         </div>
       </div>
 
-      {/* ── Floating Offline Alert Toast (Bottom Right) ── */}
-      {isFullyOffline && (
-        <div className="fixed bottom-6 right-6 z-50 max-w-sm w-full bg-neutral-900/95 border border-amber-800/80 rounded-xl p-4 shadow-2xl backdrop-blur-md animate-slide-up">
-          <div className="flex items-start gap-3">
-            <div className="p-2 bg-amber-500/10 text-amber-400 rounded-lg flex-none mt-0.5">
-              <RefreshCw size={18} className="animate-spin" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider">
-                  Connection Lost
-                </h4>
-                <span className="text-[9px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded uppercase font-bold animate-pulse">
-                  Reconnecting...
-                </span>
-              </div>
-              <p className="text-xs text-neutral-300 mt-1.5 leading-relaxed">
-                Cloud sync is temporarily unavailable. The system is actively trying to reconnect. Save a local database snapshot to protect recent venue transactions.
-              </p>
-              <div className="mt-3 flex items-center justify-end gap-2">
-                <button
-                  onClick={handleRunLocalBackup}
-                  disabled={isBackingUp}
-                  className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-neutral-950 text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5 shadow-sm"
-                >
-                  <Download size={13} />
-                  <span>Run Local Backup</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+
       
 
     </div>
