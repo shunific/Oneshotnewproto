@@ -3,6 +3,7 @@ import { RootWrapper } from './RootWrapper';
 import { Layout } from './layout';
 import { AdminLayout } from './adminLayout';
 import { OfflineLogin } from './pages/OfflineLogin';
+import { HomePage } from './pages/HomePage';
 import { LiveMonitor } from './pages/LiveMonitor';
 // Staff pages
 import { OverviewDashboard } from './pages/OverviewDashboard';
@@ -34,6 +35,10 @@ export const router = createBrowserRouter([
     children: [
       // 1. Force the root path to be the Offline Login
       { path: '/', Component: OfflineLogin },
+      { path: '/home', Component: HomePage },
+      { path: '/customer', Component: HomePage },
+      { path: '/about', Component: HomePage },
+      { path: '/feedback', Component: HomePage },
       { path: '/monitor', Component: LiveMonitor },
       
       // 2. Staff Portal

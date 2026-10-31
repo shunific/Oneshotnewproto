@@ -35,9 +35,9 @@ function StatCard({ label, value, sub, color, icon: Icon, onClick }: {
 
 export function OverviewDashboard() {
   const { 
-    tables = [], queue = [], reservations, watchlist, 
+    tables, queue, reservations, watchlist, 
     staffUsers, promoCodes, announcements, closedDates, rates, 
-    staffProfile, availableTables, heldTableIds, reservationMoveError
+    staffProfile,availableTables,heldTableIds,reservationMoveError
   } = useAppContext() as any;
   const navigate = useNavigate();
 
@@ -134,13 +134,13 @@ export function OverviewDashboard() {
 
   const activeWatchlist = watchlist?.filter((w: any) => w.status === 'active' && !w.isArchived) || [];
 
-  const available = (availableTables || []).length;
-  const occupied = (tables || []).filter((t: any) => t.isActive && t.status === 'occupied').length;
-  const reserved = (tables || []).filter((t: any) => t.isActive && t.status === 'reserved').length;
-  const waiting = (queue || []).filter((q: any) => q.status === 'waiting').length;
+  const available = availableTables.length;
+  const occupied = tables.filter((t: any) => t.isActive && t.status === 'occupied').length;
+  const reserved = tables.filter((t: any) => t.isActive && t.status === 'reserved').length;
+  const waiting = queue.filter((q: any) => q.status === 'waiting').length;
 
-  const waitingQueue = (queue || []).filter((q: any) => q.status === 'waiting');
-  const occupiedWithSession = (tables || []).filter((t: any) => t.isActive && t.status === 'occupied' && t.session && !heldTableIds.has(t.id));
+  const waitingQueue = queue.filter((q: any) => q.status === 'waiting');
+  const occupiedWithSession = tables.filter((t: any) => t.isActive && t.status === 'occupied' && t.session && !heldTableIds.has(t.id));
 
   const sortedEndTimes = occupiedWithSession
     .map((t: any) => addMinutes(new Date(t.session!.startTime), t.session!.durationMinutes || 0))
@@ -161,14 +161,14 @@ export function OverviewDashboard() {
   const overallWait = waitingQueue.length > 0 ? estimateWaitForPosition(waitingQueue.length) : null;
 
   // 🟢 ENHANCED: Open Time is officially classified and visually tracked as Overtime
-  const overtimeTables = (tables || []).filter((t: any) => {
+  const overtimeTables = tables.filter((t: any) => {
     if (!t.isActive || t.status !== 'occupied' || !t.session) return false;
     if (t.session.isOpenTime || t.session.durationMinutes === null) return true;
     const end = addMinutes(new Date(t.session.startTime), t.session.durationMinutes);
     return new Date() > end;
   });
 
- const alertTables = (tables || []).filter((t: any) => {
+ const alertTables = tables.filter((t: any) => {
     if (!t.isActive || t.status !== 'occupied' || !t.session) return false;
     if (t.session.isOpenTime || t.session.durationMinutes === null) return false; // Handled strictly by Overtime
     const end = addMinutes(new Date(t.session.startTime), t.session.durationMinutes);
@@ -352,7 +352,7 @@ export function OverviewDashboard() {
 
       {/* Stat Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label="Available Tables" value={reservationMoveError?'—':available} sub={reservationMoveError?'Check transfer recovery':`of ${(tables || []).length} total`} color="text-emerald-400" icon={TableProperties} onClick={() => navigate('/staff/tables')} />
+        <StatCard label="Available Tables" value={reservationMoveError?'—':available} sub={reservationMoveError?'Check transfer recovery':`of ${tables.length} total`} color="text-emerald-400" icon={TableProperties} onClick={() => navigate('/staff/tables')} />
         <StatCard label="Occupied" value={occupied} sub={`${reserved} reserved`} color="text-amber-400" icon={TableProperties} onClick={() => navigate('/staff/tables')} />
         <StatCard label="Waiting Queue" value={waiting} sub="FCFS order" color="text-purple-400" icon={Users} onClick={() => navigate('/staff/queue')} />
         <StatCard label="Overtime Tables" value={overtimeTables.length} sub="Requires attention" color="text-rose-400" icon={Clock} onClick={() => navigate('/staff/tables')} />
@@ -367,7 +367,7 @@ export function OverviewDashboard() {
           </button>
         </div>
         <div className="grid grid-cols-5 sm:grid-cols-10 gap-2">
-          {((tables || []).filter((t: any) => t.isActive)).map((t: any) => {
+          {tables.filter((t: any) => t.isActive).map((t: any) => {
             const isOpenTime = t.status === 'occupied' && t.session && (t.session.isOpenTime || t.session.durationMinutes === null);
             const isOvertime = t.status === 'occupied' && t.session && (isOpenTime || new Date() > addMinutes(new Date(t.session.startTime), t.session.durationMinutes!));
             const isAlert = !isOvertime && t.status === 'occupied' && t.session && (() => {

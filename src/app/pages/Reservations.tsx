@@ -145,6 +145,10 @@ export function Reservations() {
   } = useAppContext() as any;
   const navigate = useNavigate();
   
+  const safeAvailableTables = Array.isArray(availableTables)
+    ? availableTables
+    : (Array.isArray(tables) ? tables.filter((t: any) => t.isActive && t.status === 'available') : []);
+  
   const [showForm, setShowForm] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
   const [viewMonth, setViewMonth] = useState(new Date());
@@ -494,19 +498,19 @@ export function Reservations() {
 
     if (res.tableId) {
       const preferredTable = tables.find((t: any) => t.id === res.tableId);
-      if (preferredTable && !availableTables.some((table:any)=>table.id===preferredTable.id)) {
+      if (preferredTable && !safeAvailableTables.some((table:any)=>table.id===preferredTable.id)) {
         const choice = window.confirm(`Their preferred table (${preferredTable.name}) is currently occupied.\n\nClick OK to assign them to ANY available table, or Cancel to manually add them to the Waiting Queue.`);
         if (!choice) {
           navigate('/staff/queue');
           return;
         }
-      } else if (preferredTable && availableTables.some((table:any)=>table.id===preferredTable.id)) {
+      } else if (preferredTable && safeAvailableTables.some((table:any)=>table.id===preferredTable.id)) {
         targetTableId = preferredTable.id;
       }
     }
 
     if (!targetTableId) {
-      const firstAvail = availableTables[0];
+      const firstAvail = safeAvailableTables[0];
       if (firstAvail) {
         targetTableId = firstAvail.id;
       } else {
@@ -1424,7 +1428,22 @@ export function Reservations() {
                            </div>
                            <div>
                               <label className="block text-[10px] text-neutral-500 mb-1">New Time</label>
-                              <input type="time" value={rescheduleData.newTimeSlot} onChange={e => setRescheduleData(prev => prev ? ({...prev, newTimeSlot: e.target.value}) : null)} className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-[10px] text-neutral-100 focus:outline-none focus:border-amber-500" style={{ colorScheme: 'dark' }} />
+                              <input 
+                                type="time" 
+                                value={rescheduleData.newTimeSlot} 
+                                min={rescheduleData.newDate && isToday(rescheduleData.newDate) ? format(new Date(), 'HH:mm') : undefined}
+                                onChange={e => {
+                                  const val = e.target.value;
+                                  const nowTime = format(new Date(), 'HH:mm');
+                                  if (rescheduleData.newDate && isToday(rescheduleData.newDate) && val && val < nowTime) {
+                                    setRescheduleData(prev => prev ? ({ ...prev, newTimeSlot: nowTime }) : null);
+                                    return;
+                                  }
+                                  setRescheduleData(prev => prev ? ({...prev, newTimeSlot: val}) : null);
+                                }} 
+                                className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-[10px] text-neutral-100 focus:outline-none focus:border-amber-500" 
+                                style={{ colorScheme: 'dark' }} 
+                              />
                            </div>
                            <div>
                               <label className="block text-[10px] text-neutral-500 mb-1">Duration</label>
@@ -1667,8 +1686,29 @@ export function Reservations() {
                       <label className="block text-xs text-emerald-500 font-bold uppercase tracking-wider mb-3 flex items-center gap-1.5"><Clock size={14} /> Schedule Setup</label>
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-xs text-neutral-400 mb-1.5">Start Time <span className="text-rose-500">*</span></label>
-                          <input required type="time" style={{ colorScheme: 'dark' }} value={form.timeSlot} onChange={e => setForm(f => ({ ...f, timeSlot: e.target.value }))} className={`w-full bg-neutral-800 border rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-emerald-500 ${timeValidation !== 'valid' && form.timeSlot ? 'border-rose-500/50 text-rose-200' : 'border-neutral-700'}`} />
+                          <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end">
+                            <span>Start Time <span className="text-rose-500">*</span></span>
+                            {selectedDate && isToday(selectedDate) && (
+                              <span className="text-[9px] text-amber-500 font-semibold">Min: {format(new Date(), 'HH:mm')}</span>
+                            )}
+                          </label>
+                          <input 
+                            required 
+                            type="time" 
+                            style={{ colorScheme: 'dark' }} 
+                            min={selectedDate && isToday(selectedDate) ? format(new Date(), 'HH:mm') : undefined}
+                            value={form.timeSlot} 
+                            onChange={e => {
+                              const val = e.target.value;
+                              const nowTime = format(new Date(), 'HH:mm');
+                              if (selectedDate && isToday(selectedDate) && val && val < nowTime) {
+                                setForm(f => ({ ...f, timeSlot: nowTime }));
+                                return;
+                              }
+                              setForm(f => ({ ...f, timeSlot: val }));
+                            }} 
+                            className={`w-full bg-neutral-800 border rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-emerald-500 ${timeValidation !== 'valid' && form.timeSlot ? 'border-rose-500/50 text-rose-200' : 'border-neutral-700'}`} 
+                          />
                         </div>
                         <div className="flex flex-col justify-end">
                           <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end"><span>Duration</span><span className="text-[9px] text-amber-500">Max ~{maxAllowedDuration}h</span></label>

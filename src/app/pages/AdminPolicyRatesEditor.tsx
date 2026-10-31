@@ -19,22 +19,22 @@ export default function AdminPolicyRatesEditor() {
   const [policyLoadError, setPolicyLoadError] = useState('');
   const [policyWarning, setPolicyWarning] = useState(false);
   const [policyBaseline, setPolicyBaseline] = useState<any>(null);
-  const savedRates = policyBaseline?.rates || (rates || {});
-  const savedTerms = policyBaseline?.terms || (reservationTerms || {});
+  const savedRates = policyBaseline?.rates || rates;
+  const savedTerms = policyBaseline?.terms || reservationTerms;
 
   const [ratesForm, setRatesForm] = useState({
-    ...(rates || {}),
-    downPaymentPercent: (rates || {}).downPaymentPercent ?? 50,
-    overtimeRate: (rates || {}).overtimeRate ?? (rates || {}).hourlyRate ?? 0,
+    ...rates,
+    downPaymentPercent: rates.downPaymentPercent ?? 50,
+    overtimeRate: rates.overtimeRate ?? rates.hourlyRate ?? 0,
   });
 
   const [termsForm, setTermsForm] = useState({
-    ...(reservationTerms || {}),
-    weekdayMinPartySize: (reservationTerms || {}).weekdayMinPartySize ?? 1,
-    weekdayMaxPartySize: (reservationTerms || {}).weekdayMaxPartySize ?? 8,
-    weekendMinPartySize: (reservationTerms || {}).weekendMinPartySize ?? 1,
-    weekendMaxPartySize: (reservationTerms || {}).weekendMaxPartySize ?? 8,
-    cancellationHours: (reservationTerms || {}).cancellationHours ?? 24
+    ...reservationTerms,
+    weekdayMinPartySize: reservationTerms.weekdayMinPartySize ?? 1,
+    weekdayMaxPartySize: reservationTerms.weekdayMaxPartySize ?? 8,
+    weekendMinPartySize: reservationTerms.weekendMinPartySize ?? 1,
+    weekendMaxPartySize: reservationTerms.weekendMaxPartySize ?? 8,
+    cancellationHours: reservationTerms.cancellationHours ?? 24
   });
 
   const [showSummaryModal, setShowSummaryModal] = useState(false);
@@ -53,7 +53,7 @@ export default function AdminPolicyRatesEditor() {
   const handleReloadSavedSettings = async () => {
     setIsLoading(true);
     try {
-      const response = await localFetch('/api/settings/policy');
+      const response = await localFetch('http://localhost:3001/api/settings/policy');
       if (response.ok) {
         const saved = await response.json();
         if (saved?.settings?.rates) setRatesForm(saved.settings.rates);
@@ -85,7 +85,7 @@ export default function AdminPolicyRatesEditor() {
     setIsLoading(true);
     void (async () => {
       try {
-        const response = await localFetch('/api/settings/policy');
+        const response = await localFetch('http://localhost:3001/api/settings/policy');
         if (response.ok) {
           const saved = await response.json();
           if (active && saved?.settings?.rates && saved?.settings?.terms) {
@@ -95,7 +95,6 @@ export default function AdminPolicyRatesEditor() {
             setPolicyBaseline(saved.settings);
             setPolicyLoadError('');
             setPolicyWarning(false);
-            setIsLoading(false);
             return;
           }
         }
@@ -627,6 +626,15 @@ export default function AdminPolicyRatesEditor() {
         >
           <RefreshCw size={15} className={isLoading ? 'animate-spin text-amber-400' : 'text-neutral-400'} />
           <span>{isLoading ? 'Reloading...' : 'Reload Saved Settings'}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={handleReviewChanges}
+          disabled={isSaving}
+          className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 transition-all shadow-lg shadow-emerald-950/40 cursor-pointer disabled:opacity-50 text-xs uppercase tracking-wider"
+        >
+          <Save size={16} /> Save Changes
         </button>
       </div>
       {showSummaryModal && (

@@ -400,11 +400,11 @@ export function AdminDashboard() {
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
         {[
-          { label: 'Staff Users',       value: activeUsers,       total: (staffUsers || []).length,       color: 'text-blue-400',    bg: 'bg-blue-500/10',    border: 'border-blue-500/20',    icon: Users,        link: '/admin/users' },
-          { label: 'Available Tables', value: reservationMoveError ? '—' : (availableTables || []).length, total: (tables || []).length, color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', icon: Table2, link: '/admin/tables' },
-          { label: 'Active Promos',     value: activePromos,      total: (promoCodes || []).length,       color: 'text-violet-400',  bg: 'bg-violet-500/10',  border: 'border-violet-500/20',  icon: Tag,          link: '/admin/events' },
-          { label: 'Live Announcements',value: activeAnn,         total: (announcements || []).length,    color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', icon: Megaphone,    link: '/admin/announcements' },
-          { label: 'Upcoming Closures', value: upcomingClosed,    total: (closedDates || []).length,      color: 'text-rose-400',    bg: 'bg-rose-500/10',    border: 'border-rose-500/20',    icon: CalendarX2,   link: '/admin/events' },
+          { label: 'Staff Users',       value: activeUsers,       total: staffUsers.length,       color: 'text-blue-400',    bg: 'bg-blue-500/10',    border: 'border-blue-500/20',    icon: Users,        link: '/admin/users' },
+          { label: 'Available Tables', value: reservationMoveError?'—':availableTables.length, total: tables.length, color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', icon: Table2, link: '/admin/tables' },
+          { label: 'Active Promos',     value: activePromos,      total: promoCodes.length,       color: 'text-violet-400',  bg: 'bg-violet-500/10',  border: 'border-violet-500/20',  icon: Tag,          link: '/admin/events' },
+          { label: 'Live Announcements',value: activeAnn,         total: announcements.length,    color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', icon: Megaphone,    link: '/admin/announcements' },
+          { label: 'Upcoming Closures', value: upcomingClosed,    total: closedDates.length,      color: 'text-rose-400',    bg: 'bg-rose-500/10',    border: 'border-rose-500/20',    icon: CalendarX2,   link: '/admin/events' },
         ].map(c => (
           <button key={c.label} onClick={() => navigate(c.link)} className={`bg-neutral-950 border rounded-xl p-4 text-left hover:scale-[1.02] transition-all group ${c.border}`}>
             <div className="flex items-start justify-between mb-3"><div className={`p-2 rounded-lg ${c.bg}`}><c.icon size={16} className={c.color} /></div></div>

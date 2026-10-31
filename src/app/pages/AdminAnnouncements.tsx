@@ -186,7 +186,7 @@ export function AdminAnnouncements() {
 
   return (
     <div className="space-y-5">
-      <PendingContentCreate kind="announcement" pending={(pendingContentCreates || []).find((item: any) => item.kind === 'announcement')} storageError={contentCreateError} onRetry={recoverAnnouncementCreate} />
+      <PendingContentCreate kind="announcement" pending={pendingContentCreates.find((item: any) => item.kind === 'announcement')} storageError={contentCreateError} onRetry={recoverAnnouncementCreate} />
       {/* 🟢 TOP-RIGHT FLOATING TOAST */}
       {toast && (
         <div className="fixed top-6 right-6 z-[9999] animate-in slide-in-from-top-4 fade-in duration-300" style={{ animation: 'toast-fade-out 5s forwards' }}>
@@ -467,7 +467,7 @@ export function AdminAnnouncements() {
                   className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors">Cancel</button>
                 <button type="submit"
                   className="flex-1 bg-amber-600 hover:bg-amber-500 text-white text-sm rounded-xl font-semibold py-2.5 flex items-center justify-center gap-2 shadow-lg shadow-amber-900/20">
-                  {editingId ? <><Pencil size={14} /> Update</> : <><Plus size={14} /> {form.isActive ? 'Post' : 'Post Schedule'}</>}               
+                  {editingId ? <><Pencil size={14} /> Update</> : <><Plus size={14} /> {form.isActive ? 'Save Locally' : 'Save Local Schedule'}</>}
                 </button>
               </div>
             </fieldset></form>

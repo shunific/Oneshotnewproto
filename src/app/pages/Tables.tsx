@@ -85,12 +85,12 @@ const PayMethodBtn = ({ value, current, icon: Icon, label, onChange }: { value: 
 
 export function Tables() {
   const { 
-    tables = [], queue = [], reservations = [], assignTable, extendSession, migrateSession, checkoutTable, freeTable,
-    inventory = [], submitTableOrders, voidTableOrder, retryPendingOrder, addInventoryItem, updateInventoryItem,
+    tables = [], queue, reservations, assignTable, extendSession, migrateSession, checkoutTable, freeTable,
+    inventory, submitTableOrders, voidTableOrder, retryPendingOrder, addInventoryItem, updateInventoryItem,
     staffProfile, rates, reservationTerms, staffUsers, hashPassword,
     addSessionHistory, addActivity, addWatchlistItem,
     seatQueueCustomer, removeFromQueue, updateReservationStatus, forceFullSync,
-    pendingReservationMoves, reservationMoveError, heldTableIds, availableTables = [], recoverReservationTransfer, refreshReservationTransfers
+    pendingReservationMoves, reservationMoveError, heldTableIds, availableTables, recoverReservationTransfer, refreshReservationTransfers
   } = useAppContext() as any;
 
   // 🟢 Audio alert when any table session ends
@@ -221,17 +221,23 @@ export function Tables() {
   const [debtContact,      setDebtContact]      = useState('');
 
   const [showArchivedMenu, setShowArchivedMenu] = useState(false);
-  const displayTables = tables.map((t: any) => 
+  const safeTables = Array.isArray(tables) ? tables : [];
+  const safeAvailableTables = Array.isArray(availableTables)
+    ? availableTables
+    : safeTables.filter((t: any) => t.isActive && t.status === 'available');
+  const safeHeldTableIds = heldTableIds instanceof Set ? heldTableIds : new Set<string>();
+
+  const displayTables = safeTables.map((t: any) => 
     !t.isActive ? { ...t, status: 'maintenance', maintenanceReason: t.maintenanceReason || 'Deactivated (Admin)' } : t
   );
-  const activeTables = tables.filter((t: any) => t.isActive);
-  const available    = availableTables.length;
+  const activeTables = safeTables.filter((t: any) => t.isActive);
+  const available    = safeAvailableTables.length;
   const occupied     = activeTables.filter((t: any) => t.status === 'occupied').length;
   const reserved     = activeTables.filter((t: any) => t.status === 'reserved').length;
   const maintenance  = displayTables.filter((t: any) => t.status === 'maintenance').length;
 
   const filtered = displayTables.filter((t: any) => {
-    const matchFilter = filter === 'all' || (t.status === filter&&(filter!=='available'||availableTables.some((a:any)=>a.id===t.id)));
+    const matchFilter = filter === 'all' || (t.status === filter&&(filter!=='available'||safeAvailableTables.some((a:any)=>a.id===t.id)));
     const matchSearch = !search
       || t.name.toLowerCase().includes(search.toLowerCase())
       || (t.session?.customerName?.toLowerCase().includes(search.toLowerCase()));
@@ -362,7 +368,7 @@ export function Tables() {
   };
 
   const openAssign = (tableId: string) => {
-    if(!availableTables.some((table:any)=>table.id===tableId)){flash('Refresh transfer recovery and choose an available table.','error');return;}
+    if(!safeAvailableTables.some((table:any)=>table.id===tableId)){flash('Refresh transfer recovery and choose an available table.','error');return;}
     if (orderRequestInFlight.current || checkoutInFlight.current) return;
     if (pendingCheckout || pendingCheckoutError) { flash('Confirm the pending checkout before changing sessions.', 'error'); return; }
     if (forceFullSync) forceFullSync(); // 🟢 Automatically pull latest cloud reservations
@@ -371,7 +377,7 @@ export function Tables() {
     setSelectedCustomer(null);
     setCustomerName('');
     const availData = getAvailableDurations(tableId);
-    const defaultMins = availData.opts.length > 0 ? availData.opts[0] : 60;
+    const defaultMins = (availData?.opts && availData.opts.length > 0) ? availData.opts[0] : 60;
     setDurationMinutes(defaultMins);
     setAmountPaid(Math.round((defaultMins / 60) * effectiveHourly).toString());
     setPaymentOption('payNow');
@@ -382,13 +388,13 @@ export function Tables() {
     if (assigningTableId) {
       const availData = getAvailableDurations(assigningTableId);
       if (durationMinutes !== 'open' && typeof durationMinutes === 'number') {
-        if (durationMinutes > availData.maxMins) {
-          const newMins = availData.opts.length > 0 ? availData.opts[0] : 60;
+        if (availData && durationMinutes > availData.maxMins) {
+          const newMins = (availData?.opts && availData.opts.length > 0) ? availData.opts[0] : 60;
           setDurationMinutes(newMins);
           setAmountPaid(Math.round((newMins / 60) * effectiveHourly).toString());
         }
-      } else if (durationMinutes === 'open' && (isOpenTimeDisabled || availData.maxMins < 1440)) {
-          const newMins = availData.opts.length > 0 ? availData.opts[0] : 60;
+      } else if (durationMinutes === 'open' && (isOpenTimeDisabled || (availData && availData.maxMins < 1440))) {
+          const newMins = (availData?.opts && availData.opts.length > 0) ? availData.opts[0] : 60;
           setDurationMinutes(newMins);
           setAmountPaid(Math.round((newMins / 60) * effectiveHourly).toString());
           setPaymentOption('payNow');
@@ -467,7 +473,7 @@ export function Tables() {
     setExtendingTableId(tableId);
     const extLimits = getExtensionLimits(tableId);
     // 🟢 Auto-select the smallest available extension, or default to 60 if fully blocked
-    setExtendMinutes(extLimits.opts.length > 0 ? extLimits.opts[0] : 60); 
+    setExtendMinutes((extLimits?.opts && extLimits.opts.length > 0) ? extLimits.opts[0] : 60); 
     setExtendPayStatus('paid'); setExtendPayMethod('cash'); setExtendPartialAmount(''); setExtendCashTendered(''); setExtendGcashRef('');
     setDebtName(table?.session?.customerName || ''); setDebtContact('');
   };
@@ -477,10 +483,10 @@ export function Tables() {
     const availData = getAvailableDurations(assigningTableId);
     if (c.kind === 'reservation') {
       const mins = c.durationHours * 60;
-      const finalMins = Math.min(mins, availData.maxMins); // Enforce max gap
+      const finalMins = availData ? Math.min(mins, availData.maxMins) : mins; // Enforce max gap
       setDurationMinutes(finalMins); setAmountPaid(Math.round((finalMins / 60) * effectiveHourly).toString());
     } else {
-      const defaultMins = availData.opts.length > 0 ? availData.opts[0] : 60;
+      const defaultMins = (availData?.opts && availData.opts.length > 0) ? availData.opts[0] : 60;
       setDurationMinutes(defaultMins); setAmountPaid(Math.round((defaultMins / 60) * effectiveHourly).toString());
     }
   };
@@ -1786,10 +1792,10 @@ export function Tables() {
                         }}
                         className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-amber-500/40"
                       >
-                        {extLimits.opts.length === 0 ? (
+                        {(!extLimits?.opts || extLimits.opts.length === 0) ? (
                           <option value={60} disabled>No extra time available</option>
                         ) : (
-                          extLimits.opts.map(d => (
+                          (extLimits.opts || []).map(d => (
                             <option key={d} value={d}>+{d / 60} Hour{d / 60 > 1 ? 's' : ''} (+{formatPHP(Math.round((d / 60) * extendingRate * 100) / 100)})</option>
                           ))
                         )}

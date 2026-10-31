@@ -284,8 +284,8 @@ export function Layout() {
 
   if (!staffLoggedIn) return null;
 
-  const waitingCount = (queue || []).filter((q: any) => q.status === 'waiting').length;
-  const overtimeCount = (tables || []).filter((t: any) => {
+  const waitingCount = queue.filter((q: any) => q.status === 'waiting').length;
+  const overtimeCount = tables.filter((t: any) => {
     if (t.status !== 'occupied' || !t.session) return false;
     const end = new Date(t.session.startTime).getTime() + (t.session.durationMinutes || 0) * 60000;
     return Date.now() > end;

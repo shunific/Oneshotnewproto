@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef, useMemo } from 'react';
+import { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { supabase } from '../utils/supabase';
 import { motion, AnimatePresence } from 'motion/react';
@@ -175,10 +175,6 @@ type AppContextType = {
   logoutStep: string;
   lastSynced: Date | null;
   forceFullSync: () => Promise<void>;
-  availableTables: Table[];
-  heldTableIds: Set<string>;
-  reservationMoveError: string;
-  resolveUserPin: (user?: any) => string;
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -219,20 +215,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [activeAnnouncement, setActiveAnnouncement] = useState("");
   const updateActiveAnnouncement = (msg: string) => setActiveAnnouncement(msg);
 
-  const heldTableIds = useMemo(() => new Set<string>(), []);
-  const availableTables = useMemo(() => {
-    return (tables || []).filter(t => t.isActive && (t.status === 'available' || !t.status) && !t.session && !heldTableIds.has(t.id));
-  }, [tables, heldTableIds]);
-  const reservationMoveError = '';
-
-  const resolveUserPin = (user?: any) => {
-    let pin = user?.recoveryPin;
-    if (typeof pin === 'string' && pin && !pin.startsWith('scrypt') && pin.length <= 12) {
-      return pin;
-    }
-    return '8492';
-  };
-
   // 🟢 Global Recovery PIN State
   const [showRecoveryModal, setShowRecoveryModal] = useState(false);
   const [pinCopied, setPinCopied] = useState(false);
@@ -259,17 +241,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if ((staffLoggedIn || adminLoggedIn) && staffProfile?.username) {
-      const isSuper = staffProfile.username.toLowerCase() === 'superadmin' || staffProfile.role === 'Super Admin' || staffProfile.isAdmin;
-      if (isSuper) {
-        setShowRecoveryModal(false);
-        return;
-      }
       const isBackedUp = localStorage.getItem(`oneshot_pin_backed_up_${staffProfile.username}`);
       if (!isBackedUp) {
         setShowRecoveryModal(true);
       }
-    } else {
-      setShowRecoveryModal(false);
     }
   }, [staffLoggedIn, adminLoggedIn, staffProfile]);
 
@@ -298,15 +273,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
   
   const handleDownloadPin = () => {
-    const targetUser = staffUsers.find((u: any) => u.username?.toLowerCase() === staffProfile?.username?.toLowerCase());
-    const pin = resolveUserPin(targetUser);
+    const targetUser = staffUsers.find((u: any) => u.username === staffProfile?.username);
+    if (!targetUser?.recoveryPin) return;
     
-    const text = `ONE SHOT BAR & BILLIARDS\n=================================\nACCOUNT RECOVERY CREDENTIALS\n=================================\n\nAccount Name : ${targetUser?.fullName || staffProfile?.fullName || 'Staff User'}\nUsername     : ${targetUser?.username || staffProfile?.username || ''}\nRole         : ${(targetUser?.role || staffProfile?.role || 'Staff').toUpperCase()}\n\nOFFLINE RECOVERY PIN: ${pin}\n\n=================================\nIMPORTANT: Keep this file secure. Because this system operates offline, if you forget your password, you will strictly need this 4-digit PIN to recover your account without a Super Admin.\n`;
+    const text = `ONE SHOT BAR & BILLIARDS\n=================================\nACCOUNT RECOVERY CREDENTIALS\n=================================\n\nAccount Name : ${targetUser.fullName}\nUsername     : ${targetUser.username}\nRole         : ${targetUser.role.toUpperCase()}\n\nOFFLINE RECOVERY PIN: ${targetUser.recoveryPin}\n\n=================================\nIMPORTANT: Keep this file secure. Because this system operates offline, if you forget your password, you will strictly need this 4-digit PIN to recover your account without a Super Admin.\n`;
     const blob = new Blob([text], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `oneshot-recovery-pin-${targetUser?.username || staffProfile?.username || 'staff'}.txt`;
+    link.download = `oneshot-recovery-pin-${targetUser.username}.txt`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -475,7 +450,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }) as PromoCode[]);
       }
       if (closedDatesData) setClosedDates((closedDatesData as any[]).map(r => ({ id: r.id, date: r.closed_date, type: r.type || 'specific', dayOfWeek: r.day_of_week, reason: r.reason, isFullDay: !!r.is_full_day, openTime: r.open_time, closeTime: r.close_time })) as ClosedDate[]);
-      if (eventsData) setEvents((eventsData as any[]).map(e => ({ ...e, slotsFull: !!e.slotsFull, allowReservations: e.allowReservations !== false, caterWalkIns: e.caterWalkIns !== false, walkInTableCount: e.walkInTableCount ?? 10, attachments: Array.isArray(e.attachments) ? e.attachments : (e.attachments ? [e.attachments] : []) })) as Event[]);
+      if (eventsData) setEvents((eventsData as any[]).map(e => {
+        let parsedDates: string[] = [];
+        if (Array.isArray(e.dates)) parsedDates = e.dates;
+        else if (typeof e.dates === 'string') {
+          try { parsedDates = JSON.parse(e.dates); } catch { parsedDates = [e.dates]; }
+        }
+        if (e.date && !parsedDates.includes(e.date)) parsedDates.push(e.date);
+
+        let parsedTableIds: string[] = [];
+        const rawTIds = e.eventTableIds || e.selectedTableIds || e.event_table_ids || e.tableIds;
+        if (Array.isArray(rawTIds)) parsedTableIds = rawTIds;
+        else if (typeof rawTIds === 'string') {
+          try { parsedTableIds = JSON.parse(rawTIds); } catch { parsedTableIds = [rawTIds]; }
+        }
+
+        return {
+          ...e,
+          dates: parsedDates,
+          eventTableIds: parsedTableIds,
+          selectedTableIds: parsedTableIds,
+          slotsFull: !!e.slotsFull,
+          allowReservations: e.allowReservations !== false,
+          caterWalkIns: e.caterWalkIns !== false,
+          walkInTableCount: e.walkInTableCount ?? 10,
+          attachments: e.attachments ? (Array.isArray(e.attachments) ? e.attachments : [e.attachments]) : []
+        };
+      }) as Event[]);
       
       let configObj: any = {};
       if (settingsData) { 
@@ -507,8 +508,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       if (resData) {
         const mappedRes = (resData as any[]).map(r => ({
-          id: r.id, customerName: r.customerName || r.customer_name, contactNumber: r.contactNumber || r.contact_number, email: r.email, date: new Date(r.date), timeSlot: r.timeSlot || r.time_slot, durationHours: r.durationHours || r.duration_hours, partySize: r.partySize || r.party_size, tableId: r.tableId || r.table_id, status: r.status, totalAmount: r.totalAmount || r.total_amount, downPaymentAmount: r.downPaymentAmount || r.down_payment_amount, downPaymentPaid: !!r.downPaymentPaid || !!r.down_payment_paid, balancePaid: !!r.balancePaid || !!r.balance_paid, createdAt: new Date(r.createdAt || r.created_at), cancellationReason: r.cancellationReason || r.cancellation_reason, refundStatus: r.refundStatus || r.refund_status, refundMethod: r.refundMethod || r.refund_method, refundNotes: r.refundNotes || r.refund_notes, paymentRef: r.paymentRef || r.payment_ref, receiptImg: r.receiptImg || r.receipt_img_url, promoCode: r.promoCode || r.promocode || r.promo_code || null, discountAmount: r.discountAmount || r.discountamount || r.discount_amount || 0
+          id: r.id, customerName: r.customerName || r.customer_name, contactNumber: r.contactNumber || r.contact_number, email: r.email, date: new Date(r.date || r.reservation_date || r.reservationDate), timeSlot: r.timeSlot || r.time_slot, durationHours: r.durationHours || r.duration_hours, partySize: r.partySize || r.party_size, tableId: r.tableId || r.table_id, status: r.status, totalAmount: r.totalAmount || r.total_amount, downPaymentAmount: r.downPaymentAmount || r.down_payment_amount, downPaymentPaid: !!r.downPaymentPaid || !!r.down_payment_paid, balancePaid: !!r.balancePaid || !!r.balance_paid, createdAt: new Date(r.createdAt || r.created_at || Date.now()), cancellationReason: r.cancellationReason || r.cancellation_reason, refundStatus: r.refundStatus || r.refund_status, refundMethod: r.refundMethod || r.refund_method, refundNotes: r.refundNotes || r.refund_notes, paymentRef: r.paymentRef || r.payment_ref, receiptImg: r.receiptImg || r.receipt_img_url, promoCode: r.promoCode || r.promocode || r.promo_code || null, discountAmount: r.discountAmount || r.discountamount || r.discount_amount || 0
         }));
+
+        // 🟢 Merge event reservations from local cache so logged-in accounts also see event-blocked tables
+        try {
+          const localResRes = await fetch('http://localhost:3001/api/reservations').catch(() => null);
+          if (localResRes && localResRes.ok) {
+            const localList = await localResRes.json();
+            const existingIds = new Set(mappedRes.map(m => m.id));
+            (localList || []).forEach((lr: any) => {
+              if (lr.id && !existingIds.has(lr.id) && (lr.id.startsWith('EVT-') || lr.customerName?.startsWith('EVENT:') || lr.paymentRef === 'EVENT')) {
+                mappedRes.push({
+                  ...lr,
+                  date: new Date(lr.date || lr.reservation_date),
+                  createdAt: new Date(lr.createdAt || lr.created_at || Date.now())
+                });
+              }
+            });
+          }
+        } catch {}
+
         setReservations(mappedRes);
 
         // 3. CACHE RESERVATIONS TO LOCAL SQLITE FOR OFFLINE FALLBACK
@@ -536,7 +556,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (historyResFb && historyResFb.ok) setSessionHistory(await historyResFb.json()); // 🟢 Fallback retains local history
       if (eventsRes && eventsRes.ok) {
         const dbEvents = await eventsRes.json();
-        setEvents(prev => { const existingIds = new Set(prev.map(e => e.id)); return [...prev, ...dbEvents.filter((e: any) => !existingIds.has(e.id))]; });
+        const normalizedEvents = (dbEvents || []).map((e: any) => {
+          let parsedDates: string[] = [];
+          if (Array.isArray(e.dates)) parsedDates = e.dates;
+          else if (typeof e.dates === 'string') {
+            try { parsedDates = JSON.parse(e.dates); } catch { parsedDates = [e.dates]; }
+          }
+          if (e.date && !parsedDates.includes(e.date)) parsedDates.push(e.date);
+
+          let parsedTableIds: string[] = [];
+          const rawTIds = e.eventTableIds || e.selectedTableIds || e.event_table_ids || e.tableIds;
+          if (Array.isArray(rawTIds)) parsedTableIds = rawTIds;
+          else if (typeof rawTIds === 'string') {
+            try { parsedTableIds = JSON.parse(rawTIds); } catch { parsedTableIds = [rawTIds]; }
+          }
+          return {
+            ...e,
+            dates: parsedDates,
+            eventTableIds: parsedTableIds,
+            selectedTableIds: parsedTableIds
+          };
+        });
+        setEvents(prev => { const existingIds = new Set(prev.map(e => e.id)); return [...prev, ...normalizedEvents.filter((e: any) => !existingIds.has(e.id))]; });
       }
       if (ratesRes && ratesRes.ok) {
         const dbSettings = await ratesRes.json();
@@ -598,14 +639,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const runCloudBackup = () => {
     if (cloudSyncTimeout.current) clearTimeout(cloudSyncTimeout.current);
     cloudSyncTimeout.current = setTimeout(() => {
-      localFetch('/api/sync-to-cloud', { method: 'POST' }).catch(() => {});
+      fetch('http://localhost:3001/api/sync-to-cloud', { method: 'POST' }).catch(() => {});
     }, 1500); 
   };
 
   const syncToDB = async (endpoint: string, method: 'POST' | 'PUT' | 'DELETE', payload: any, successMsg: string) => {
     try {
-      const target = endpoint.startsWith('http') ? endpoint : (endpoint.startsWith('/') ? endpoint : `/${endpoint}`);
-      const res = await localFetch(target, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const res = await fetch(`http://localhost:3001${endpoint}`, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const text = await res.text();
       let json: any = null;
       try { json = text ? JSON.parse(text) : null; } catch (e) { json = text; }
@@ -920,9 +960,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const activeUser = serverUserData || valid;
 
       setAdminLoggedIn(true);
-      setStaffLoggedIn(true);
       sessionStorage.setItem('oneshot_admin_auth', 'true');
-      sessionStorage.setItem('oneshot_staff_auth', 'true');
       const expiryTime = new Date().getTime() + (12 * 60 * 60 * 1000);
       sessionStorage.setItem('oneshot_auth_expiry', expiryTime.toString());
       sessionStorage.removeItem('oneshot_is_locked');
@@ -1480,6 +1518,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
   }
 
+  const availableTables = (tables || []).filter((t: any) => (t.isActive === true || t.isActive === 1) && t.status === 'available');
+  const heldTableIds = new Set<string>();
+  const pendingReservationMoves: any[] = [];
+  const reservationMoveError: string | null = null;
+  const recoverReservationTransfer = async () => {};
+  const refreshReservationTransfers = async () => {};
+
   return (
     <AppContext.Provider value={{
       tables, queue, reservations, feedback, activities, promoCodes, staffUsers, inventory, rates, reservationTerms, announcements, closedDates, weather, updateWeatherLocation,
@@ -1501,7 +1546,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       updateRefundStatus, acknowledgeRefund,
       isLoggingOut, logoutStep,
       lastSynced, forceFullSync,
-      availableTables, heldTableIds, reservationMoveError, resolveUserPin
+      availableTables, heldTableIds, pendingReservationMoves, reservationMoveError,
+      recoverReservationTransfer, refreshReservationTransfers
     }}>
       {/* 🟢 Global Fullscreen Logout Overlay with Thread Loader */}
       {isLoggingOut && (
@@ -1522,10 +1568,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       {/* 🟢 Global First-Time Recovery PIN Modal */}
       <AnimatePresence>
         {showRecoveryModal && (() => {
-          const isSuper = staffProfile?.username?.toLowerCase() === 'superadmin' || staffProfile?.role === 'Super Admin' || staffProfile?.isAdmin;
-          if (isSuper) return null;
-          const targetUser = staffUsers.find((u: any) => u.username?.toLowerCase() === staffProfile?.username?.toLowerCase());
-          const displayPin = resolveUserPin(targetUser);
+          const targetUser = staffUsers.find((u: any) => u.username === staffProfile?.username);
           return (
             <motion.div 
               initial={{ opacity: 0 }} 
@@ -1548,13 +1591,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 
                 <div className="bg-black/40 border border-black/50 rounded-xl p-6 mb-6">
                   <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-bold mb-2">Your Unique PIN</p>
-                  <p className="text-6xl font-mono font-black text-white tracking-[0.2em]">{displayPin}</p>
+                  <p className="text-6xl font-mono font-black text-white tracking-[0.2em]">{targetUser?.recoveryPin || '0000'}</p>
                 </div>
                 
                 <div className="flex gap-3 mb-6">
                   <button 
                     onClick={() => { 
-                      navigator.clipboard.writeText(displayPin); 
+                      navigator.clipboard.writeText(targetUser?.recoveryPin || '0000'); 
                       setPinCopied(true); 
                       setHasInteractedWithPin(true);
                       setTimeout(()=>setPinCopied(false), 2000); 

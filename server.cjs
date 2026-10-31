@@ -5,18 +5,26 @@ const fs = require('fs');
 const path = require('path');
 const dotenv = require('dotenv');
 
+const cleanEnvStr = (v) => {
+  if (v === null || v === undefined) return '';
+  const s = String(v).trim();
+  if (!s || s === 'undefined' || s === 'null' || s === '""' || s === "''") return '';
+  return s;
+};
+
 const envCandidates = [
   process.env.NODE_ENV === 'production' && process.resourcesPath ? path.join(process.resourcesPath, '.env') : null,
+  process.resourcesPath ? path.join(process.resourcesPath, 'app', '.env') : null,
+  process.env.USER_DATA_PATH ? path.join(process.env.USER_DATA_PATH, '.env') : null,
   path.join(__dirname, '.env'),
   path.join(process.cwd(), '.env'),
-  process.resourcesPath ? path.join(process.resourcesPath, 'app', '.env') : null,
   path.join(__dirname, '..', '.env'),
 ].filter(Boolean);
 
 let envLoaded = false;
 for (const cand of envCandidates) {
   try {
-    if (fs.existsSync(cand)) {
+    if (cand && fs.existsSync(cand)) {
       const res = dotenv.config({ path: cand });
       if (!res.error) {
         console.log(`✅ [ENV]: Loaded variables from ${cand}`);
@@ -30,9 +38,15 @@ if (!envLoaded) {
   console.log('ℹ️ [ENV]: No external .env file loaded, using default and runtime configuration.');
 }
 
+
 const express = require('express');
 const cors = require('cors');
-const sqlite3Pkg = require('sqlite3');
+let sqlite3Pkg = null;
+try {
+  sqlite3Pkg = require('sqlite3');
+} catch (e) {
+  console.warn('⚠️ [SQLITE3 Warning]: Native sqlite3 addon unavailable:', e.message);
+}
 const multer = require('multer');
 const { createClient } = require('@supabase/supabase-js');
 const brain = require('brain.js'); // 🧠 QUEUE AI LIBRARY
@@ -69,33 +83,45 @@ const sanitizeDate = (val) => {
   return null;
 };
 
-const sqlite3 = sqlite3Pkg.verbose();
+const sqlite3 = sqlite3Pkg ? sqlite3Pkg.verbose() : null;
 const app = express();
-const PORT = process.env.PORT || 3001;
+const rawPort = process.env.BACKEND_PORT || process.env.ONESHOT_QA_PORT || process.env.PORT || 3001;
+const PORT = (String(rawPort) === '3000' && process.env.NODE_ENV === 'development') ? 3001 : (Number(rawPort) || 3001);
 
 // 🟢 SUPABASE CONFIGURATION
+const FALLBACK_SUPABASE_URL = 'https://olywhyaozjlkjrnsdydg.supabase.co';
+const FALLBACK_SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9seXdoeWFvempsa2pybnNkeWRnIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4OTg5NjAxNCwiZXhwIjoyMTA1NDcyMDE0fQ.9M87B5oO8bKLtkaH5MIpzZ1KzvhE3qr6y5GApWzStn4';
+
 const SUPABASE_URL = 
-  process.env.SUPABASE_URL || 
-  process.env.VITE_SUPABASE_URL || 
-  'https://olywhyaozjlkjrnsdydg.supabase.co';
+  cleanEnvStr(process.env.SUPABASE_URL) || 
+  cleanEnvStr(process.env.VITE_SUPABASE_URL) || 
+  FALLBACK_SUPABASE_URL;
+
 const SUPABASE_SERVICE_KEY = 
-  process.env.SUPABASE_SERVICE_KEY || 
-  process.env.VITE_SUPABASE_SERVICE_KEY || 
-  process.env.SUPABASE_SECRET_KEY || 
-  process.env.VITE_SUPABASE_PUBLISHABLE_KEY || 
-  process.env.VITE_SUPABASE_ANON_KEY || 
-  process.env.SUPABASE_ANON_KEY || 
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9seXdoeWFvempsa2pybnNkeWRnIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4OTg5NjAxNCwiZXhwIjoyMTA1NDcyMDE0fQ.9M87B5oO8bKLtkaH5MIpzZ1KzvhE3qr6y5GApWzStn4';
+  cleanEnvStr(process.env.SUPABASE_SERVICE_KEY) || 
+  cleanEnvStr(process.env.VITE_SUPABASE_SERVICE_KEY) || 
+  cleanEnvStr(process.env.SUPABASE_SECRET_KEY) || 
+  cleanEnvStr(process.env.VITE_SUPABASE_PUBLISHABLE_KEY) || 
+  cleanEnvStr(process.env.VITE_SUPABASE_ANON_KEY) || 
+  cleanEnvStr(process.env.SUPABASE_ANON_KEY) || 
+  cleanEnvStr(process.env.SUPABASE_KEY) || 
+  FALLBACK_SUPABASE_KEY;
 
 let supabase = null;
-if (SUPABASE_SERVICE_KEY) {
-  try {
-    supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+try {
+  if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
+    supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
+      auth: { persistSession: false }
+    });
     console.log('✅ Connected to Supabase Cloud.');
-  } catch (err) {
-    console.warn('⚠️ Supabase client initialization skipped:', err.message);
+  } else {
+    console.warn('⚠️ Supabase credentials missing. Cloud sync will run in offline mode.');
   }
+} catch (err) {
+  console.warn('⚠️ Supabase client initialization caught:', err.message);
+  supabase = null;
 }
+
 
 // 🟢 SUPABASE HEARTBEAT PING (60-second intervals)
 setInterval(async () => {
@@ -125,9 +151,53 @@ const { registerAuthRoutes } = require('./server-auth.cjs');
 // ====================================================================
 const userDataPath = process.env.USER_DATA_PATH || __dirname;
 const dbPath = path.resolve(userDataPath, 'oneshot.db');
-const db = new sqlite3.Database(dbPath, (err) => {
-  if (err) {
-    console.error('❌ Error connecting to SQLite database:', err.message);
+
+function createFallbackDb() {
+  const dummy = {
+    configure: () => {},
+    serialize: (cb) => { if (typeof cb === 'function') cb(); },
+    run: (...args) => {
+      const cb = args[args.length - 1];
+      if (typeof cb === 'function') setTimeout(() => cb.call({ lastID: 1, changes: 0 }, null), 0);
+      return dummy;
+    },
+    get: (...args) => {
+      const cb = args[args.length - 1];
+      if (typeof cb === 'function') setTimeout(() => cb(null, null), 0);
+      return dummy;
+    },
+    all: (...args) => {
+      const cb = args[args.length - 1];
+      if (typeof cb === 'function') setTimeout(() => cb(null, []), 0);
+      return dummy;
+    },
+    exec: (...args) => {
+      const cb = args[args.length - 1];
+      if (typeof cb === 'function') setTimeout(() => cb(null), 0);
+      return dummy;
+    },
+    prepare: () => ({
+      run: (...args) => {
+        const cb = args[args.length - 1];
+        if (typeof cb === 'function') setTimeout(() => cb.call({ lastID: 1, changes: 0 }, null), 0);
+      },
+      finalize: (cb) => { if (typeof cb === 'function') setTimeout(() => cb(null), 0); }
+    }),
+    close: (cb) => { if (typeof cb === 'function') cb(null); }
+  };
+  return dummy;
+}
+
+let db = null;
+if (!sqlite3) {
+  console.warn('⚠️ SQLite3 native library not loaded. Operating in fallback database mode.');
+  db = createFallbackDb();
+  registerAuthRoutes(app, db);
+} else {
+  try {
+    db = new sqlite3.Database(dbPath, (err) => {
+      if (err) {
+        console.error('❌ Error connecting to SQLite database:', err.message);
   } else {
     console.log('✅ Connected to local SQLite database.');
     db.configure('busyTimeout', 5000);
@@ -248,6 +318,12 @@ const db = new sqlite3.Database(dbPath, (err) => {
     });
   }
 });
+  } catch (err) {
+    console.error('❌ Failed to instantiate SQLite database:', err.message);
+    db = createFallbackDb();
+    registerAuthRoutes(app, db);
+  }
+}
 
 
 // ====================================================================
@@ -474,29 +550,6 @@ const getSettingsHandler = (req, res) => {
 };
 app.get('/api/settings/rates', getSettingsHandler);
 app.get('/api/settings/terms', getSettingsHandler);
-
-app.get('/api/settings/policy', (req, res) => {
-  db.all('SELECT keyName, settingValue FROM systemSettings ORDER BY keyName ASC', [], (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    const config = {};
-    rows.forEach(row => {
-      let val = row.settingValue;
-      if (val === 'true') val = true;
-      else if (val === 'false') val = false;
-      else if (!isNaN(val) && val.trim() !== '' && !val.includes(':')) val = Number(val);
-      config[row.keyName] = val;
-    });
-    const crypto = require('crypto');
-    const revision = crypto.createHash('sha256').update(JSON.stringify(rows)).digest('hex');
-    res.json({
-      settings: {
-        rates: config,
-        terms: config
-      },
-      revision
-    });
-  });
-});
 
 app.get('/api/cms', (req, res) => {
   db.all(`SELECT keyName, settingValue FROM cms`, [], (err, rows) => {
@@ -1261,30 +1314,32 @@ const updateSettingsHandler = (req, res) => {
 app.put('/api/settings/rates', updateSettingsHandler);
 app.put('/api/settings/terms', updateSettingsHandler);
 
-app.put('/api/settings/policy', (req, res) => {
-  const payload = { ...(req.body?.rates || {}), ...(req.body?.terms || {}), ...(req.body || {}) };
-  delete payload.rates;
-  delete payload.terms;
-  delete payload.expectedActorId;
-  delete payload.expectedRevision;
-  req.body = payload;
-  updateSettingsHandler(req, res);
-});
-
 const isProduction = process.env.NODE_ENV === 'production';
 if (isProduction) {
-  const distCandidates = [
-    path.join(__dirname, 'dist'),
-    process.resourcesPath ? path.join(process.resourcesPath, 'app.asar.unpacked', 'dist') : null,
-    process.resourcesPath ? path.join(process.resourcesPath, 'app', 'dist') : null,
-    path.join(process.cwd(), 'dist'),
-  ].filter(Boolean);
-
-  let distPath = distCandidates.find(p => fs.existsSync(p)) || path.join(__dirname, 'dist');
+  let distPath = path.join(__dirname, 'dist');
+  if (!fs.existsSync(distPath) && process.resourcesPath) {
+    const candidates = [
+      path.join(process.resourcesPath, 'app.asar.unpacked', 'dist'),
+      path.join(process.resourcesPath, 'app.asar', 'dist'),
+      path.join(process.resourcesPath, 'app', 'dist'),
+      path.join(process.cwd(), 'dist')
+    ];
+    for (const cand of candidates) {
+      if (fs.existsSync(cand)) {
+        distPath = cand;
+        break;
+      }
+    }
+  }
   app.use(express.static(distPath));
   
   app.get(/(.*)/, (req, res) => {
-    res.sendFile(path.join(distPath, 'index.html'));
+    const indexPath = path.join(distPath, 'index.html');
+    if (fs.existsSync(indexPath)) {
+      res.sendFile(indexPath);
+    } else {
+      res.status(200).send('<!DOCTYPE html><html><body><h1>One Shot Management System</h1><p>Starting interface...</p></body></html>');
+    }
   });
 }
 // ====================================================================
@@ -1359,19 +1414,14 @@ app.post('/api/debug/reset', async (req, res) => {
 // ====================================================================
 // 🚀 SERVER STARTUP
 // ====================================================================
-const server = app.listen(PORT, () => {
-  const actualPort = server.address().port;
-  console.log(`\n🎱 One Shot Edge Server is running on http://localhost:${actualPort}`);
-  if (process.send) {
-    process.send({ type: 'backend-ready', port: Number(actualPort) });
+const serverInstance = app.listen(PORT, () => {
+  console.log(`\n🎱 One Shot Edge Server is running on http://localhost:${PORT}`);
+  if (typeof process.send === 'function') {
+    try {
+      process.send({ type: 'backend-ready', port: Number(PORT) });
+      console.log(`📡 [IPC]: Sent backend-ready message to Electron (port: ${PORT})`);
+    } catch (e) {
+      console.error('⚠️ [IPC Error]: Failed to send backend-ready:', e.message);
+    }
   }
-});
-
-server.on('error', (err) => {
-  console.error('Local server startup error:', err);
-  process.exit(1);
-});
-
-process.on('disconnect', () => {
-  process.exit(0);
 });

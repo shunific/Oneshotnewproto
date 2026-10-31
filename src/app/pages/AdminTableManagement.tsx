@@ -172,14 +172,15 @@ export function AdminTableManagement() {
     event:       'bg-purple-500/10 text-purple-400 border-purple-500/20',
   };
 
-  const activeCount   = (tables || []).filter((t: any) => t.isActive).length;
-  const inactiveCount = (tables || []).filter((t: any) => !t.isActive || t.status === 'maintenance').length;
-  const occupiedCount = (tables || []).filter((t: any) => t.status === 'occupied').length;
+  const safeTables = Array.isArray(tables) ? tables : [];
+  const activeCount   = safeTables.filter((t: any) => t.isActive).length;
+  const inactiveCount = safeTables.filter((t: any) => !t.isActive || t.status === 'maintenance').length;
+  const occupiedCount = safeTables.filter((t: any) => t.status === 'occupied').length;
   
   // 🟢 NEW: Utilization Calculation
   const utilization = activeCount > 0 ? Math.round((occupiedCount / activeCount) * 100) : 0;
 
-  const filtered = tables.filter((t: any) => {
+  const filtered = safeTables.filter((t: any) => {
     if (filter === 'active')   return t.isActive && t.status !== 'maintenance';
     if (filter === 'inactive') return !t.isActive || t.status === 'maintenance';
     return true;
@@ -219,7 +220,7 @@ export function AdminTableManagement() {
       {/* 🟢 UPGRADED: Enhanced Analytics Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         {[
-          { label: 'Total Tables',     value: tables.length,  color: 'text-white',          icon: Table2 },
+          { label: 'Total Tables',     value: safeTables.length,  color: 'text-white',          icon: Table2 },
           { label: 'Utilization',      value: `${utilization}%`, color: 'text-blue-400',    icon: Percent },
           { label: 'Active',           value: activeCount,    color: 'text-emerald-400',    icon: CheckCircle },
           { label: 'Occupied Now',     value: occupiedCount,  color: 'text-rose-400',       icon: Users },

@@ -45,16 +45,22 @@ function startServer() {
 
   let serverStderr = ''; 
 
+  const nodePath = process.resourcesPath
+    ? path.join(process.resourcesPath, 'app.asar', 'node_modules')
+    : (process.env.NODE_PATH || path.join(__dirname, '..', 'node_modules'));
+
   serverProcess = fork(serverPath, [], {
-      stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-  env: {
-    ...process.env,
-    NODE_PATH: path.join(process.resourcesPath, 'app.asar', 'node_modules'),
-    PORT: String(serverPort),
-    USER_DATA_PATH: userDataPath,
-    NODE_ENV: isDev ? 'development' : 'production'
-  }
-});
+    stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+    env: {
+      ...process.env,
+      NODE_PATH: nodePath,
+      PORT: String(serverPort),
+      USER_DATA_PATH: userDataPath,
+      NODE_ENV: isDev ? 'development' : 'production',
+      SUPABASE_URL: process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || 'https://olywhyaozjlkjrnsdydg.supabase.co',
+      SUPABASE_SERVICE_KEY: process.env.SUPABASE_SERVICE_KEY || process.env.VITE_SUPABASE_SERVICE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9seXdoeWFvempsa2pybnNkeWRnIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4OTg5NjAxNCwiZXhwIjoyMTA1NDcyMDE0fQ.9M87B5oO8bKLtkaH5MIpzZ1KzvhE3qr6y5GApWzStn4'
+    }
+  });
 
   const keyStore=createDeviceKeyStore({app,safeStorage,rootPath:path.join(userDataPath,'device-credentials')});
   deviceKeyChannel=createHostDeviceKeyChannel({child:serverProcess,store:keyStore,resolveDeviceId:()=>readNativeDeviceId(path.join(userDataPath,'oneshot.db'))});
