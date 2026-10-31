@@ -448,8 +448,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
           };
         }) as PromoCode[]);
       }
-      if (closedDatesData) setClosedDates((closedDatesData as any[]).map(r => ({ id: r.id, date: r.closed_date, type: r.type || 'specific', dayOfWeek: r.day_of_week, reason: r.reason, isFullDay: !!r.is_full_day, openTime: r.open_time, closeTime: r.close_time })) as ClosedDate[]);
-      if (eventsData) setEvents((eventsData as any[]).map(e => ({ ...e, slotsFull: !!e.slotsFull, allowReservations: e.allowReservations !== false, caterWalkIns: e.caterWalkIns !== false, walkInTableCount: e.walkInTableCount ?? 10, attachments: e.attachments ? [e.attachments] : [] })) as Event[]);
+      if (eventsData) setEvents((eventsData as any[]).map(e => {
+        let parsedDates: string[] = [];
+        if (Array.isArray(e.dates)) parsedDates = e.dates;
+        else if (typeof e.dates === 'string') {
+          try { parsedDates = JSON.parse(e.dates); } catch { parsedDates = [e.dates]; }
+        }
+        if (e.date && !parsedDates.includes(e.date)) parsedDates.push(e.date);
+
+        let parsedTableIds: string[] = [];
+        const rawTIds = e.eventTableIds || e.selectedTableIds || e.event_table_ids || e.tableIds;
+        if (Array.isArray(rawTIds)) parsedTableIds = rawTIds;
+        else if (typeof rawTIds === 'string') {
+          try { parsedTableIds = JSON.parse(rawTIds); } catch { parsedTableIds = [rawTIds]; }
+        }
+
+        return { 
+          ...e, 
+          dates: parsedDates,
+          eventTableIds: parsedTableIds,
+          slotsFull: !!e.slotsFull, 
+          allowReservations: e.allowReservations !== false, 
+          caterWalkIns: e.caterWalkIns !== false, 
+          walkInTableCount: e.walkInTableCount ?? 10, 
+          attachments: e.attachments ? (Array.isArray(e.attachments) ? e.attachments : [e.attachments]) : [] 
+        };
+      }) as Event[]);
       
       let configObj: any = {};
       if (settingsData) { 

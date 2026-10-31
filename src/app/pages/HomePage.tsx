@@ -25,7 +25,7 @@ const MONTHS = ['January','February','March','April','May','June','July','August
 
 const todayStart = startOfDay(new Date());
 
-type Section = 'home' | 'reservations' | 'events' | 'rates';
+type Section = 'home' | 'reservations' | 'events' | 'rates' | 'about' | 'feedback';
 
 function MiniCalendar({ selectedDate, onSelect, reservedDates, closedDates, onClosedClick, minDate = new Date() }: { selectedDate: Date | null; onSelect: (d: Date) => void; reservedDates: Date[]; closedDates: any[]; onClosedClick?: (d: Date, reason: string) => void; minDate?: Date }) {
   const today = minDate;
@@ -573,13 +573,8 @@ export function HomePage() {
   };
 
   const handleNavClick = (sectionId: string) => {
-    if (sectionId === 'about' || sectionId === 'feedback') {
-      setActiveSection('home');
-      setPendingScroll(sectionId);
-    } else {
-      setActiveSection(sectionId as Section | 'rates');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
+    setActiveSection(sectionId as Section);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleReportProblem = (reservationId: string) => {
@@ -1534,24 +1529,36 @@ export function HomePage() {
                                   const isMaint = table.status === 'maintenance';
 
                                   const eventForTable = (events || []).find((ev: any) => {
-                                    const evDateMatch = ev.date && (
-                                      isSameDay(new Date(ev.date), selectedDate) ||
-                                      (Array.isArray(ev.dates) && ev.dates.some((d: string) => isSameDay(new Date(d), selectedDate)))
-                                    );
+                                    let evDates: any[] = [];
+                                    if (Array.isArray(ev.dates)) evDates = ev.dates;
+                                    else if (typeof ev.dates === 'string') {
+                                      try { evDates = JSON.parse(ev.dates); } catch { evDates = [ev.dates]; }
+                                    }
+                                    if (ev.date && !evDates.includes(ev.date)) evDates.push(ev.date);
+
+                                    const evDateMatch = evDates.some((d: any) => {
+                                      try { return isSameDay(new Date(d), selectedDate); } catch { return false; }
+                                    });
                                     if (!evDateMatch) return false;
-                                    const tIds = ev.selectedTableIds || ev.eventTableIds || ev.event_table_ids || ev.tableIds || [];
-                                    if (Array.isArray(tIds) && tIds.length > 0) {
+
+                                    let tIds: string[] = [];
+                                    const rawTIds = ev.selectedTableIds || ev.eventTableIds || ev.event_table_ids || ev.tableIds;
+                                    if (Array.isArray(rawTIds)) tIds = rawTIds;
+                                    else if (typeof rawTIds === 'string') {
+                                      try { tIds = JSON.parse(rawTIds); } catch { tIds = [rawTIds]; }
+                                    }
+                                    if (tIds.length > 0) {
                                       return tIds.includes(table.id);
                                     }
                                     if (ev.allowReservations === false) return true;
                                     return false;
-                                  }) || reservations.find((r: any) => 
+                                  }) || (reservations || []).find((r: any) => 
                                     r.tableId === table.id && 
-                                    isSameDay(new Date(r.date), selectedDate) && 
+                                    isSameDay(new Date(r.date || r.reservation_date || r.reservationDate), selectedDate) && 
                                     r.status !== 'cancelled' &&
                                     (r.customerName?.startsWith('EVENT:') || r.id?.startsWith('EVT-') || r.paymentRef === 'EVENT')
                                   );
-                                  const isEvent = Boolean(eventForTable);
+                                  const isEvent = Boolean(eventForTable) || table.status === 'event';
                                   
                                   return (
                                     <button
@@ -1599,18 +1606,35 @@ export function HomePage() {
                                     const isActiveWalkIn = isToday(selectedDate) && targetTable?.status === 'occupied' && targetTable.session?.startTime;
 
                                     const eventForTable = (events || []).find((ev: any) => {
-                                      const evDateMatch = ev.date && (
-                                        isSameDay(new Date(ev.date), selectedDate) ||
-                                        (Array.isArray(ev.dates) && ev.dates.some((d: string) => isSameDay(new Date(d), selectedDate)))
-                                      );
+                                      let evDates: any[] = [];
+                                      if (Array.isArray(ev.dates)) evDates = ev.dates;
+                                      else if (typeof ev.dates === 'string') {
+                                        try { evDates = JSON.parse(ev.dates); } catch { evDates = [ev.dates]; }
+                                      }
+                                      if (ev.date && !evDates.includes(ev.date)) evDates.push(ev.date);
+
+                                      const evDateMatch = evDates.some((d: any) => {
+                                        try { return isSameDay(new Date(d), selectedDate); } catch { return false; }
+                                      });
                                       if (!evDateMatch) return false;
-                                      const tIds = ev.selectedTableIds || ev.eventTableIds || ev.event_table_ids || ev.tableIds || [];
-                                      if (Array.isArray(tIds) && tIds.length > 0) {
+
+                                      let tIds: string[] = [];
+                                      const rawTIds = ev.selectedTableIds || ev.eventTableIds || ev.event_table_ids || ev.tableIds;
+                                      if (Array.isArray(rawTIds)) tIds = rawTIds;
+                                      else if (typeof rawTIds === 'string') {
+                                        try { tIds = JSON.parse(rawTIds); } catch { tIds = [rawTIds]; }
+                                      }
+                                      if (tIds.length > 0) {
                                         return tIds.includes(selectedTableId);
                                       }
                                       if (ev.allowReservations === false) return true;
                                       return false;
-                                    });
+                                    }) || (reservations || []).find((r: any) => 
+                                      r.tableId === selectedTableId && 
+                                      isSameDay(new Date(r.date || r.reservation_date || r.reservationDate), selectedDate) && 
+                                      r.status !== 'cancelled' && 
+                                      (r.customerName?.startsWith('EVENT:') || r.id?.startsWith('EVT-') || r.paymentRef === 'EVENT')
+                                    );
                                     
                                     const tableRes = reservations.filter((r: any) => 
                                       r.tableId === selectedTableId && 
@@ -1783,9 +1807,27 @@ export function HomePage() {
                                     value={resForm.timeSlot} 
                                     onChange={e => {
                                       const val = e.target.value;
-                                      if (selectedDate && isToday(selectedDate) && minAllowedTime && val && val < minAllowedTime) {
-                                        setResForm(f => ({ ...f, timeSlot: minAllowedTime }));
+                                      if (!val) {
+                                        setResForm(f => ({ ...f, timeSlot: '' }));
                                         return;
+                                      }
+                                      if (selectedDate && isToday(selectedDate)) {
+                                        const [h, m] = val.split(':').map(Number);
+                                        const now = new Date();
+                                        const nowMins = now.getHours() * 60 + now.getMinutes();
+                                        const chosenMins = h * 60 + m;
+                                        if (chosenMins <= nowMins) {
+                                          setToastMsg({ title: "Time Has Passed", desc: "You cannot select a time that has already passed for today.", type: 'error' });
+                                          setResForm(f => ({ ...f, timeSlot: minAllowedTime || format(addMinutes(new Date(), 60), 'HH:mm') }));
+                                          return;
+                                        }
+                                        if (minAllowedTime) {
+                                          const [minH, minM] = minAllowedTime.split(':').map(Number);
+                                          if (chosenMins < minH * 60 + minM) {
+                                            setResForm(f => ({ ...f, timeSlot: minAllowedTime }));
+                                            return;
+                                          }
+                                        }
                                       }
                                       setResForm(f => ({ ...f, timeSlot: val }));
                                     }} 
@@ -2440,6 +2482,201 @@ export function HomePage() {
             </motion.div>
           )}
 
+          {/* ════ ABOUT & FEEDBACK SECTION / PAGE ════ */}
+          {(activeSection === 'about' || activeSection === 'feedback') && (
+            <motion.div key="about-feedback" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }} className="pb-16">
+              {/* Green Sub-tab Switcher for About and Feedback */}
+              <div className="max-w-5xl mx-auto px-6 pt-10">
+                <div className="flex items-center justify-center border-b border-neutral-800 mb-10">
+                  <div className="flex gap-10 sm:gap-14">
+                    <button
+                      type="button"
+                      onClick={() => handleNavClick('about')}
+                      className={`relative pb-3 text-base sm:text-lg font-bold transition-all cursor-pointer ${
+                        activeSection === 'about'
+                          ? (isLightMode ? 'text-emerald-700 font-black' : 'text-emerald-400 font-black')
+                          : (isLightMode ? 'text-slate-500 hover:text-slate-800' : 'text-neutral-400 hover:text-white')
+                      }`}
+                    >
+                      <span>About Us</span>
+                      {activeSection === 'about' && (
+                        <motion.div
+                          layoutId="aboutSectionActiveLine"
+                          className="absolute bottom-0 left-0 right-0 h-1 bg-emerald-500 rounded-full shadow-[0_0_10px_rgba(16,185,129,0.7)]"
+                          transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                        />
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleNavClick('feedback')}
+                      className={`relative pb-3 text-base sm:text-lg font-bold transition-all cursor-pointer ${
+                        activeSection === 'feedback'
+                          ? (isLightMode ? 'text-emerald-700 font-black' : 'text-emerald-400 font-black')
+                          : (isLightMode ? 'text-slate-500 hover:text-slate-800' : 'text-neutral-400 hover:text-white')
+                      }`}
+                    >
+                      <span>Feedback</span>
+                      {activeSection === 'feedback' && (
+                        <motion.div
+                          layoutId="aboutSectionActiveLine"
+                          className="absolute bottom-0 left-0 right-0 h-1 bg-emerald-500 rounded-full shadow-[0_0_10px_rgba(16,185,129,0.7)]"
+                          transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                        />
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Render About Us Content */}
+              {activeSection === 'about' && (
+                <div id="home-about-section" className="max-w-5xl mx-auto px-6">
+                  <div className="text-center mb-10">
+                    <h2 className="text-3xl font-black text-white mb-2">{cms.aboutTitle}</h2>
+                    <p className="text-neutral-400 text-sm">The story behind Cainta's favorite billiards destination</p>
+                  </div>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 items-center mb-12">
+                    <div>
+                      <p className="text-emerald-400 text-xs uppercase tracking-widest font-semibold mb-3">Our Mission</p>
+                      <p className="text-neutral-400 text-sm leading-relaxed mb-4">{cms.aboutP1}</p>
+                      <p className="text-neutral-400 text-sm leading-relaxed mb-4">{cms.aboutP2}</p>
+                      <p className="text-neutral-400 text-sm leading-relaxed mb-6">{cms.aboutP3}</p>
+                      
+                      <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-5 space-y-3 shadow-inner">
+                        <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest mb-2">Get in Touch</p>
+                        <div className="flex items-center gap-3 text-sm text-neutral-300">
+                          <div className="w-8 h-8 rounded-full bg-emerald-950/50 flex items-center justify-center border border-emerald-900/50"><Phone size={14} className="text-emerald-500" /></div>
+                          <span>{cms.phone}</span>
+                        </div>
+                        <div className="flex items-center gap-3 text-sm text-neutral-300">
+                          <div className="w-8 h-8 rounded-full bg-emerald-950/50 flex items-center justify-center border border-emerald-900/50"><Mail size={14} className="text-emerald-500" /></div>
+                          <span>{cms.email}</span>
+                        </div>
+                        <div className="flex items-center gap-3 text-sm text-neutral-300">
+                          <div className="w-8 h-8 rounded-full bg-emerald-950/50 flex items-center justify-center border border-emerald-900/50"><MapPin size={14} className="text-emerald-500" /></div>
+                          <span className="leading-tight">{cms.address}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="rounded-2xl overflow-hidden h-full min-h-[300px] border border-neutral-800">
+                       <ImageWithFallback src={cms.aboutImage} alt="One Shot Facility" className="w-full h-full object-cover" />
+                    </div>
+                  </div>
+                  
+                  <div className="mb-12">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-xl font-bold text-white">{cms.address || "Autobase OAX, Cainta"}</h3>
+                      <a
+                        href={
+                          cms.address && cms.address.trim() !== ''
+                            ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(cms.address.trim())}`
+                            : (cms.latitude && cms.longitude
+                                ? `https://www.google.com/maps/search/?api=1&query=${cms.latitude},${cms.longitude}`
+                                : `https://www.google.com/maps/search/?api=1&query=One%20Shot%20Bar%20and%20Billiards%20Cainta`)
+                        }
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1 transition-colors"
+                      >
+                        <MapPin size={13} /> Open in Google Maps &rarr;
+                      </a>
+                    </div>
+                    <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden h-96 relative group">
+                      <iframe 
+                        key={`about_page_map_${cms.address}_${cms.latitude}_${cms.longitude}`}
+                        src={(() => {
+                          let url = (cms.googleMapsEmbedUrl || "").trim();
+                          const iframeMatch = url.match(/src=["']([^"']+)["']/i);
+                          if (iframeMatch) url = iframeMatch[1];
+                          if (url && (url.includes('/maps/embed') || url.includes('output=embed'))) return url;
+                          if (cms.address && cms.address.trim() !== '') {
+                            return `https://maps.google.com/maps?q=${encodeURIComponent(cms.address.trim())}&t=&z=16&ie=UTF8&iwloc=&output=embed`;
+                          }
+                          return "https://maps.google.com/maps?q=14.581333,121.124939&t=&z=16&ie=UTF8&iwloc=&output=embed";
+                        })()} 
+                        className="absolute inset-0 w-full h-full border-0 grayscale hover:grayscale-0 transition-all duration-700"
+                        allowFullScreen={false} 
+                        loading="lazy" 
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Render Feedback Content */}
+              {activeSection === 'feedback' && (
+                <div id="home-feedback-section" className="max-w-2xl mx-auto px-6">
+                  <div className="text-center mb-8">
+                    <h2 className="text-3xl font-black text-white mb-2">Send us Feedback</h2>
+                    <p className="text-neutral-400 text-sm">We value your experience. Let us know how we can improve!</p>
+                  </div>
+                  {feedbackSent ? (
+                    <div className="bg-sky-600/10 border border-sky-600/30 rounded-2xl p-10 text-center">
+                      <CheckCircle size={40} className="text-sky-400 mx-auto mb-3" />
+                      <p className="text-sky-300 font-semibold text-lg mb-1">Message Sent!</p>
+                      <p className="text-neutral-500 text-sm">Our management team will review your message shortly.</p>
+                    </div>
+                  ) : (
+                    <form onSubmit={handleFeedbackSubmit} className="bg-neutral-900 border border-neutral-800 rounded-2xl p-8 space-y-5">
+                      <div className="flex items-center gap-2 mb-1"><Mail className="text-sky-400" size={18} /><p className="text-sm font-semibold text-white">Direct Message to Management</p></div>
+                      <div>
+                        <label className="block text-xs text-neutral-400 mb-1.5">Your Name <span className="text-rose-500">*</span></label>
+                        <input type="text" value={feedbackForm.name} onChange={e => setFeedbackForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Juan dela Cruz" required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500 outline-none" />
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs text-neutral-400 mb-1.5">Contact Number <span className="text-rose-500">*</span></label>
+                          <input type="tel" inputMode="numeric" value={feedbackForm.contact} onChange={e => setFeedbackForm(f => ({ ...f, contact: e.target.value.replace(/\D/g, '').slice(0, 13) }))} placeholder="09XX-XXX-XXXX" required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500 outline-none" />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-neutral-400 mb-1.5">Reservation ID <span className="text-neutral-600">(Optional)</span></label>
+                          <input type="text" value={feedbackForm.reservationId} onChange={e => setFeedbackForm(f => ({ ...f, reservationId: e.target.value.toUpperCase() }))} placeholder="e.g. X7B9QA" className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500 font-mono tracking-widest uppercase outline-none" />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-neutral-400 mb-1.5">Type of Feedback <span className="text-rose-500">*</span></label>
+                        <div className="relative">
+                          <select value={feedbackForm.type} onChange={e => setFeedbackForm(f => ({ ...f, type: e.target.value }))} required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500 appearance-none outline-none">
+                            <option value="" disabled>Select a category...</option>
+                            <option value="compliment">Compliment</option>
+                            <option value="suggestion">Suggestion</option>
+                            <option value="complaint">Concern / Complaint</option>
+                            <option value="lost_item">Lost Item</option>
+                            <option value="other">Other</option>
+                          </select>
+                          <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 pointer-events-none" />
+                        </div>
+                      </div>
+                      {feedbackForm.type === 'other' && (
+                        <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="overflow-hidden">
+                          <label className="block text-xs text-neutral-400 mb-1.5">Please Specify <span className="text-rose-500">*</span></label>
+                          <input type="text" value={feedbackForm.customType} onChange={e => setFeedbackForm(f => ({ ...f, customType: e.target.value }))} placeholder="e.g. Partnership Inquiry" required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500 outline-none" />
+                        </motion.div>
+                      )}
+                      <div>
+                        <label className="block text-xs text-neutral-400 mb-1.5">Message <span className="text-rose-500">*</span></label>
+                        <textarea value={feedbackForm.message} onChange={e => setFeedbackForm(f => ({ ...f, message: e.target.value }))} placeholder="Please provide details..." rows={4} required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500 resize-none outline-none" />
+                      </div>
+                      <button
+                        type="submit"
+                        disabled={!feedbackForm.name || !feedbackForm.contact || !feedbackForm.type || (feedbackForm.type === 'other' && !feedbackForm.customType) || !feedbackForm.message}
+                        className={`w-full py-3 rounded-xl text-sm font-semibold transition-colors shadow-sm text-white ${
+                          isLightMode
+                            ? 'bg-sky-600 hover:bg-sky-500 disabled:bg-slate-200 disabled:text-slate-400 disabled:border disabled:border-slate-300'
+                            : 'bg-sky-600 hover:bg-sky-500 disabled:bg-neutral-800 disabled:text-neutral-500 disabled:border disabled:border-neutral-700'
+                        } disabled:cursor-not-allowed`}
+                      >
+                        Submit Feedback
+                      </button>
+                    </form>
+                  )}
+                </div>
+              )}
+            </motion.div>
+          )}
+
         </AnimatePresence>
 
         {/* 🟢 FOOTER WITH LEGAL LINKS */}
@@ -2686,8 +2923,30 @@ export function HomePage() {
                 </div>
                 
                 <div>
-                  <label className="block text-xs text-neutral-400 mb-1.5">New Time Slot (Duration: {rescheduleData.reservation.durationHours}h) *</label>
-                  <input type="time" style={{ colorScheme: isLightMode ? 'light' : 'dark' }} required value={rescheduleData.timeSlot} onChange={e => setRescheduleData(prev => prev ? ({ ...prev, timeSlot: e.target.value }) : null)} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-sm text-neutral-100 focus:border-violet-500 outline-none text-center transition-colors" />
+                  <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end">
+                    <span>New Time Slot (Duration: {rescheduleData.reservation.durationHours}h) *</span>
+                    {rescheduleData.newDate && isToday(rescheduleData.newDate) && (
+                      <span className="text-[9px] text-amber-500 font-semibold">Min: {format(new Date(), 'HH:mm')}</span>
+                    )}
+                  </label>
+                  <input 
+                    type="time" 
+                    style={{ colorScheme: isLightMode ? 'light' : 'dark' }} 
+                    required 
+                    min={rescheduleData.newDate && isToday(rescheduleData.newDate) ? format(new Date(), 'HH:mm') : undefined}
+                    value={rescheduleData.timeSlot} 
+                    onChange={e => {
+                      const val = e.target.value;
+                      const nowStr = format(new Date(), 'HH:mm');
+                      if (rescheduleData.newDate && isToday(rescheduleData.newDate) && val && val < nowStr) {
+                        setToastMsg({ title: "Time Has Passed", desc: "Cannot reschedule to a past time for today.", type: 'error' });
+                        setRescheduleData(prev => prev ? ({ ...prev, timeSlot: nowStr }) : null);
+                        return;
+                      }
+                      setRescheduleData(prev => prev ? ({ ...prev, timeSlot: val }) : null);
+                    }} 
+                    className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-sm text-neutral-100 focus:border-violet-500 outline-none text-center transition-colors" 
+                  />
                 </div>
                 
                 <div className="flex gap-2 pt-2">
