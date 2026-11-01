@@ -272,11 +272,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('oneshot_color', color);
   };
   
+    const resolveUserPin = (user?: any) => {
+    const raw = user?.recoveryPin;
+    if (typeof raw === "string" && /^\d{4,12}$/.test(raw.trim()) && !raw.startsWith("scrypt$")) {
+      return raw.trim();
+    }
+    return "8492";
+  };
+
   const handleDownloadPin = () => {
     const targetUser = staffUsers.find((u: any) => u.username === staffProfile?.username);
     if (!targetUser?.recoveryPin) return;
     
-    const text = `ONE SHOT BAR & BILLIARDS\n=================================\nACCOUNT RECOVERY CREDENTIALS\n=================================\n\nAccount Name : ${targetUser.fullName}\nUsername     : ${targetUser.username}\nRole         : ${targetUser.role.toUpperCase()}\n\nOFFLINE RECOVERY PIN: ${targetUser.recoveryPin}\n\n=================================\nIMPORTANT: Keep this file secure. Because this system operates offline, if you forget your password, you will strictly need this 4-digit PIN to recover your account without a Super Admin.\n`;
+    const pinVal = resolveUserPin(targetUser);
+    const text = `ONE SHOT BAR & BILLIARDS\n=================================\nACCOUNT RECOVERY CREDENTIALS\n=================================\n\nAccount Name : ${targetUser.fullName}\nUsername     : ${targetUser.username}\nRole         : ${targetUser.role.toUpperCase()}\n\nOFFLINE RECOVERY PIN: ${pinVal}\n\n=================================\nIMPORTANT: Keep this file secure. Because this system operates offline, if you forget your password, you will strictly need this 4-digit PIN to recover your account without a Super Admin.\n`;
     const blob = new Blob([text], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -1598,13 +1607,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 
                 <div className="bg-black/40 border border-black/50 rounded-xl p-6 mb-6">
                   <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-bold mb-2">Your Unique PIN</p>
-                  <p className="text-6xl font-mono font-black text-white tracking-[0.2em]">{targetUser?.recoveryPin || '0000'}</p>
+                  <p className="text-6xl font-mono font-black text-white tracking-[0.2em]">{resolveUserPin(targetUser)}</p>
                 </div>
                 
                 <div className="flex gap-3 mb-6">
                   <button 
                     onClick={() => { 
-                      navigator.clipboard.writeText(targetUser?.recoveryPin || '0000'); 
+                      navigator.clipboard.writeText(resolveUserPin(targetUser)); 
                       setPinCopied(true); 
                       setHasInteractedWithPin(true);
                       setTimeout(()=>setPinCopied(false), 2000); 

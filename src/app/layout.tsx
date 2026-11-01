@@ -181,7 +181,7 @@ export function Layout() {
 
   const [isLocked, setIsLocked] = useState(() => sessionStorage.getItem('oneshot_is_locked') === 'true');
   
-  const { queue, tables, reservations, promoCodes, watchlist, activities, staffLoggedIn, staffLogout, staffProfile } = useAppContext() as any;
+  const { queue, tables, reservations, promoCodes, watchlist, activities, staffLoggedIn, adminLoggedIn, staffLogout, staffProfile } = useAppContext() as any;
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -210,8 +210,11 @@ export function Layout() {
   };
   
   useEffect(() => {
-    if (!staffLoggedIn) navigate('/', { replace: true });
-  }, [staffLoggedIn, navigate]);
+    const isAuthed = staffLoggedIn || adminLoggedIn || sessionStorage.getItem('oneshot_staff_auth') === 'true' || sessionStorage.getItem('oneshot_admin_auth') === 'true';
+    if (!isAuthed) {
+      navigate('/', { replace: true });
+    }
+  }, [staffLoggedIn, adminLoggedIn, navigate]);
 
   useEffect(() => {
     if (!staffLoggedIn || isLocked) return;
