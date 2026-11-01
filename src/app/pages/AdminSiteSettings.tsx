@@ -7,6 +7,8 @@ import {
 } from "lucide-react";
 import { supabase } from "../utils/supabase"; 
 
+import { resolveMapEmbedUrl } from "../utils/maps";
+
 export function AdminSiteSettings() {
   const { 
     siteConfig, updateSiteConfig, 
@@ -43,8 +45,6 @@ export function AdminSiteSettings() {
 
   const [locationForm, setLocationForm] = useState({
     address: "One Shot Bar & Billiards, Manila, Philippines",
-    latitude: "14.5995",
-    longitude: "120.9842",
     googleMapsEmbedUrl: "",
   });
 
@@ -93,8 +93,6 @@ export function AdminSiteSettings() {
       setLocationForm((prev) => ({
         ...prev,
         address: siteConfig.address || prev.address,
-        latitude: siteConfig.latitude || prev.latitude,
-        longitude: siteConfig.longitude || prev.longitude,
         googleMapsEmbedUrl: siteConfig.googleMapsEmbedUrl || prev.googleMapsEmbedUrl,
       }));
     }
@@ -178,18 +176,12 @@ export function AdminSiteSettings() {
   const saveLocationPin = async () => {
     setIsProcessing(true);
     try {
-      let embed = (locationForm.googleMapsEmbedUrl || "").trim();
-      const iframeMatch = embed.match(/src=["']([^"']+)["']/i);
-      if (iframeMatch) {
-        embed = iframeMatch[1];
-      }
+      const cleanEmbed = resolveMapEmbedUrl(locationForm.googleMapsEmbedUrl, locationForm.address);
       await updateSiteConfig({
         address: (locationForm.address || "").trim().slice(0, 200),
-        latitude: String(locationForm.latitude || "").trim(),
-        longitude: String(locationForm.longitude || "").trim(),
-        googleMapsEmbedUrl: embed,
+        googleMapsEmbedUrl: cleanEmbed,
       });
-      flash("Location pin and address saved and synchronized!", "success");
+      flash("Location and Google Maps embed link saved successfully!", "success");
     } catch (err: any) {
       flash(err.message || "Failed to update location pin.", "error");
     } finally {
@@ -353,7 +345,8 @@ export function AdminSiteSettings() {
     }
   };
 
-  const mapsQuery = encodeURIComponent(locationForm.address || `${locationForm.latitude},${locationForm.longitude}`);
+  const mapsQuery = encodeURIComponent(locationForm.address || "One Shot Bar and Billiards Cainta");
+  const previewMapSrc = resolveMapEmbedUrl(locationForm.googleMapsEmbedUrl, locationForm.address);
   const heroList = Array.isArray(form.heroImages) ? form.heroImages : [];
 
   return (
@@ -738,7 +731,7 @@ export function AdminSiteSettings() {
             </div>
             <div>
               <h2 className="text-sm font-bold text-white uppercase tracking-wider">Location Pin & Map Integration</h2>
-              <p className="text-[11px] text-neutral-500">Set venue address and geolocation coordinates to pin your venue on the customer map.</p>
+              <p className="text-[11px] text-neutral-500">Set venue address and Google Maps share link or embed code to pin your venue on the customer map.</p>
             </div>
           </div>
           <button 
@@ -751,8 +744,8 @@ export function AdminSiteSettings() {
           </button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="md:col-span-3">
+        <div className="space-y-4">
+          <div>
             <div className="flex justify-between items-center mb-1">
               <label className="text-[11px] text-neutral-400 font-medium">Venue Address</label>
               <span className="text-[10px] text-neutral-500 font-mono">{(locationForm.address || "").length}/200</span>
@@ -762,52 +755,32 @@ export function AdminSiteSettings() {
               maxLength={200}
               value={locationForm.address} 
               onChange={e => setLocationForm(l => ({ ...l, address: e.target.value }))}
-              placeholder="e.g. 123 Quezon Ave, Quezon City, Metro Manila"
+              placeholder="e.g. Autobase OAX, Cainta, Rizal, Philippines"
               className="w-full bg-neutral-900 border border-neutral-800 rounded-lg p-2.5 text-xs text-neutral-100 outline-none focus:border-rose-500"
             />
           </div>
-          <div>
-            <label className="block text-[11px] text-neutral-400 mb-1 font-medium">Latitude</label>
-            <input 
-              type="text" 
-              value={locationForm.latitude} 
-              onChange={e => setLocationForm(l => ({ ...l, latitude: e.target.value }))}
-              placeholder="14.6324"
-              className="w-full bg-neutral-900 border border-neutral-800 rounded-lg p-2.5 text-xs text-neutral-100 outline-none focus:border-rose-500 font-mono"
-            />
-          </div>
-          <div>
-            <label className="block text-[11px] text-neutral-400 mb-1 font-medium">Longitude</label>
-            <input 
-              type="text" 
-              value={locationForm.longitude} 
-              onChange={e => setLocationForm(l => ({ ...l, longitude: e.target.value }))}
-              placeholder="121.0336"
-              className="w-full bg-neutral-900 border border-neutral-800 rounded-lg p-2.5 text-xs text-neutral-100 outline-none focus:border-rose-500 font-mono"
-            />
-          </div>
-          <div className="flex items-end">
-            <a 
-              href={`https://www.google.com/maps/search/?api=1&query=${mapsQuery}`} 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="w-full py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors border border-neutral-700"
-            >
-              <Navigation size={13} /> View on Google Maps &rarr;
-            </a>
-          </div>
-        </div>
 
-        <div>
-          <label className="block text-[11px] text-neutral-400 mb-1 font-medium">Google Maps Embed URL / Share Link (Optional)</label>
-          <input 
-            type="text" 
-            value={locationForm.googleMapsEmbedUrl || ""} 
-            onChange={e => setLocationForm(l => ({ ...l, googleMapsEmbedUrl: e.target.value }))}
-            placeholder='Paste Google Maps embed link or <iframe src="..."> code'
-            className="w-full bg-neutral-900 border border-neutral-800 rounded-lg p-2.5 text-xs text-neutral-100 outline-none focus:border-rose-500 font-mono"
-          />
-          <p className="text-[10px] text-neutral-500 mt-1">If empty, the live map automatically generates an embedded pin from your Venue Address and Latitude/Longitude coordinates.</p>
+          <div>
+            <div className="flex justify-between items-center mb-1">
+              <label className="text-[11px] text-neutral-400 font-medium">Google Maps Embed URL / Share Link / Copy Link</label>
+              <a 
+                href={locationForm.googleMapsEmbedUrl?.startsWith('http') ? locationForm.googleMapsEmbedUrl : `https://www.google.com/maps/search/?api=1&query=${mapsQuery}`} 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="text-[10px] text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1 transition-colors"
+              >
+                <Navigation size={11} /> Test on Google Maps &rarr;
+              </a>
+            </div>
+            <input 
+              type="text" 
+              value={locationForm.googleMapsEmbedUrl || ""} 
+              onChange={e => setLocationForm(l => ({ ...l, googleMapsEmbedUrl: e.target.value }))}
+              placeholder='Paste Google Maps Copy Link (maps.app.goo.gl/...), direct URL, or <iframe src="..."> embed code'
+              className="w-full bg-neutral-900 border border-neutral-800 rounded-lg p-2.5 text-xs text-neutral-100 outline-none focus:border-rose-500 font-mono"
+            />
+            <p className="text-[10px] text-neutral-500 mt-1">Supports Google Maps short links, direct browser links, or full embed &lt;iframe&gt; codes. Automatically formats for the live map.</p>
+          </div>
         </div>
 
         {/* Live Interactive Map Pin Preview */}
@@ -816,7 +789,7 @@ export function AdminSiteSettings() {
             <span className="font-semibold flex items-center gap-1.5">
               <MapPin size={14} className="text-rose-500 animate-bounce" /> Live Map Pin Preview
             </span>
-            <span className="text-[10px] text-neutral-500">Coordinates: {locationForm.latitude}, {locationForm.longitude}</span>
+            <span className="text-[10px] text-emerald-400 font-medium">Active Source: {locationForm.googleMapsEmbedUrl ? "Custom Google Maps Link / Embed" : "Address Geocoding"}</span>
           </div>
           <div className="h-64 rounded-xl overflow-hidden border border-neutral-800 relative bg-neutral-950">
             <iframe 
@@ -825,7 +798,7 @@ export function AdminSiteSettings() {
               height="100%" 
               style={{ border: 0, filter: "invert(90%) hue-rotate(180deg)" }} 
               loading="lazy" 
-              src={`https://maps.google.com/maps?q=${mapsQuery}&t=&z=15&ie=UTF8&iwloc=&output=embed`}
+              src={previewMapSrc}
             />
           </div>
         </div>
