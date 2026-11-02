@@ -579,11 +579,17 @@ export function HomePage() {
       setActiveSection('about');
       setAboutSubTab('about');
       setTimeout(() => {
-        const el = document.getElementById('about-passion-section') || document.getElementById('home-about-section');
+        const el = document.getElementById('home-about-section') || document.getElementById('about-passion-section');
         if (el) {
-          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          const navOffset = 150;
+          const elementPosition = el.getBoundingClientRect().top;
+          const offsetPosition = elementPosition + window.pageYOffset - navOffset;
+          window.scrollTo({
+            top: Math.max(0, offsetPosition),
+            behavior: 'smooth'
+          });
         }
-      }, 50);
+      }, 60);
       return;
     }
     if (sectionId === 'feedback') {
@@ -592,9 +598,15 @@ export function HomePage() {
       setTimeout(() => {
         const el = document.getElementById('home-feedback-section');
         if (el) {
-          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          const navOffset = 150;
+          const elementPosition = el.getBoundingClientRect().top;
+          const offsetPosition = elementPosition + window.pageYOffset - navOffset;
+          window.scrollTo({
+            top: Math.max(0, offsetPosition),
+            behavior: 'smooth'
+          });
         }
-      }, 50);
+      }, 60);
       return;
     }
     setActiveSection(sectionId as Section);
@@ -1252,14 +1264,33 @@ export function HomePage() {
               </div>
 
               {/* About & Location */}
-              <div id="home-about-section" className="max-w-5xl mx-auto px-6 py-16 border-t border-neutral-800">
-                <div id="about-passion-section" className="text-center mb-10 scroll-mt-28"><h2 className="text-3xl font-black text-white mb-2">{cms.aboutTitle}</h2><p className="text-neutral-400 text-sm">The story behind Cainta's favorite billiards destination</p></div>
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 items-center mb-12">
-                  <div>
-                    <p className="text-emerald-400 text-xs uppercase tracking-widest font-semibold mb-3">Our Mission</p>
-                    <p className="text-neutral-400 text-sm leading-relaxed mb-4">{cms.aboutP1}</p>
-                    <p className="text-neutral-400 text-sm leading-relaxed mb-4">{cms.aboutP2}</p>
-                    <p className="text-neutral-400 text-sm leading-relaxed mb-6">{cms.aboutP3}</p>
+              <div id="home-about-section" className="max-w-5xl mx-auto px-6 pt-20 pb-20 sm:pt-24 sm:pb-24 border-t border-neutral-800 scroll-mt-40">
+                <div id="about-passion-section" className="text-center mb-12 sm:mb-16 scroll-mt-40">
+                  <h2 className="text-3xl sm:text-4xl font-black text-white mb-3 tracking-tight">{cms.aboutTitle}</h2>
+                  <p className="text-neutral-400 text-sm sm:text-base max-w-xl mx-auto leading-relaxed">The story behind Cainta's favorite billiards destination</p>
+                </div>
+                
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 items-stretch mb-16">
+                  <div className="lg:col-span-7 flex flex-col gap-6 justify-between">
+                    {/* Mission Card */}
+                    <div className="bg-neutral-900/90 border border-neutral-800 rounded-2xl p-6 sm:p-7 space-y-4 shadow-sm">
+                      <div className="flex items-center gap-2">
+                        <span className="text-emerald-400 text-xs uppercase tracking-widest font-bold">Our Mission</span>
+                      </div>
+                      <p className="text-sm sm:text-base text-neutral-200 leading-relaxed font-normal">
+                        {cms.aboutP1}
+                      </p>
+                      {cms.aboutP2 && (
+                        <p className="text-xs sm:text-sm text-neutral-400 leading-relaxed">
+                          {cms.aboutP2}
+                        </p>
+                      )}
+                      {cms.aboutP3 && (
+                        <p className="text-xs sm:text-sm text-neutral-400 leading-relaxed">
+                          {cms.aboutP3}
+                        </p>
+                      )}
+                    </div>
                     
                     {/* 🟢 Live Queue Dynamic Wait Time Status & AI Metrics */}
                     {(() => {
@@ -1270,7 +1301,7 @@ export function HomePage() {
                         : 0;
 
                       return (
-                        <div className="bg-gradient-to-r from-emerald-950/60 to-emerald-900/20 border border-emerald-800/50 rounded-2xl p-5 mb-6 shadow-inner relative overflow-hidden group">
+                        <div className="bg-gradient-to-r from-emerald-950/60 to-emerald-900/20 border border-emerald-800/50 rounded-2xl p-5 shadow-inner relative overflow-hidden group">
                           <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl transition-all group-hover:bg-emerald-500/20" />
                           <div className="relative z-10 flex items-start gap-4">
                             <div className="w-10 h-10 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center flex-shrink-0 mt-1 shadow-inner">
@@ -1282,7 +1313,7 @@ export function HomePage() {
                                 Our system tracks live table occupancy and analyzes historical data to give you real-time estimates before you walk in.
                               </p>
                               
-                              <div className="grid grid-cols-2 gap-2 mb-3">
+                              <div className="grid grid-cols-2 gap-2 mb-1">
                                 <div className="bg-emerald-950/80 border border-emerald-800/60 rounded-xl p-3 shadow-lg">
                                   <span className="text-[9px] text-neutral-400 uppercase tracking-wider font-bold block mb-1">Live Wait Estimate</span>
                                   <span className="text-sm font-black text-emerald-400 tracking-wide flex items-center gap-1.5"><Clock size={12}/> {dynamicWaitTime}</span>
@@ -1298,28 +1329,30 @@ export function HomePage() {
                       );
                     })()}
 
-                    <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-5 space-y-3 shadow-inner">
-                      <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest mb-2">Get in Touch</p>
-                      <div className="flex items-center gap-3 text-sm text-neutral-300">
-                        <div className="w-8 h-8 rounded-full bg-emerald-950/50 flex items-center justify-center border border-emerald-900/50"><Phone size={14} className="text-emerald-500" /></div>
-                        <span>{cms.phone}</span>
+                    {/* Get in Touch Card */}
+                    <div className="bg-neutral-900/90 border border-neutral-800 rounded-2xl p-6 space-y-3.5 shadow-sm">
+                      <p className="text-xs font-bold text-neutral-400 uppercase tracking-wider mb-1">Get in Touch</p>
+                      <div className="flex items-center gap-3.5 text-sm text-neutral-300">
+                        <div className="w-8 h-8 rounded-full bg-emerald-950/50 flex items-center justify-center border border-emerald-900/50 flex-shrink-0"><Phone size={14} className="text-emerald-500" /></div>
+                        <span className="font-medium">{cms.phone}</span>
                       </div>
-                      <div className="flex items-center gap-3 text-sm text-neutral-300">
-                        <div className="w-8 h-8 rounded-full bg-emerald-950/50 flex items-center justify-center border border-emerald-900/50"><Mail size={14} className="text-emerald-500" /></div>
-                        <span>{cms.email}</span>
+                      <div className="flex items-center gap-3.5 text-sm text-neutral-300">
+                        <div className="w-8 h-8 rounded-full bg-emerald-950/50 flex items-center justify-center border border-emerald-900/50 flex-shrink-0"><Mail size={14} className="text-emerald-500" /></div>
+                        <span className="font-medium">{cms.email}</span>
                       </div>
-                      <div className="flex items-center gap-3 text-sm text-neutral-300">
-                        <div className="w-8 h-8 rounded-full bg-emerald-950/50 flex items-center justify-center border border-emerald-900/50"><MapPin size={14} className="text-emerald-500" /></div>
-                        <span className="leading-tight">{cms.address}</span>
+                      <div className="flex items-center gap-3.5 text-sm text-neutral-300">
+                        <div className="w-8 h-8 rounded-full bg-emerald-950/50 flex items-center justify-center border border-emerald-900/50 flex-shrink-0"><MapPin size={14} className="text-emerald-500" /></div>
+                        <span className="font-medium leading-tight">{cms.address}</span>
                       </div>
                     </div>
                   </div>
-                  <div className="rounded-2xl overflow-hidden h-full min-h-[300px] border border-neutral-800">
-                     <ImageWithFallback src={cms.aboutImage} alt="One Shot Facility" className="w-full h-full object-cover" />
+
+                  <div className="lg:col-span-5 rounded-2xl overflow-hidden min-h-[380px] lg:h-full border border-neutral-800 shadow-xl bg-neutral-900 flex">
+                     <ImageWithFallback src={cms.aboutImage} alt="One Shot Facility" className="w-full h-full object-cover min-h-[380px]" />
                   </div>
                 </div>
                 
-                <div className="mb-12">
+                <div className="mt-16 pt-12 border-t border-neutral-800/80 mb-8">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="text-xl font-bold text-white">{cms.address || "Autobase OAX, Cainta"}</h3>
                     <a
@@ -1350,10 +1383,10 @@ export function HomePage() {
               </div>
 
               {/* FEEDBACK SECTION */}
-              <div id="home-feedback-section" className="max-w-2xl mx-auto px-6 py-16 border-t border-neutral-800 scroll-mt-28">
-                <div id="send-feedback-heading" className="text-center mb-8 scroll-mt-28">
-                  <h2 className="text-3xl font-black text-white mb-2">Send us Feedback</h2>
-                  <p className="text-neutral-400 text-sm">We value your experience. Let us know how we can improve!</p>
+              <div id="home-feedback-section" className="max-w-2xl mx-auto px-6 pt-20 pb-24 border-t border-neutral-800 scroll-mt-40">
+                <div id="send-feedback-heading" className="text-center mb-10 scroll-mt-40">
+                  <h2 className="text-3xl sm:text-4xl font-black text-white mb-2 tracking-tight">Send us Feedback</h2>
+                  <p className="text-neutral-400 text-sm sm:text-base">We value your experience. Let us know how we can improve!</p>
                 </div>
                 {feedbackSent ? (
                   <div className="bg-sky-600/10 border border-sky-600/30 rounded-2xl p-10 text-center">
