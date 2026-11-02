@@ -2522,25 +2522,29 @@ export function HomePage() {
           </AnimatePresence>
 
         {/* 🟢 FOOTER WITH LEGAL LINKS */}
-        <footer className="bg-neutral-900 border-t border-neutral-800 mt-16 py-8 px-6 text-center text-xs text-neutral-600 w-full relative">
+        <footer className={`border-t mt-16 py-8 px-6 text-center text-xs w-full relative transition-colors ${
+          isLightMode 
+            ? 'bg-slate-100 border-slate-200 text-slate-600' 
+            : 'bg-neutral-900 border-neutral-800 text-neutral-400'
+        }`}>
           <div className="max-w-4xl mx-auto space-y-4">
             <div className="flex items-center justify-center gap-2.5 mb-3">
               <img src={logoImg} alt="One Shot Bar & Billiards" className="h-8 w-8 object-contain" />
-              <span className="text-white font-bold text-sm">One Shot Bar & Billiards</span>
+              <span className={`font-bold text-sm ${isLightMode ? 'text-slate-900' : 'text-white'}`}>One Shot Bar & Billiards</span>
             </div>
             
-            <p className="text-neutral-600 text-xs">
+            <p className={`text-xs ${isLightMode ? 'text-slate-600' : 'text-neutral-400'}`}>
               {cms.address} · Mon–Thu {fmt12(rates?.weekdayStartTime || '12:00')}–{fmt12(rates?.weekdayEndTime || '02:00')} · Fri–Sun {fmt12(rates?.weekendStartTime || '12:00')}–{fmt12(rates?.weekendEndTime || '02:00')}
             </p>
-            <p className="text-neutral-600 text-xs mt-1">{cms.phone}</p>
+            <p className={`text-xs mt-1 ${isLightMode ? 'text-slate-600' : 'text-neutral-400'}`}>{cms.phone}</p>
             
-            <div className="flex items-center justify-center gap-4 mt-6 text-[11px] font-semibold">
-              <button onClick={() => navigate('/legal?tab=terms')} className="hover:text-emerald-400 transition-colors">Terms of Service</button>
-              <span className="text-neutral-700">|</span>
-              <button onClick={() => navigate('/legal?tab=privacy')} className="hover:text-emerald-400 transition-colors">Privacy Policy</button>
+            <div className={`flex items-center justify-center gap-4 mt-6 text-[11px] font-semibold ${isLightMode ? 'text-slate-700' : 'text-neutral-300'}`}>
+              <button onClick={() => navigate('/legal?tab=terms')} className="hover:text-emerald-600 transition-colors">Terms of Service</button>
+              <span className={isLightMode ? 'text-slate-400' : 'text-neutral-700'}>|</span>
+              <button onClick={() => navigate('/legal?tab=privacy')} className="hover:text-emerald-600 transition-colors">Privacy Policy</button>
             </div>
 
-            <p className="mt-6 text-[10px] text-neutral-700">© 2026 One Shot Bar & Billiards. All rights reserved.</p>
+            <p className={`mt-6 text-[10px] ${isLightMode ? 'text-slate-500' : 'text-neutral-600'}`}>© 2026 One Shot Bar & Billiards. All rights reserved.</p>
           </div>
         </footer>
       </main>
