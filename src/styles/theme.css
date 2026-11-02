@@ -617,5 +617,38 @@
   font-weight: 700 !important;
 }
 
+/* 🟢 FOOTER IN LIGHT MODE */
+.theme-light footer {
+  background-color: #f8fafc !important;
+  border-top-color: #e2e8f0 !important;
+  color: #475569 !important;
+}
+
+.theme-light footer .text-white,
+.theme-light footer span.text-white {
+  color: #0f172a !important;
+}
+
+.theme-light footer .text-neutral-600,
+.theme-light footer p.text-neutral-600,
+.theme-light footer .text-neutral-500,
+.theme-light footer .text-neutral-400 {
+  color: #475569 !important;
+}
+
+.theme-light footer .text-neutral-700,
+.theme-light footer p.text-neutral-700,
+.theme-light footer span.text-neutral-700 {
+  color: #64748b !important;
+}
+
+.theme-light footer button {
+  color: #334155 !important;
+}
+
+.theme-light footer button:hover {
+  color: #059669 !important;
+}
+
 
 
