@@ -1,5 +1,6 @@
 import { localFetch } from './utils/localApi';
 import { useState, useEffect, useMemo, useRef } from 'react';
+import { flushSync } from 'react-dom';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router';
 import {
   LayoutDashboard, Users, Table2, Tag, BarChart3,
@@ -240,7 +241,9 @@ export function AdminLayout() {
       setPendingNav('STAFF_PORTAL');
       return;
     }
-    setStaffLoggedIn(true);
+    flushSync(() => {
+      setStaffLoggedIn(true);
+    });
     sessionStorage.setItem('oneshot_staff_auth', 'true');
     navigate('/staff');
   };
@@ -251,7 +254,9 @@ export function AdminLayout() {
       adminLogout();
       navigate('/');
     } else if (pendingNav === 'STAFF_PORTAL') {
-      setStaffLoggedIn(true);
+      flushSync(() => {
+        setStaffLoggedIn(true);
+      });
       sessionStorage.setItem('oneshot_staff_auth', 'true');
       navigate('/staff');
     } else if (pendingNav) {
