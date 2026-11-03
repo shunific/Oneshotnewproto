@@ -210,7 +210,8 @@ export function Layout() {
   };
   
   useEffect(() => {
-    if (!staffLoggedIn) navigate('/', { replace: true });
+    const staffAuth = sessionStorage.getItem('oneshot_staff_auth') === 'true';
+    if (!staffLoggedIn && !staffAuth) navigate('/', { replace: true });
   }, [staffLoggedIn, navigate]);
 
   useEffect(() => {
