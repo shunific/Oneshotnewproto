@@ -181,7 +181,7 @@ export function Layout() {
 
   const [isLocked, setIsLocked] = useState(() => sessionStorage.getItem('oneshot_is_locked') === 'true');
   
-  const { queue, tables, reservations, promoCodes, watchlist, activities, staffLoggedIn, staffLogout, staffProfile, theme, primaryColor } = useAppContext() as any;
+  const { queue, tables, reservations, promoCodes, watchlist, activities, staffLoggedIn, adminLoggedIn, staffLogout, staffProfile, theme, primaryColor } = useAppContext() as any;
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -211,8 +211,8 @@ export function Layout() {
   
   useEffect(() => {
     const staffAuth = sessionStorage.getItem('oneshot_staff_auth') === 'true';
-    if (!staffLoggedIn && !staffAuth) navigate('/', { replace: true });
-  }, [staffLoggedIn, navigate]);
+    if (!staffLoggedIn && !staffAuth && !adminLoggedIn) navigate('/', { replace: true });
+  }, [staffLoggedIn, adminLoggedIn, navigate]);
 
   useEffect(() => {
     if (!staffLoggedIn || isLocked) return;
@@ -283,7 +283,7 @@ export function Layout() {
     return results.slice(0, 4);
   }, [globalSearch, tables, reservations, promoCodes, watchlist]);
 
-  if (!staffLoggedIn) return null;
+  if (!staffLoggedIn && !adminLoggedIn) return null;
 
   const waitingCount = queue.filter((q: any) => q.status === 'waiting').length;
   const overtimeCount = tables.filter((t: any) => {
