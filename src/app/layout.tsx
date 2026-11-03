@@ -181,7 +181,7 @@ export function Layout() {
 
   const [isLocked, setIsLocked] = useState(() => sessionStorage.getItem('oneshot_is_locked') === 'true');
   
-  const { queue, tables, reservations, promoCodes, watchlist, activities, staffLoggedIn, adminLoggedIn, staffLogout, staffProfile } = useAppContext() as any;
+  const { queue, tables, reservations, promoCodes, watchlist, activities, staffLoggedIn, staffLogout, staffProfile, theme, primaryColor } = useAppContext() as any;
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -210,11 +210,8 @@ export function Layout() {
   };
   
   useEffect(() => {
-    const isAuthed = staffLoggedIn || adminLoggedIn || sessionStorage.getItem('oneshot_staff_auth') === 'true' || sessionStorage.getItem('oneshot_admin_auth') === 'true';
-    if (!isAuthed) {
-      navigate('/', { replace: true });
-    }
-  }, [staffLoggedIn, adminLoggedIn, navigate]);
+    if (!staffLoggedIn) navigate('/', { replace: true });
+  }, [staffLoggedIn, navigate]);
 
   useEffect(() => {
     if (!staffLoggedIn || isLocked) return;
@@ -336,7 +333,7 @@ export function Layout() {
       
       {isLocked && <LockScreen onUnlock={handleUnlockTerminal} />}
         
-      <div ref={node => { if (node) node.inert = isLocked; }} aria-hidden={isLocked || undefined} className={`flex h-screen bg-neutral-900 text-neutral-100 overflow-hidden transition-all duration-300 ${isLocked ? 'pointer-events-none blur-md select-none opacity-50' : ''}`}>
+      <div ref={node => { if (node) node.inert = isLocked; }} aria-hidden={isLocked || undefined} className={`flex h-screen ${theme === 'light' ? 'theme-light bg-slate-50 text-slate-900' : 'bg-neutral-900 text-neutral-100'} overflow-hidden transition-all duration-300 ${isLocked ? 'pointer-events-none blur-md select-none opacity-50' : ''}`}>
         
         {/* Mobile Overlay */}
         {sidebarOpen && (

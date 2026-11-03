@@ -69,8 +69,8 @@ export function AdminLayout() {
 
   const { 
     adminLoggedIn, adminLogout, staffProfile, activities, queue, tables,
-    reservations, promoCodes, watchlist, staffUsers 
-  } = useAppContext();
+    reservations, promoCodes, watchlist, staffUsers, theme, primaryColor 
+  } = useAppContext() as any;
   
   const location = useLocation();
   const navigate = useNavigate();
@@ -260,7 +260,7 @@ export function AdminLayout() {
     <>
       {isLocked && <LockScreen onUnlock={handleUnlockTerminal} />}
       
-      <div ref={node => { if (node) node.inert = isLocked; }} aria-hidden={isLocked || undefined} className={`flex h-screen w-full bg-neutral-950 text-neutral-100 overflow-hidden transition-all duration-300 ${isLocked ? 'pointer-events-none blur-md select-none opacity-50' : ''}`}>
+      <div ref={node => { if (node) node.inert = isLocked; }} aria-hidden={isLocked || undefined} className={`flex h-screen w-full ${theme === 'light' ? 'theme-light bg-slate-50 text-slate-900' : 'bg-neutral-950 text-neutral-100'} overflow-hidden transition-all duration-300 ${isLocked ? 'pointer-events-none blur-md select-none opacity-50' : ''}`}>
         
         {sidebarOpen && <div className="fixed inset-0 z-30 bg-black/60 lg:hidden" onClick={() => setSidebarOpen(false)} />}
 

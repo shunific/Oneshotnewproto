@@ -87,7 +87,7 @@ export function TableCard({ table, held=false, availabilityVerified=true, onAssi
   return (
     <div 
       onClick={handleCardClick}
-      className={`relative flex flex-col bg-neutral-900 border-2 border-transparent hover:border-neutral-700 rounded-2xl overflow-hidden transition-all duration-200 
+      className={`relative flex flex-col bg-neutral-900 border border-neutral-800 hover:border-neutral-600 rounded-2xl overflow-hidden transition-all duration-200 shadow-sm
       ${table.status !== 'maintenance'&&!held ? 'cursor-pointer hover:-translate-y-1 hover:shadow-xl hover:shadow-black/50' : 'opacity-80'}
       ${timer?.isOvertime ? '!border-rose-600 shadow-[0_0_15px_rgba(225,29,72,0.15)] hover:!border-rose-400' : ''}`}
     >
