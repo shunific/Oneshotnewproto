@@ -47,7 +47,7 @@ export function SettingsPage() {
   const [pendingFile, setPendingFile] = useState<File | null>(null); 
 
   const [profileEdit, setProfileEdit] = useState(false);
-  const [profileForm, setProfileForm] = useState({ fullName: staffProfile.fullName, phone: staffProfile.phone, role: staffProfile.role });
+  const [profileForm, setProfileForm] = useState({ fullName: staffProfile?.fullName || '', phone: staffProfile?.phone || '', role: staffProfile?.role || '' });
 
   const [secEdit, setSecEdit] = useState(false);
   const [secForm, setSecForm] = useState({ username: staffProfile.username, currentPassword: '', newPassword: '', confirmPassword: '', newRecoveryPin: '' });
@@ -78,11 +78,11 @@ export function SettingsPage() {
 
   // 🟢 FIXED: Added strict validation checks before saving
   const handleSaveProfile = async () => {
-    if (!profileForm.fullName.trim()) {
+    if (!(profileForm.fullName || '').trim()) {
       flash("Full Name cannot be empty.", "error");
       return;
     }
-    if (profileForm.phone.length !== 11) {
+    if ((profileForm.phone || '').length !== 11) {
       flash("Phone number must be exactly 11 digits.", "error");
       return;
     }
@@ -288,7 +288,7 @@ export function SettingsPage() {
         <div className="bg-neutral-950 border border-neutral-800 rounded-2xl overflow-hidden">
           <div className="px-6 py-4 border-b border-neutral-800 flex items-center justify-between">
             <div><h3 className="text-sm font-bold text-neutral-100">Personal Information</h3><p className="text-xs text-neutral-500 mt-0.5">Your display name, contact, and role details</p></div>
-            {!profileEdit ? <button onClick={() => { setProfileEdit(true); setProfileForm({ fullName: staffProfile.fullName, phone: staffProfile.phone, role: staffProfile.role }); }} className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-neutral-200 bg-neutral-800 border border-neutral-700 px-3 py-1.5 rounded-lg"><Pencil size={12} /> Edit</button> : <button onClick={() => setProfileEdit(false)} className="flex items-center gap-1.5 text-xs text-neutral-500 px-3 py-1.5 rounded-lg"><X size={12} /> Cancel</button>}
+            {!profileEdit ? <button onClick={() => { setProfileEdit(true); setProfileForm({ fullName: staffProfile?.fullName || '', phone: staffProfile?.phone || '', role: staffProfile?.role || '' }); }} className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-neutral-200 bg-neutral-800 border border-neutral-700 px-3 py-1.5 rounded-lg"><Pencil size={12} /> Edit</button> : <button onClick={() => setProfileEdit(false)} className="flex items-center gap-1.5 text-xs text-neutral-500 px-3 py-1.5 rounded-lg"><X size={12} /> Cancel</button>}
           </div>
           <div className="p-6 space-y-4">
             {/* 🟢 FIXED: Full Name input with strict regex (no symbols), 50 chars max, and live counter */}
@@ -312,8 +312,8 @@ export function SettingsPage() {
                   />
                   <div className="flex justify-between items-center text-[10px] text-neutral-500">
                     <span>Letters and spaces only (no symbols)</span>
-                    <span className={profileForm.fullName.length === 50 ? 'text-amber-400 font-bold' : ''}>
-                      {profileForm.fullName.length}/50
+                    <span className={(profileForm.fullName || '').length === 50 ? 'text-amber-400 font-bold' : ''}>
+                      {(profileForm.fullName || '').length}/50
                     </span>
                   </div>
                 </div>
@@ -340,8 +340,8 @@ export function SettingsPage() {
                   />
                   <div className="flex justify-between items-center text-[10px] text-neutral-500">
                     <span>Must be exactly 11 numeric digits</span>
-                    <span className={profileForm.phone.length === 11 ? 'text-emerald-400 font-bold' : 'text-amber-400'}>
-                      {profileForm.phone.length}/11
+                    <span className={(profileForm.phone || '').length === 11 ? 'text-emerald-400 font-bold' : 'text-amber-400'}>
+                      {(profileForm.phone || '').length}/11
                     </span>
                   </div>
                 </div>
