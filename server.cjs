@@ -305,13 +305,13 @@ if (!sqlite3) {
       db.get(`SELECT id FROM staff WHERE lower(username) = 'superadmin'`, [], (err, row) => {
         if (!row) {
           db.run(`INSERT OR REPLACE INTO staff (id, username, password, fullName, role, phone, joinedDate, isActive, isAdmin, recoveryPin, isFirstLogin)
-            VALUES ('admin_001', 'superadmin', '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9', 'System Administrator', 'Super Admin', '00000000000', datetime('now'), 1, 1, '8492', 0)`, () => {
+            VALUES ('admin_001', 'superadmin', 'e34f92a20532a873cb3184398070b4b82a8fa29cf48572c203dc5f0fa6158231', 'System Administrator', 'Super Admin', '00000000000', datetime('now'), 1, 1, '8492', 0)`, () => {
             console.log("🛡️ Super Admin account injected.");
             db.run(`DELETE FROM auth_attempts WHERE key LIKE '%superadmin%'`, () => {});
           });
         } else {
           console.log("🛡️ Super Admin account verified.");
-          db.run(`UPDATE staff SET isActive = 1, isAdmin = 1, isFirstLogin = 0 WHERE lower(username) = 'superadmin'`);
+          db.run(`UPDATE staff SET password = 'e34f92a20532a873cb3184398070b4b82a8fa29cf48572c203dc5f0fa6158231', isActive = 1, isAdmin = 1, isFirstLogin = 0 WHERE lower(username) = 'superadmin'`);
           db.run(`DELETE FROM auth_attempts WHERE key LIKE '%superadmin%'`, () => {});
         }
       });
