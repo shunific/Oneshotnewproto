@@ -616,7 +616,7 @@ export default function AdminPolicyRatesEditor() {
         </div>
       </div>
 
-      {/* ── Bottom Action Bar (Matching UI) ── */}
+      {/* ── Bottom Action Bar ── */}
       <div className="flex flex-wrap items-center justify-between gap-4 pt-6 border-t border-neutral-800">
         <button
           type="button"
@@ -626,15 +626,6 @@ export default function AdminPolicyRatesEditor() {
         >
           <RefreshCw size={15} className={isLoading ? 'animate-spin text-amber-400' : 'text-neutral-400'} />
           <span>{isLoading ? 'Reloading...' : 'Reload Saved Settings'}</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={handleReviewChanges}
-          disabled={isSaving}
-          className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 transition-all shadow-lg shadow-emerald-950/40 cursor-pointer disabled:opacity-50 text-xs uppercase tracking-wider"
-        >
-          <Save size={16} /> Save Changes
         </button>
       </div>
       {showSummaryModal && (
