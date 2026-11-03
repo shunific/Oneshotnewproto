@@ -69,7 +69,8 @@ export function AdminLayout() {
 
   const { 
     adminLoggedIn, adminLogout, staffProfile, activities, queue, tables,
-    reservations, promoCodes, watchlist, staffUsers, theme, primaryColor 
+    reservations, promoCodes, watchlist, staffUsers, theme, primaryColor,
+    setStaffLoggedIn 
   } = useAppContext() as any;
   
   const location = useLocation();
@@ -239,6 +240,8 @@ export function AdminLayout() {
       setPendingNav('STAFF_PORTAL');
       return;
     }
+    setStaffLoggedIn(true);
+    sessionStorage.setItem('oneshot_staff_auth', 'true');
     navigate('/staff');
   };
 
@@ -248,6 +251,8 @@ export function AdminLayout() {
       adminLogout();
       navigate('/');
     } else if (pendingNav === 'STAFF_PORTAL') {
+      setStaffLoggedIn(true);
+      sessionStorage.setItem('oneshot_staff_auth', 'true');
       navigate('/staff');
     } else if (pendingNav) {
       navigate(pendingNav);
