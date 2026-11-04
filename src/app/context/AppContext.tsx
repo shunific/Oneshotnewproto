@@ -139,7 +139,7 @@ export const generateRandomPromoCode = () => {
 type AppContextType = {
   tables: Table[]; queue: QueueItem[]; reservations: Reservation[]; feedback: Feedback[]; activities: Activity[]; promoCodes: PromoCode[]; staffUsers: StaffUser[]; inventory: InventoryItem[]; rates: RatesConfig; reservationTerms: ReservationTerms; announcements: Announcement[]; closedDates: ClosedDate[]; weather: WeatherData | null; updateWeatherLocation: (lat: string, lon: string, name: string) => void;
   activeAnnouncement: string; updateActiveAnnouncement: (msg: string) => void;
-  staffLoggedIn: boolean; adminLoggedIn: boolean; staffProfile: StaffProfile;
+  staffLoggedIn: boolean; adminLoggedIn: boolean; setStaffLoggedIn: (v: boolean) => void; setAdminLoggedIn: (v: boolean) => void; staffProfile: StaffProfile;
   staffLogin: (u: string, p: string) => Promise<boolean>; staffLogout: () => void; adminLogin: (u: string, p: string) => Promise<boolean>; adminLogout: () => void; updateStaffProfile: (profile: Partial<StaffProfile>) => void;
   assignTable: (id: string, s: Session) => void; freeTable: (id: string) => void; reserveTable: (id: string) => void; extendSession: (id: string, mins: number, pay: number) => void; migrateSession: (fromTableId: string, toTableId: string) => void; setTableMaintenance: (id: string, reason: string) => void; setTableEvent: (id: string, eventName: string) => void; addTable: (n: string) => void; updateTable: (id: string, n: string) => void; toggleTableActive: (id: string) => void; deleteTable: (id: string) => void;
   addInventoryItem: (i: Omit<InventoryItem, 'id'>) => void; updateInventoryItem: (id: string, i: Partial<InventoryItem>) => void; deleteInventoryItem: (id: string) => void; submitTableOrders: (tableId: string, cart: SessionOrder[]) => void; voidTableOrder: (tableId: string, orderIndex: number, order: SessionOrder) => void;
@@ -859,10 +859,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const staffLogin = async (u: string, p: string) => { 
     const hashedP = await hashPassword(p); 
-    const valid = staffUsers.find(su => su.username === u && su.password === hashedP && su.isActive); 
+    const cleanU = (u || '').trim().toLowerCase();
+    const valid = staffUsers.find(su => (su.username || '').toLowerCase() === cleanU && (su.password === hashedP || su.password === p) && su.isActive); 
     if (valid) { 
       setStaffLoggedIn(true); 
       sessionStorage.setItem('oneshot_staff_auth', 'true');
+      if (valid.isAdmin) {
+        setAdminLoggedIn(true);
+        sessionStorage.setItem('oneshot_admin_auth', 'true');
+      }
+      if (valid.password === p) {
+        updateStaffUser(valid.id, { password: hashedP });
+      }
       const expiryTime = new Date().getTime() + (12 * 60 * 60 * 1000);
       sessionStorage.setItem('oneshot_auth_expiry', expiryTime.toString());
       sessionStorage.removeItem('oneshot_is_locked'); 
@@ -875,10 +883,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const adminLogin = async (u: string, p: string) => { 
     const hashedP = await hashPassword(p); 
-    const valid = staffUsers.find(su => su.username === u && su.password === hashedP && su.isActive && su.isAdmin);
+    const cleanU = (u || '').trim().toLowerCase();
+    const valid = staffUsers.find(su => (su.username || '').toLowerCase() === cleanU && (su.password === hashedP || su.password === p) && su.isActive && su.isAdmin);
     if (valid) {
       setAdminLoggedIn(true);
+      setStaffLoggedIn(true);
       sessionStorage.setItem('oneshot_admin_auth', 'true');
+      sessionStorage.setItem('oneshot_staff_auth', 'true');
+      if (valid.password === p) {
+        updateStaffUser(valid.id, { password: hashedP });
+      }
       const expiryTime = new Date().getTime() + (12 * 60 * 60 * 1000);
       sessionStorage.setItem('oneshot_auth_expiry', expiryTime.toString());
       sessionStorage.removeItem('oneshot_is_locked');
@@ -939,7 +953,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       const targetUser = staffUsers.find(user => user.id === id);
       const displayName = targetUser ? targetUser.fullName : id;
-      const hashedPw = await hashPassword('oneshotstaff'); 
+      const hashedPw = await hashPassword('oneshot123'); 
       setStaffUsers(prev => prev.map(u => u.id === id ? { ...u, password: hashedPw } : u));
       syncToDB(`/api/staff/${id}`, 'PUT', { password: hashedPw }, `Reset staff password`).then(runCloudBackup).catch(()=>{});
       addActivity('admin_action', `Reset password to default for: ${displayName}`);
@@ -1423,7 +1437,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     <AppContext.Provider value={{
       tables, queue, reservations, feedback, activities, promoCodes, staffUsers, inventory, rates, reservationTerms, announcements, closedDates, weather, updateWeatherLocation,
       activeAnnouncement, updateActiveAnnouncement,
-      staffLoggedIn, adminLoggedIn, staffProfile,
+      staffLoggedIn, adminLoggedIn, setStaffLoggedIn, setAdminLoggedIn, staffProfile,
       staffLogin, staffLogout, adminLogin, adminLogout, updateStaffProfile,
       assignTable, freeTable, reserveTable, extendSession, migrateSession, setTableMaintenance, setTableEvent, addTable, updateTable, toggleTableActive, deleteTable,
       addInventoryItem, updateInventoryItem, deleteInventoryItem, submitTableOrders, voidTableOrder,

@@ -209,10 +209,10 @@ export function Layout() {
     setIsLocked(false);
   };
   
+  const isStaffOrAdminAuth = staffLoggedIn || adminLoggedIn || sessionStorage.getItem('oneshot_staff_auth') === 'true' || sessionStorage.getItem('oneshot_admin_auth') === 'true';
   useEffect(() => {
-    const staffAuth = sessionStorage.getItem('oneshot_staff_auth') === 'true';
-    if (!staffLoggedIn && !staffAuth && !adminLoggedIn) navigate('/', { replace: true });
-  }, [staffLoggedIn, adminLoggedIn, navigate]);
+    if (!isStaffOrAdminAuth) navigate('/', { replace: true });
+  }, [isStaffOrAdminAuth, navigate]);
 
   useEffect(() => {
     if (!staffLoggedIn || isLocked) return;
@@ -283,7 +283,7 @@ export function Layout() {
     return results.slice(0, 4);
   }, [globalSearch, tables, reservations, promoCodes, watchlist]);
 
-  if (!staffLoggedIn && !adminLoggedIn) return null;
+  if (!isStaffOrAdminAuth) return null;
 
   const waitingCount = queue.filter((q: any) => q.status === 'waiting').length;
   const overtimeCount = tables.filter((t: any) => {

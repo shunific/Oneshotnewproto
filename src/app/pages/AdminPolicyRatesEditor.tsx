@@ -95,6 +95,7 @@ export default function AdminPolicyRatesEditor() {
             setPolicyBaseline(saved.settings);
             setPolicyLoadError('');
             setPolicyWarning(false);
+            setIsLoading(false);
             return;
           }
         }

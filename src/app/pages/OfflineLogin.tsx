@@ -101,7 +101,7 @@ export function OfflineLogin() {
     const isSuperAdmin = cleanUsername.toLowerCase() === 'superadmin';
     const targetUser = staffUsers.find((u: any) => u.username?.toLowerCase() === cleanUsername.toLowerCase());
     
-    if (!isSuperAdmin && targetUser && password === 'oneshotstaff') {
+    if (!isSuperAdmin && targetUser && (password === 'oneshot123' || password === 'oneshotstaff')) {
       switchView('force-change');
       setIsProcessing(false);
       return;
@@ -126,7 +126,7 @@ export function OfflineLogin() {
     e.preventDefault();
     setError('');
 
-    if (newPassword === 'oneshotstaff') { setError('You cannot use the default password.'); return; }
+    if ((newPassword === 'oneshot123' || newPassword === 'oneshotstaff')) { setError('You cannot use the default password.'); return; }
     if (!pwStrength.isValid) { setError('Password does not meet security requirements.'); return; }
     if (newPassword !== confirmPassword) { setError('Passwords do not match.'); return; }
 

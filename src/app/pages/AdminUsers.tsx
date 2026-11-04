@@ -2,7 +2,7 @@ import { localFetch } from '../utils/localApi';
 import { EmployeeProfileEditor } from '../components/EmployeeProfileEditor';
 import { useState, useEffect, useRef } from 'react';
 import { useAppContext, StaffUser } from '../context/AppContext';
-import { Plus, X, User, Phone, CheckCircle, Eye, EyeOff, Trash2, History, Activity, RefreshCw, MoreVertical, ShieldAlert } from 'lucide-react';
+import { Plus, X, User, Phone, CheckCircle, Eye, EyeOff, Trash2, History, Activity, RefreshCw, MoreVertical, ShieldAlert, Pencil } from 'lucide-react';
 
 const ROLES: { value: StaffUser['role']; label: string; color: string; icon: React.ReactNode }[] = [
   { value: 'manager', label: 'Manager', color: 'bg-amber-500/10 text-amber-400 border-amber-500/20', icon: <User size={11} /> },
@@ -82,7 +82,7 @@ export function AdminUsers() {
     const { confirmPassword, ...accountFields } = form;
     const payload = {
       ...accountFields,
-      password: form.password,
+      password: await hashPassword(form.password),
       isActive: true,
 
       isFirstLogin: 1,
@@ -103,14 +103,14 @@ export function AdminUsers() {
 
   const handleResetPassword = async (id: string, name: string) => {
     setOpenDropdownId(null);
-    if (window.confirm(`Are you sure you want to reset the password for ${name}? You will choose a unique temporary password; they must change it at next login.`)) {
+    if (window.confirm(`Are you sure you want to reset the password for ${name}? They will be required to change it on their next login.`)) {
       try {
         await resetStaffUserPassword(id);
       } catch {
         alert('Password was not saved. Please try again.');
         return;
       }
-      setResetMsg(`Password for ${name} has been reset. Share the temporary password privately.`);
+      setResetMsg(`Password for ${name} has been securely reset.`);
       setTimeout(() => setResetMsg(null), 8000);
     }
   };
@@ -321,7 +321,15 @@ export function AdminUsers() {
                 </div>
 
                 <div className="flex items-center gap-2 flex-shrink-0">
-                  <button type="button" onClick={() => { setOpenDropdownId(null); setEditingEmployee(u); }} className="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 text-xs text-neutral-300 hover:text-white">Edit employee</button>
+                  <button
+                    type="button"
+                    onClick={() => { setOpenDropdownId(null); setEditingEmployee(u); }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-neutral-900 border border-neutral-800 text-xs font-semibold text-neutral-300 hover:text-white hover:border-neutral-700 transition-colors shadow-sm cursor-pointer"
+                    title="Edit Employee"
+                  >
+                    <Pencil size={12} className="text-amber-400" />
+                    <span>Edit</span>
+                  </button>
                   {viewTab === 'active' ? (
                     <>
                       {/* Admin Privilege Switch (Disabled if role is cashier OR if it's the logged-in user or superadmin) */}
