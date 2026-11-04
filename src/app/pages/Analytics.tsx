@@ -61,7 +61,7 @@ function StatCard({ label, value, sub, icon: Icon, color }: any) {
 }
 
 export function Analytics() {
-  const { tables, reservations, queue, sessionHistory } = useAppContext() as any;
+  const { tables = [], reservations = [], queue = [], sessionHistory } = useAppContext() as any;
 
   // 🟢 Custom Date Range for Overall Analytics
   const [dateRange, setDateRange] = useState({

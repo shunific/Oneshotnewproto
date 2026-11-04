@@ -15,10 +15,10 @@ import { format, isToday, isTomorrow, subDays, eachDayOfInterval, isSameDay } fr
 
 export function AdminDashboard() {
   const { 
-    staffUsers, tables, promoCodes, announcements, closedDates, 
-    rates, reservations, feedback, weather, updateWeatherLocation, 
-    activities, sessionHistory,
-    queue, watchlist, availableTables, reservationMoveError, pendingReservationMoves=[], pendingQueueOperations=[], queueOperationError
+    staffUsers = [], tables = [], promoCodes = [], announcements = [], closedDates = [], 
+    rates = {}, reservations = [], feedback = [], weather = null, updateWeatherLocation, 
+    activities = [], sessionHistory = [],
+    queue = [], watchlist = [], availableTables = [], reservationMoveError, pendingReservationMoves=[], pendingQueueOperations=[], queueOperationError
   } = useAppContext() as any;
   
   const navigate = useNavigate();

@@ -61,8 +61,8 @@ export function AdminEvents() {
     events, addEvent, updateEvent, deleteEvent, 
     promoCodes, addPromoCode, updatePromoCode, togglePromoCode, deletePromoCode,
     closedDates, addClosedDate, removeClosedDate, updateClosedDate,
-    reservations, updateReservation, updateReservationStatus, tables,
-    rates 
+    reservations = [], updateReservation, updateReservationStatus, tables = [],
+    rates = {}
   } = useAppContext() as any;
 
   const [activeTab, setActiveTab] = useState<'calendar' | 'events' | 'promos'>('calendar');

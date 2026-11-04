@@ -17,7 +17,7 @@ type FormState = {
 const blankForm: FormState = { username: '', password: '', confirmPassword: '', fullName: '', role: 'manager', phone: '', isAdmin: false };
 
 export function AdminUsers() {
-  const { staffUsers, activities, addStaffUser, updateStaffUser, resetStaffUserPassword, hashPassword, staffProfile } = useAppContext() as any;
+  const { staffUsers = [], activities = [], addStaffUser, updateStaffUser, resetStaffUserPassword, hashPassword, staffProfile } = useAppContext() as any;
 
   const [editingEmployee, setEditingEmployee] = useState<StaffUser | null>(null);
   const [showForm, setShowForm]     = useState(false);

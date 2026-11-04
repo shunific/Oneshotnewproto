@@ -11,7 +11,7 @@ import { formatDistanceToNow, format, isToday, isTomorrow, differenceInMinutes, 
 import { useNavigate } from 'react-router';
 
 export function Queue() {
-  const { queue, addToQueue, removeFromQueue, callQueueItem, addActivity, tables, availableTables, heldTableIds, reservationMoveError, reservations, cancelReservation, reservationTerms } = useAppContext() as any;
+  const { queue = [], addToQueue, removeFromQueue, callQueueItem, addActivity, tables = [], availableTables = [], heldTableIds, reservationMoveError, reservations = [], cancelReservation, reservationTerms } = useAppContext() as any;
   const navigate = useNavigate();
   
   // 🟢 Dynamic max party size based on the current day

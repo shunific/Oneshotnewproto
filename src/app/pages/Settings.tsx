@@ -36,7 +36,7 @@ const COLOR_PALETTES = [
 ];
 
 export function SettingsPage() {
-  const { staffProfile, updateStaffProfile, activities, changeOwnCredentials, verifyPassword, staffUsers, updateStaffUser, theme, updateTheme, primaryColor, updatePrimaryColor } = useAppContext();
+  const { staffProfile, updateStaffProfile, activities = [], changeOwnCredentials, verifyPassword, staffUsers = [], updateStaffUser, theme, updateTheme, primaryColor, updatePrimaryColor } = useAppContext();
   const navigate = useNavigate();
 
   const [activeSection, setActiveSection] = useState<Section>('overview');

@@ -16,7 +16,7 @@ const COMMON_MAINTENANCE_REASONS = [
 ];
 
 export function AdminTableManagement() {
-  const { tables, addTable, updateTable, updateTableState } = useAppContext() as any;
+  const { tables = [], addTable, updateTable, updateTableState } = useAppContext() as any;
 
   const [newName, setNewName]               = useState('');
   const [showAddForm, setShowAddForm]       = useState(false);

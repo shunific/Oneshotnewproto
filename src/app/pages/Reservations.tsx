@@ -137,11 +137,11 @@ function MiniCalendar({ selectedDate, onSelect, reservedDates, closedDates, onCl
 
 export function Reservations() {
   const { 
-    reservations, addReservation, updateReservationStatus, updateReservation, cancelReservation, 
-    updateDownPayment, updateBalance, tables, events, promoCodes, closedDates, 
-    rates, updateRefundStatus, theme, reservationTerms,
-    staffUsers, hashPassword, addActivity, sessionHistory, 
-    lastSynced, forceFullSync, addWatchlistItem, staffProfile, availableTables, reservationMoveError
+    reservations = [], addReservation, updateReservationStatus, updateReservation, cancelReservation, 
+    updateDownPayment, updateBalance, tables = [], events = [], promoCodes = [], closedDates = [], 
+    rates = {}, updateRefundStatus, theme, reservationTerms = {},
+    staffUsers = [], hashPassword, addActivity, sessionHistory = [], 
+    lastSynced, forceFullSync, addWatchlistItem, staffProfile, availableTables = [], reservationMoveError
   } = useAppContext() as any;
   const navigate = useNavigate();
   
