@@ -493,7 +493,7 @@ export function OfflineLogin() {
               {/* ── RECOVERY PIN BACKUP VIEW ── */}
               {view === 'recovery-pin' && (() => {
                 const targetUser = staffUsers.find((u: any) => u.username?.toLowerCase() === username?.toLowerCase());
-                const pinToShow = targetUser?.recoveryPin || '0000';
+                const pinToShow = generatedPin || targetUser?.recoveryPin || '0000';
                 return (
                   <motion.div key="recovery-pin" initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} transition={{ duration: 0.3 }} className="w-full">
                     <div className="bg-amber-950/20 border border-amber-900/40 rounded-xl p-5 mb-5 text-center">
