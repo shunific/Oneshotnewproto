@@ -64,7 +64,7 @@ function SidebarSmartTimer({ tables, onNavigate }: { tables: any[]; onNavigate: 
     return totalSeconds < 0 ? `+${parts}` : parts;
   };
 
-  const occupiedTables = tables.filter((t: any) => t.isActive && t.status === 'occupied' && t.session);
+  const occupiedTables = (tables || []).filter((t: any) => t.isActive && t.status === 'occupied' && t.session);
 
   if (occupiedTables.length === 0) {
     return (
@@ -181,7 +181,7 @@ export function Layout() {
 
   const [isLocked, setIsLocked] = useState(() => sessionStorage.getItem('oneshot_is_locked') === 'true');
   
-  const { queue, tables, reservations, promoCodes, watchlist, activities, staffLoggedIn, adminLoggedIn, staffLogout, staffProfile, theme, primaryColor } = useAppContext() as any;
+  const { queue = [], tables = [], reservations, promoCodes, watchlist, activities, staffLoggedIn, adminLoggedIn, staffLogout, staffProfile, theme, primaryColor } = useAppContext() as any;
   const location = useLocation();
   const navigate = useNavigate();
 
