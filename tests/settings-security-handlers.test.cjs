@@ -19,7 +19,7 @@ test('password and PIN change share the password update and preserve a blank PIN
  for(const newRecoveryPin of ['483729','']) {const f=fixture({newPassword:'fixtureChanged9',confirmPassword:'fixtureChanged9',newRecoveryPin});await f.handlers.handleSaveSecurity();assert.equal(f.calls.password.length,1);assert.equal(f.calls.password[0].recoveryPin,newRecoveryPin||undefined);assert.equal(f.calls.api.length,0);assert.equal(f.context.secForm.newRecoveryPin,'');}
 });
 test('failed PIN write keeps all entered values and the edit form open',async()=>{
- const f=fixture({newRecoveryPin:'483729'},{authRequest:async()=>{throw new Error('Fixture disk failure');}});const before={...f.context.secForm};await f.handlers.handleSaveSecurity();assert.deepEqual({...f.context.secForm},before);assert.equal(f.calls.edit.length,0);assert.match(f.calls.error.at(-1),/Failed to save/);assert.equal(f.context.securityInFlight.current,false);assert.deepEqual(f.calls.busy,[true,false]);
+ const f=fixture({newRecoveryPin:'483729'},{authRequest:async()=>{throw new Error('Fixture disk failure');}});const before={...f.context.secForm};await f.handlers.handleSaveSecurity();assert.deepEqual({...f.context.secForm},before);assert.equal(f.calls.edit.length,0);assert.match(f.calls.error.at(-1),/Fixture disk failure/);assert.equal(f.context.securityInFlight.current,false);assert.deepEqual(f.calls.busy,[true,false]);
 });
 test('PIN validation rejects short, long and nondigit values before sending credentials',async()=>{
  for(const value of ['1','1234567890123','12xx34']) {const f=fixture({newRecoveryPin:value});await f.handlers.handleSaveSecurity();assert.equal(f.calls.api.length,0);assert.equal(f.calls.password.length,0);assert.match(f.calls.error.at(-1),/4–12 digits/);}

@@ -35,10 +35,16 @@ export function TableCard({ table, held=false, availabilityVerified=true, onAssi
   const getTimerInfo = () => {
     if (!table.session) return null;
     const currentTime=table.status==='occupied'?new Date():now;
+
+    // Guard against missing/invalid stored timing so the card never renders "NaN:NaN".
+    const startTime = new Date(table.session.startTime);
+    if (!Number.isFinite(startTime.getTime())) {
+      return { isOvertime: false, percentLeft: 0, display: '--:--', isOpenTime: false };
+    }
     
     // 🟢 NEW: Intercept Open Time Logic
     if (table.session.isOpenTime || table.session.durationMinutes === null) {
-      const elapsedSecs = Math.max(0, differenceInSeconds(stop?.reached ? new Date(stop.latestEndTime) : currentTime, new Date(table.session.startTime)));
+      const elapsedSecs = Math.max(0, differenceInSeconds(stop?.reached ? new Date(stop.latestEndTime) : currentTime, startTime));
       const hrs = String(Math.floor(elapsedSecs / 3600)).padStart(2, '0');
       const mm = String(Math.floor((elapsedSecs % 3600) / 60)).padStart(2, '0');
       const ss = String(elapsedSecs % 60).padStart(2, '0');
@@ -52,7 +58,11 @@ export function TableCard({ table, held=false, availabilityVerified=true, onAssi
     }
 
     // Standard Countdown Logic
-    const endTime = addMinutes(new Date(table.session.startTime), table.session.durationMinutes);
+    const durationMins = Number(table.session.durationMinutes);
+    if (!Number.isFinite(durationMins) || durationMins <= 0) {
+      return { isOvertime: false, percentLeft: 0, display: '--:--', isOpenTime: false };
+    }
+    const endTime = addMinutes(startTime, durationMins);
     const secsLeft = differenceInSeconds(endTime, currentTime);
     const isOvertime = secsLeft < 0;
     const absSecs = Math.abs(secsLeft);
@@ -64,7 +74,7 @@ export function TableCard({ table, held=false, availabilityVerified=true, onAssi
     const display = hrs > 0 ? `${hrs}:${mm}:${ss}` : `${mm}:${ss}`;
 
     // Calculate progress bar percentage
-    const totalSecs = table.session.durationMinutes * 60;
+    const totalSecs = durationMins * 60;
     const percentLeft = Math.max(0, Math.min(100, (secsLeft / totalSecs) * 100));
 
     return { display, isOvertime, percentLeft, isOpenTime: false };

@@ -1,6 +1,6 @@
 import { authRequest } from '../utils/localApi';
 import { localFetch } from '../utils/localApi';
-import { useState, useMemo, useRef } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
 import {
   User, Lock, Phone, Eye, EyeOff, Palette, Sun, Moon,
@@ -55,6 +55,7 @@ export function SettingsPage() {
   const [secError, setSecError] = useState('');
   const securityInFlight = useRef(false);
   const [isSavingSecurity, setIsSavingSecurity] = useState(false);
+  const [currentPwStatus, setCurrentPwStatus] = useState<'idle' | 'checking' | 'valid' | 'invalid'>('idle');
 
   const userActivities = useMemo(() => activities.filter((a: any) => a.metadata?.actorId === staffProfile.id), [activities, staffProfile.id]);
 
@@ -66,6 +67,22 @@ export function SettingsPage() {
   }), [userActivities]);
 
   const pwStrength = getPasswordStrength(secForm.newPassword);
+
+  // Real-time current-password check so the user knows immediately whether it is correct.
+  useEffect(() => {
+    if (!secEdit || !secForm.currentPassword) { setCurrentPwStatus('idle'); return; }
+    let cancelled = false;
+    setCurrentPwStatus('checking');
+    const timer = setTimeout(async () => {
+      try {
+        const valid = await verifyPassword(secForm.currentPassword);
+        if (!cancelled) setCurrentPwStatus(valid ? 'valid' : 'invalid');
+      } catch {
+        if (!cancelled) setCurrentPwStatus('invalid');
+      }
+    }, 400);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [secForm.currentPassword, secEdit]);
 
   const [toast, setToast] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
   const toastTimeout = useRef<NodeJS.Timeout | null>(null);
@@ -154,11 +171,11 @@ export function SettingsPage() {
       setSecEdit(false);
       setSecForm(f => ({ ...f, currentPassword: '', newPassword: '', confirmPassword: '', newRecoveryPin: '' }));
       flash("Security credentials saved!", "success");
-    } catch {
+    } catch (error: any) {
       if (passwordSaved || pinSaved) {
         setSecForm(f => ({ ...f, currentPassword: passwordSaved ? secForm.newPassword : f.currentPassword, newPassword: passwordSaved ? '' : f.newPassword, confirmPassword: passwordSaved ? '' : f.confirmPassword, newRecoveryPin: pinSaved ? '' : f.newRecoveryPin }));
         setSecError('Your password or PIN was saved, but the username change failed. Review the username and try again.');
-      } else setSecError('Failed to save security credentials. Please try again.');
+      } else setSecError(error?.message || 'Failed to save security credentials. Please try again.');
     } finally {
       securityInFlight.current = false;
       setIsSavingSecurity(false);
@@ -183,7 +200,7 @@ export function SettingsPage() {
       {/* 🟢 TOP-RIGHT FLOATING TOAST WITH 5S TIMER & FADE OUT */}
       {toast && (
         <div 
-          className="fixed top-6 right-6 z-[9999] animate-in slide-in-from-top-4 fade-in duration-300"
+          className="fixed top-6 right-6 z-[9999] pointer-events-none animate-in slide-in-from-top-4 fade-in duration-300"
           style={{ animation: 'toast-fade-out 5s forwards' }}
         >
           <div className={`relative overflow-hidden flex items-start gap-3 px-5 py-4 rounded-xl border shadow-2xl backdrop-blur-md min-w-[320px] max-w-md ${
@@ -197,7 +214,7 @@ export function SettingsPage() {
             <span className="text-sm font-semibold leading-snug whitespace-pre-wrap pr-4">{toast.msg}</span>
             <button 
               onClick={() => { setToast(null); if (toastTimeout.current) clearTimeout(toastTimeout.current); }} 
-              className="absolute top-4 right-4 text-neutral-500 hover:text-white transition-colors"
+              className="pointer-events-auto absolute top-4 right-4 text-neutral-500 hover:text-white transition-colors"
             >
               <X size={14} />
             </button>
@@ -455,6 +472,13 @@ export function SettingsPage() {
                       <input type={showPw.current ? 'text' : 'password'} value={secForm.currentPassword} onChange={e => setSecForm(f => ({ ...f, currentPassword: e.target.value }))} placeholder="Your current password" className="w-full bg-neutral-800 border border-neutral-700 rounded-xl px-3 pr-10 py-2 text-sm text-neutral-100" />
                       <button type="button" tabIndex={-1} onClick={() => setShowPw(s => ({ ...s, current: !s.current }))} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300">{showPw.current ? <EyeOff size={13} /> : <Eye size={13} />}</button>
                     </div>
+                    {secForm.currentPassword && currentPwStatus !== 'idle' && (
+                      <p className={`mt-1.5 text-[10px] font-semibold ${
+                        currentPwStatus === 'valid' ? 'text-emerald-400' : currentPwStatus === 'invalid' ? 'text-rose-400' : 'text-neutral-500'
+                      }`}>
+                        {currentPwStatus === 'checking' ? 'Checking current password…' : currentPwStatus === 'valid' ? '✓ Current password is correct' : '✗ Current password is incorrect'}
+                      </p>
+                    )}
                   </div>
 
                   <div>
@@ -481,6 +505,12 @@ export function SettingsPage() {
                       <input type={showPw.confirm ? 'text' : 'password'} value={secForm.confirmPassword} onChange={e => setSecForm(f => ({ ...f, confirmPassword: e.target.value }))} placeholder="Re-enter new password" className="w-full bg-neutral-800 border border-neutral-700 rounded-xl px-3 pr-10 py-2 text-sm text-neutral-100" />
                       <button type="button" tabIndex={-1} onClick={() => setShowPw(s => ({ ...s, confirm: !s.confirm }))} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500">{showPw.confirm ? <EyeOff size={13} /> : <Eye size={13} />}</button>
                     </div>
+                    {secForm.confirmPassword && secForm.newPassword !== secForm.confirmPassword && (
+                      <p className="mt-1.5 text-[10px] font-semibold text-rose-400">✗ Passwords do not match</p>
+                    )}
+                    {secForm.confirmPassword && secForm.newPassword && secForm.newPassword === secForm.confirmPassword && (
+                      <p className="mt-1.5 text-[10px] font-semibold text-emerald-400">✓ Passwords match</p>
+                    )}
                   </div>
                   <div>
                     <label htmlFor="new-recovery-pin" className="block text-xs text-neutral-400 mb-1.5">New Recovery PIN (optional)</label>

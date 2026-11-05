@@ -834,11 +834,11 @@ export function Reservations() {
       
       {/* Toast Notification */}
       {toastState && (
-        <div className="fixed top-6 right-6 z-[99999] animate-in slide-in-from-top-4 fade-in duration-300" style={{ animation: toastState.type !== 'loading' ? 'toast-fade-out 5s forwards' : 'none' }}>
+        <div className="fixed top-6 right-6 z-[99999] pointer-events-none animate-in slide-in-from-top-4 fade-in duration-300" style={{ animation: toastState.type !== 'loading' ? 'toast-fade-out 5s forwards' : 'none' }}>
           <div className={`relative overflow-hidden flex items-start gap-3 px-5 py-4 rounded-xl border shadow-2xl backdrop-blur-md min-w-[320px] max-w-md ${toastState.type === 'success' ? 'bg-emerald-950/90 border-emerald-900/50 text-emerald-400' : toastState.type === 'loading' ? 'bg-sky-950/90 border-sky-900/50 text-sky-400' : 'bg-rose-950/90 border-rose-900/50 text-rose-400'}`}>
             <div className="mt-0.5 flex-shrink-0">{toastState.type === 'success' ? <CheckCircle size={18} /> : toastState.type === 'loading' ? <RefreshCw size={18} className="animate-spin" /> : <AlertTriangle size={18} />}</div>
             <span className="text-sm font-semibold leading-snug whitespace-pre-wrap pr-4">{toastState.msg}</span>
-            {toastState.type !== 'loading' && <button onClick={() => { setToastState(null); if (toastTimeout.current) clearTimeout(toastTimeout.current); }} className="absolute top-4 right-4 text-neutral-500 hover:text-white transition-colors"><X size={14} /></button>}
+            {toastState.type !== 'loading' && <button onClick={() => { setToastState(null); if (toastTimeout.current) clearTimeout(toastTimeout.current); }} className="pointer-events-auto absolute top-4 right-4 text-neutral-500 hover:text-white transition-colors"><X size={14} /></button>}
             {toastState.type !== 'loading' && <div className={`absolute bottom-0 left-0 h-1 ${toastState.type === 'success' ? 'bg-emerald-500' : 'bg-rose-500'}`} style={{ animation: 'toast-shrink 5s linear forwards' }} />}
           </div>
           <style>{`@keyframes toast-shrink { 0% { width: 100%; } 100% { width: 0%; } } @keyframes toast-fade-out { 0%, 90% { opacity: 1; transform: translateY(0); } 100% { opacity: 0; transform: translateY(-10px); } }`}</style>

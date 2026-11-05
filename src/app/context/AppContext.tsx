@@ -142,6 +142,7 @@ type AppContextType = {
   activeAnnouncement: string; updateActiveAnnouncement: (msg: string) => void;
   staffLoggedIn: boolean; adminLoggedIn: boolean; setStaffLoggedIn: (v: boolean) => void; setAdminLoggedIn: (v: boolean) => void; staffProfile: StaffProfile;
   staffLogin: (u: string, p: string) => Promise<boolean>; staffLogout: () => void; adminLogin: (u: string, p: string) => Promise<boolean>; adminLogout: () => void; updateStaffProfile: (profile: Partial<StaffProfile>) => void;
+  verifyPassword: (password: string) => Promise<boolean>; changeOwnCredentials: (credentials: { currentPassword: string; newPassword?: string; recoveryPin?: string }) => Promise<boolean>;
   assignTable: (id: string, s: Session) => void; freeTable: (id: string) => void; reserveTable: (id: string) => void; extendSession: (id: string, mins: number, pay: number) => void; migrateSession: (fromTableId: string, toTableId: string) => void; setTableMaintenance: (id: string, reason: string) => void; setTableEvent: (id: string, eventName: string) => void; addTable: (n: string) => void; updateTable: (id: string, n: string) => void; toggleTableActive: (id: string) => void; deleteTable: (id: string) => void;
   checkoutTable: (id: string, payload: any) => Promise<any>; seatQueueCustomer: (queueId: string, tableId: string, session: any) => Promise<any>; retryPendingOrder: (tableId: string, expectedSessionStartTime: string) => Promise<void>;
   addInventoryItem: (i: Omit<InventoryItem, 'id'>) => void; updateInventoryItem: (id: string, i: Partial<InventoryItem>) => void; deleteInventoryItem: (id: string) => void; submitTableOrders: (tableId: string, cart: SessionOrder[]) => void; voidTableOrder: (tableId: string, orderIndex: number, order: SessionOrder) => void;
@@ -692,7 +693,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const seatQueueCustomer = async (queueId: string, tableId: string, session: any) => {
     const queueItem = (queue || []).find((q: any) => q.id === queueId);
     if (!queueItem) throw new Error('The queue entry was not found. Refresh the page and try again.');
-    assignTable(tableId, { ...session, customerName: queueItem.customerName } as Session);
+    const startTime = session?.startTime ? new Date(session.startTime) : new Date();
+    if (!Number.isFinite(startTime.getTime())) throw new Error('The queue session start time is invalid.');
+    assignTable(tableId, {
+      ...session,
+      customerName: queueItem.customerName,
+      startTime,
+      orders: Array.isArray(session?.orders) ? session.orders : [],
+    } as Session);
     removeFromQueue(queueId);
     return { replayed: false };
   };
@@ -976,6 +984,42 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  };
+
+  const verifyPassword = async (password: string) => {
+    if (!password) return false;
+    const target = (staffUsers || []).find(u => u.id === staffProfile?.id)
+      || (staffUsers || []).find(u => (u.username || '').toLowerCase() === (staffProfile?.username || '').toLowerCase());
+    if (!target?.password) return false;
+    if (target.password === password) return true;
+    return target.password === await hashPassword(password);
+  };
+
+  const changeOwnCredentials = async ({ currentPassword, newPassword, recoveryPin }: { currentPassword: string; newPassword?: string; recoveryPin?: string }) => {
+    if (!staffProfile?.id) throw new Error('Your account could not be found. Sign in again.');
+    const target = (staffUsers || []).find(u => u.id === staffProfile.id);
+    if (!target) throw new Error('Your account could not be found in the staff list. Sign out and back in, then retry.');
+    if (!currentPassword) throw new Error('Enter your current password to confirm the change.');
+    if (!await verifyPassword(currentPassword)) throw new Error('Your current password is incorrect.');
+
+    const updates: Partial<StaffUser> = {};
+    if (newPassword) {
+      if (newPassword.length < 8 || newPassword.length > 256 || !/[a-zA-Z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
+        throw new Error('New password must be 8–256 characters and include at least one letter and one number.');
+      }
+      updates.password = await hashPassword(newPassword);
+    }
+    if (recoveryPin !== undefined && recoveryPin !== '') {
+      if (!/^\d{4,12}$/.test(recoveryPin)) throw new Error('Recovery PIN must contain 4–12 digits.');
+      updates.recoveryPin = recoveryPin;
+    }
+    if (!Object.keys(updates).length) throw new Error('Enter a new password or recovery PIN before saving.');
+
+    await syncToDB(`/api/staff/${target.id}`, 'PUT', updates, 'Updated own security credentials');
+    setStaffUsers(prev => prev.map(u => u.id === target.id ? { ...u, ...updates } : u));
+    addActivity('admin_action', 'Changed own password / recovery PIN');
+    runCloudBackup();
+    return true;
   };
 
   const staffLogin = async (u: string, p: string) => { 
@@ -1562,6 +1606,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       activeAnnouncement, updateActiveAnnouncement,
       staffLoggedIn, adminLoggedIn, setStaffLoggedIn, setAdminLoggedIn, staffProfile,
       staffLogin, staffLogout, adminLogin, adminLogout, updateStaffProfile,
+      verifyPassword, changeOwnCredentials,
       assignTable, freeTable, reserveTable, extendSession, migrateSession, setTableMaintenance, setTableEvent, addTable, updateTable, toggleTableActive, deleteTable,
       checkoutTable, seatQueueCustomer, retryPendingOrder,
       addInventoryItem, updateInventoryItem, deleteInventoryItem, submitTableOrders, voidTableOrder,
