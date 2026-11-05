@@ -7,7 +7,7 @@
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
-    "dev": "concurrently --kill-others-on-fail=false \"cross-env NODE_ENV=development PORT=3001 node server.cjs || true\" \"vite --port 3000 --host 0.0.0.0\"",
+    "dev": "npm run build && concurrently --kill-others-on-fail=false \"cross-env NODE_ENV=development PORT=3001 node server.cjs || true\" \"vite --port 3000 --host 0.0.0.0\"",
     "build": "vite build",
     "postinstall": "electron-builder install-app-deps",
     "rebuild": "electron-rebuild -f -w sqlite3",
