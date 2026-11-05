@@ -148,7 +148,7 @@ type AppContextType = {
   addFeedback: (i: Omit<Feedback, 'id'|'date'>) => void; resolveFeedback: (id: string, notes: string) => void; addActivity: (t: ActivityType, d: string, m?: Record<string, any>) => void;  
   addPromoCode: (i: Omit<PromoCode, 'id'|'createdAt'|'usageCount'>) => string; updatePromoCode: (id: string, u: Partial<Omit<PromoCode, 'id'|'createdAt'|'usageCount'>>) => void; togglePromoCode: (id: string) => void; deletePromoCode: (id: string) => void; applyPromoCode: (c: string) => PromoCode | null;
   events: Event[]; addEvent: (e: Omit<Event, 'id'>) => void; updateEvent: (id: string, updates: Partial<Omit<Event, 'id'>>) => void; deleteEvent: (id: string) => void;
-  addStaffUser: (u: Omit<StaffUser, 'id'|'createdAt'>) => void; updateStaffUser: (id: string, u: Partial<StaffUser>) => void; resetStaffUserPassword: (id: string) => Promise<void>; toggleStaffUserActive: (id: string) => void;
+  addStaffUser: (u: Omit<StaffUser, 'id'|'createdAt'>) => string; updateStaffUser: (id: string, u: Partial<StaffUser>) => void; resetStaffUserPassword: (id: string) => Promise<void>; toggleStaffUserActive: (id: string) => void;
   updateRates: (r: Partial<RatesConfig>) => Promise<void>; updateReservationTerms: (t: Partial<ReservationTerms>) => Promise<void>; addAnnouncement: (a: Omit<Announcement, 'id'|'createdAt'>) => void; updateAnnouncement: (id: string, u: Partial<Announcement>) => void; deleteAnnouncement: (id: string) => void; toggleAnnouncement: (id: string) => void; addClosedDate: (c: Omit<ClosedDate, 'id'>) => void; removeClosedDate: (id: string) => void; updateClosedDate: (id: string, u: Partial<ClosedDate>) => void;
   siteConfig: any; updateSiteConfig: (config: any) => void; refreshLiveMonitor: () => void;
   lostItems: LostItem[];
@@ -223,11 +223,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [tables, heldTableIds]);
   const reservationMoveError = '';
 
+  // 🟢 Recovery PIN helpers (every account must have a real, unique 4-digit PIN)
+  const hasUsableRecoveryPin = (value: any) => typeof value === 'string' && /^\d{4,12}$/.test(value);
+  const generateUniqueRecoveryPin = (excludeId?: string) => {
+    const used = new Set(
+      (staffUsers || [])
+        .filter(u => u.id !== excludeId && hasUsableRecoveryPin(u.recoveryPin))
+        .map(u => String(u.recoveryPin))
+    );
+    let pin = '';
+    do {
+      pin = Math.floor(1000 + Math.random() * 9000).toString();
+    } while (used.has(pin));
+    return pin;
+  };
+
   // 🟢 Global Recovery PIN State
   const [showRecoveryModal, setShowRecoveryModal] = useState(false);
   const [pinCopied, setPinCopied] = useState(false);
   const [hasInteractedWithPin, setHasInteractedWithPin] = useState(false);
   const [pinSaved, setPinSaved] = useState(false);
+  const [pendingPin, setPendingPin] = useState('');
 
   const [staffLoggedIn, setStaffLoggedIn] = useState(() => sessionStorage.getItem('oneshot_staff_auth') === 'true');
   const [adminLoggedIn, setAdminLoggedIn] = useState(() => sessionStorage.getItem('oneshot_admin_auth') === 'true');
@@ -249,14 +265,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if ((staffLoggedIn || adminLoggedIn) && staffProfile?.username) {
+      const targetUser = (staffUsers || []).find(
+        (u: any) => u.username?.toLowerCase() === staffProfile.username.toLowerCase()
+      );
+      // Backfill a real PIN for accounts created before PINs were generated.
+      if (targetUser && !hasUsableRecoveryPin(targetUser.recoveryPin)) {
+        const freshPin = generateUniqueRecoveryPin(targetUser.id);
+        setPendingPin(freshPin);
+        updateStaffUser(targetUser.id, { recoveryPin: freshPin });
+      }
       const isBackedUp = localStorage.getItem(`oneshot_pin_backed_up_${staffProfile.username}`);
-      if (!isBackedUp) {
+      if (isBackedUp) {
+        setShowRecoveryModal(false);
+      } else if (hasUsableRecoveryPin(targetUser?.recoveryPin) || pendingPin) {
         setShowRecoveryModal(true);
       }
     } else {
       setShowRecoveryModal(false);
     }
-  }, [staffLoggedIn, adminLoggedIn, staffProfile]);
+  }, [staffLoggedIn, adminLoggedIn, staffProfile, staffUsers]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -291,14 +318,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   
   const handleDownloadPin = () => {
     const targetUser = staffUsers.find((u: any) => u.username?.toLowerCase() === staffProfile?.username?.toLowerCase());
-    if (!targetUser?.recoveryPin) return;
+    const pin = hasUsableRecoveryPin(targetUser?.recoveryPin) ? targetUser!.recoveryPin : pendingPin;
+    if (!pin) return;
     
-    const text = `ONE SHOT BAR & BILLIARDS\n=================================\nACCOUNT RECOVERY CREDENTIALS\n=================================\n\nAccount Name : ${targetUser.fullName}\nUsername     : ${targetUser.username}\nRole         : ${targetUser.role.toUpperCase()}\n\nOFFLINE RECOVERY PIN: ${targetUser.recoveryPin}\n\n=================================\nIMPORTANT: Keep this file secure. Because this system operates offline, if you forget your password, you will strictly need this 4-digit PIN to recover your account without a Super Admin.\n`;
+    const text = `ONE SHOT BAR & BILLIARDS\n=================================\nACCOUNT RECOVERY CREDENTIALS\n=================================\n\nAccount Name : ${targetUser?.fullName || staffProfile?.fullName}\nUsername     : ${targetUser?.username || staffProfile?.username}\nRole         : ${(targetUser?.role || staffProfile?.role || '').toUpperCase()}\n\nOFFLINE RECOVERY PIN: ${pin}\n\n=================================\nIMPORTANT: Keep this file secure. Because this system operates offline, if you forget your password, you will strictly need this 4-digit PIN to recover your account without a Super Admin.\n`;
     const blob = new Blob([text], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `oneshot-recovery-pin-${targetUser.username}.txt`;
+    link.download = `oneshot-recovery-pin-${targetUser?.username || staffProfile?.username}.txt`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -1244,10 +1272,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const addStaffUser = (u: Omit<StaffUser, 'id'|'createdAt'>) => {
     const id = `su${Date.now()}`;
-    const newUser = { ...u, id, createdAt: new Date() };
+    const assignedPin = hasUsableRecoveryPin(u.recoveryPin) ? u.recoveryPin! : generateUniqueRecoveryPin();
+    const newUser = { ...u, id, recoveryPin: assignedPin, createdAt: new Date() };
     setStaffUsers(prev => [...prev, newUser]);
     syncToDB('/api/staff', 'POST', newUser, `Added staff user`).then(runCloudBackup).catch(()=>{});
     addActivity('admin_action', `Created new staff user: ${u.username}`);
+    return assignedPin;
   };
   
   const updateStaffUser = (id: string, u: Partial<StaffUser>) => {
@@ -1476,7 +1506,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       <AnimatePresence>
         {showRecoveryModal && (() => {
           const targetUser = staffUsers.find((u: any) => u.username?.toLowerCase() === staffProfile?.username?.toLowerCase());
-          const displayPin = targetUser?.recoveryPin || '0000';
+          const displayPin = hasUsableRecoveryPin(targetUser?.recoveryPin) ? targetUser!.recoveryPin : (pendingPin || '----');
           return (
             <motion.div 
               initial={{ opacity: 0 }} 

@@ -25,6 +25,7 @@ export function AdminUsers() {
   const [showPw, setShowPw]                 = useState(false);
   const [showConfirmPw, setShowConfirmPw]   = useState(false);
   const [resetMsg, setResetMsg]     = useState<string | null>(null);
+  const [newAccount, setNewAccount] = useState<{ username: string; pin: string } | null>(null);
 
   const [viewTab, setViewTab]       = useState<'active' | 'archived'>('active');
   const [filterRole, setFilterRole] = useState<'all' | StaffUser['role']>('all');
@@ -91,9 +92,10 @@ export function AdminUsers() {
     setLoadingMsg('SAVING NEW USER...');
     setIsLoading(true);
     try {
-      await addStaffUser(payload as any);
+      const assignedPin = await addStaffUser(payload as any);
       setShowForm(false);
       setForm(blankForm);
+      setNewAccount({ username: payload.username, pin: assignedPin || '—' });
     } catch {
       alert('Staff account was not saved. Your form is preserved; please try again.');
     } finally {
@@ -233,6 +235,17 @@ export function AdminUsers() {
           </div>
         ))}
       </div>
+
+      {newAccount && (
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 bg-amber-950/40 border border-amber-700/40 text-amber-300 text-sm px-4 py-3 rounded-xl animate-in fade-in">
+          <CheckCircle size={16} className="flex-shrink-0" />
+          <p className="flex-1">
+            Account <span className="font-bold text-white">{newAccount.username}</span> created. Recovery PIN: <span className="font-mono font-black text-lg tracking-[0.3em] text-white">{newAccount.pin}</span>
+            <span className="block text-[11px] text-amber-500/80 mt-0.5">Give this PIN to the employee. They will be prompted to save it after logging in.</span>
+          </p>
+          <button onClick={() => setNewAccount(null)} className="text-xs font-bold underline self-start sm:self-center">Dismiss</button>
+        </div>
+      )}
 
       {resetMsg && (
         <div className="flex items-center gap-2.5 bg-emerald-950/40 border border-emerald-700/40 text-emerald-400 text-sm px-4 py-3 rounded-xl animate-in fade-in">

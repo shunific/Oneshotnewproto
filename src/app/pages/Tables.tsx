@@ -90,7 +90,7 @@ export function Tables() {
     staffProfile, rates, reservationTerms, staffUsers, hashPassword,
     addSessionHistory, addActivity, addWatchlistItem,
     seatQueueCustomer, removeFromQueue, updateReservationStatus, forceFullSync,
-    pendingReservationMoves, reservationMoveError, heldTableIds, availableTables, recoverReservationTransfer, refreshReservationTransfers
+    pendingReservationMoves = [], reservationMoveError = '', heldTableIds = new Set<string>(), availableTables = [], recoverReservationTransfer, refreshReservationTransfers
   } = useAppContext() as any;
 
   // 🟢 Audio alert when any table session ends
@@ -888,10 +888,11 @@ export function Tables() {
       {/* MAIN CONTENT AREA */}
       <div className={`flex-1 space-y-5 overflow-y-auto pr-2 transition-all duration-300 ${posTableId ? 'mr-[380px]' : ''}`}>
         <PendingQueueActions />
-        <PendingReservationMoves records={pendingReservationMoves} tables={tables} error={reservationMoveError} busy={isSavingSession} onRefresh={()=>{void refreshReservationTransfers();}} onRecover={(record,action)=>{
+        <PendingReservationMoves records={pendingReservationMoves} tables={tables} error={reservationMoveError} busy={isSavingSession} onRefresh={()=>{void (refreshReservationTransfers?.() ?? Promise.resolve());}} onRecover={(record,action)=>{
           if(sessionInFlight.current)return;
+          if(typeof recoverReservationTransfer!=='function'){flash('Transfer recovery is unavailable. Please restart the app.','error');return;}
           sessionInFlight.current=true;setIsSavingSession(true);
-          void recoverReservationTransfer(record,action).then((result:any)=>flash(result.phase==='aborted'?'Transfer cancelled. Held tables released.':'Transfer confirmed.','success')).catch((error:any)=>flash(error.message||'Recovery could not be confirmed. Retry the original transfer.','error')).finally(()=>{sessionInFlight.current=false;setIsSavingSession(false);});
+          void recoverReservationTransfer(record,action).then((result:any)=>flash(result?.phase==='aborted'?'Transfer cancelled. Held tables released.':'Transfer confirmed.','success')).catch((error:any)=>flash(error.message||'Recovery could not be confirmed. Retry the original transfer.','error')).finally(()=>{sessionInFlight.current=false;setIsSavingSession(false);});
         }}/>
         <div className="grid grid-cols-4 gap-3">
           {[

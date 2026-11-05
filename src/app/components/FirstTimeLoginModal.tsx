@@ -24,7 +24,7 @@ export function FirstTimeLoginModal({ onComplete }: { onComplete: () => void }) 
 
   const handleConfirm = () => {
     // Save PIN and disable first-time-login flag
-    updateStaffUser(staffProfile.username, { recoveryPin: pin, isFirstLogin: 0 } as any);
+    updateStaffUser(staffProfile.id, { recoveryPin: pin, isFirstLogin: 0 } as any);
     onComplete();
   };
 
