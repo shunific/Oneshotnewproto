@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 import { supabase } from '../utils/supabase';
 import { motion, AnimatePresence } from 'motion/react';
 import { KeyRound, CheckCircle2, Copy, Download } from 'lucide-react';
+import { previewSessionBill } from '../../../session-billing.mjs';
 
 // ── Types ──────────────────────────────────────────────────────
 export type TableStatus = 'available' | 'occupied' | 'reserved' | 'maintenance' | 'event';
@@ -142,6 +143,7 @@ type AppContextType = {
   staffLoggedIn: boolean; adminLoggedIn: boolean; setStaffLoggedIn: (v: boolean) => void; setAdminLoggedIn: (v: boolean) => void; staffProfile: StaffProfile;
   staffLogin: (u: string, p: string) => Promise<boolean>; staffLogout: () => void; adminLogin: (u: string, p: string) => Promise<boolean>; adminLogout: () => void; updateStaffProfile: (profile: Partial<StaffProfile>) => void;
   assignTable: (id: string, s: Session) => void; freeTable: (id: string) => void; reserveTable: (id: string) => void; extendSession: (id: string, mins: number, pay: number) => void; migrateSession: (fromTableId: string, toTableId: string) => void; setTableMaintenance: (id: string, reason: string) => void; setTableEvent: (id: string, eventName: string) => void; addTable: (n: string) => void; updateTable: (id: string, n: string) => void; toggleTableActive: (id: string) => void; deleteTable: (id: string) => void;
+  checkoutTable: (id: string, payload: any) => Promise<any>; seatQueueCustomer: (queueId: string, tableId: string, session: any) => Promise<any>; retryPendingOrder: (tableId: string, expectedSessionStartTime: string) => Promise<void>;
   addInventoryItem: (i: Omit<InventoryItem, 'id'>) => void; updateInventoryItem: (id: string, i: Partial<InventoryItem>) => void; deleteInventoryItem: (id: string) => void; submitTableOrders: (tableId: string, cart: SessionOrder[]) => void; voidTableOrder: (tableId: string, orderIndex: number, order: SessionOrder) => void;
   addToQueue: (i: Omit<QueueItem, 'id'|'arrivalTime'|'status'|'queueNumber'>) => void; removeFromQueue: (id: string) => void; callQueueItem: (id: string) => void;
   addReservation: (i: Omit<Reservation, 'id'|'createdAt'>) => string; updateReservationStatus: (id: string, s: ReservationStatus) => void; updateReservation: (id: string, u: Partial<Reservation>) => void; cancelReservation: (id: string, r: string) => void; updateDownPayment: (id: string, p: boolean) => void; updateBalance: (id: string, p: boolean) => void;
@@ -684,6 +686,97 @@ export function AppProvider({ children }: { children: ReactNode }) {
     addActivity('table_freed', `Freed ${tables.find(t=>t.id===tableId)?.name}`);
     syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'available', session: null }, `Table freed`).then(runCloudBackup).catch(()=>{});
     supabase.from('tables').update({ status: 'available', sessionData: null, maintenanceReason: null, isActive: 1 }).eq('id', tableId).then();
+  };
+
+  // Seat a queued customer: start the table timer and remove them from the queue.
+  const seatQueueCustomer = async (queueId: string, tableId: string, session: any) => {
+    const queueItem = (queue || []).find((q: any) => q.id === queueId);
+    if (!queueItem) throw new Error('The queue entry was not found. Refresh the page and try again.');
+    assignTable(tableId, { ...session, customerName: queueItem.customerName } as Session);
+    removeFromQueue(queueId);
+    return { replayed: false };
+  };
+
+  // This build no longer keeps a local pending-order ledger, so there is nothing to replay.
+  const retryPendingOrder = async (_tableId: string, _expectedSessionStartTime: string) => { /* no-op */ };
+
+  const checkoutTable = async (tableId: string, payload: any) => {
+    const table = tables.find(t => t.id === tableId);
+    const session = payload?.expectedSession || table?.session;
+    if (!session) throw new Error('The table session was not found. Refresh the tables and try again.');
+
+    const startTime = new Date(session.startTime);
+    if (!Number.isFinite(startTime.getTime())) throw new Error('The stored session start time is invalid.');
+
+    const now = Date.now();
+    let bill;
+    try {
+      bill = previewSessionBill({ ...session, startTime: startTime.toISOString() }, now, Boolean(payload?.useProrated));
+    } catch (error: any) {
+      throw new Error(error?.message || 'The session bill could not be calculated.');
+    }
+
+    const total = Number(bill.totalDue) || 0;
+    const alreadyPaid = Number(bill.alreadyPaid) || 0;
+    const dueNow = Math.max(0, total - alreadyPaid);
+    const tenderedInput = Number(payload?.tendered);
+    const tendered = Number.isFinite(tenderedInput) ? Math.max(0, tenderedInput) : dueNow;
+    const paymentStatus = payload?.paymentStatus === 'partial' ? 'partial' : payload?.paymentStatus === 'unpaid' ? 'unpaid' : 'paid';
+    const totalPaidNow = paymentStatus === 'paid' ? dueNow : paymentStatus === 'partial' ? Math.min(tendered, dueNow) : 0;
+    const totalPaid = alreadyPaid + totalPaidNow;
+    const change = paymentStatus === 'paid' ? Math.max(0, tendered - dueNow) : 0;
+    const refundDue = Math.max(0, totalPaid - total);
+    const endTime = new Date(now);
+
+    const receipt = {
+      receipt_no: `OS-${now}`,
+      table_id: tableId,
+      table_name: table?.name || session.tableName || tableId,
+      customer_name: session.customerName || 'Walk-in',
+      play_start_time: startTime.toISOString(),
+      play_end_time: endTime.toISOString(),
+      duration_minutes: bill.elapsedMins,
+      table_charge: bill.bookedCharge,
+      booking_discount_amount: bill.bookingDiscount,
+      overtime_charge: bill.overtimeCharge,
+      overtime_rate: bill.overtimeRate,
+      overtime_minutes: bill.overtimeMins,
+      fnb_charge: bill.posOrdersTotal,
+      subtotal: total,
+      total_amount: total,
+      amount_paid: totalPaid,
+      balance_due: Math.max(0, total - totalPaid),
+      payment_method: payload?.paymentMethod || 'cash',
+      payment_status: paymentStatus,
+      refund_status: refundDue > 0 ? 'pending' : '',
+      void_reason: payload?.closureKind === 'void' ? 'Voided session' : payload?.closureKind === 'walkout' ? 'Walkout' : '',
+      original_amount: total,
+    };
+
+    const orders = Array.isArray(session.orders) ? session.orders : [];
+    addSessionHistory({
+      customerName: receipt.customer_name,
+      tableId,
+      tableName: receipt.table_name,
+      startTime,
+      endTime,
+      durationMinutes: bill.elapsedMins,
+      totalAmount: total,
+      amountPaid: totalPaid,
+      orders,
+    });
+
+    freeTable(tableId);
+
+    return {
+      receipt,
+      history: { orders },
+      alreadyPaid,
+      totalPaidNow,
+      refundDue,
+      change,
+      tendered,
+    };
   };
 
   const extendSession = (tableId: string, mins: number, pay: number) => {
@@ -1470,6 +1563,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       staffLoggedIn, adminLoggedIn, setStaffLoggedIn, setAdminLoggedIn, staffProfile,
       staffLogin, staffLogout, adminLogin, adminLogout, updateStaffProfile,
       assignTable, freeTable, reserveTable, extendSession, migrateSession, setTableMaintenance, setTableEvent, addTable, updateTable, toggleTableActive, deleteTable,
+      checkoutTable, seatQueueCustomer, retryPendingOrder,
       addInventoryItem, updateInventoryItem, deleteInventoryItem, submitTableOrders, voidTableOrder,
       addToQueue, removeFromQueue, callQueueItem,
       addReservation, updateReservationStatus, updateReservation, cancelReservation, updateDownPayment, updateBalance,

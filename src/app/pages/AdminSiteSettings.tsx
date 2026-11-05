@@ -10,15 +10,6 @@ import { supabase } from "../utils/supabase";
 import { resolveMapEmbedUrl } from "../utils/maps";
 
 export function AdminSiteSettings() {
-  // Processing watchdog timer to guarantee UI never gets permanently stuck
-  useEffect(() => {
-    if (isProcessing) {
-      const timer = setTimeout(() => {
-        setIsProcessing(false);
-      }, 4000);
-      return () => clearTimeout(timer);
-    }
-  }, [isProcessing]);
   const { 
     siteConfig, updateSiteConfig, 
     rates, updateRates, 
@@ -60,6 +51,16 @@ export function AdminSiteSettings() {
   const [uploading, setUploading] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [activeSlideIdx, setActiveSlideIdx] = useState(0);
+
+  // Processing watchdog timer to guarantee UI never gets permanently stuck
+  useEffect(() => {
+    if (isProcessing) {
+      const timer = setTimeout(() => {
+        setIsProcessing(false);
+      }, 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [isProcessing]);
 
   const heroInputRef = useRef<HTMLInputElement>(null);
   const aboutInputRef = useRef<HTMLInputElement>(null);
