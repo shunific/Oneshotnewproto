@@ -316,6 +316,10 @@ export function AdminTableManagement() {
           {filtered.map((t: any) => {
             const isMaintenance = t.status === 'maintenance' || !t.isActive;
             const isOccupied = t.status === 'occupied' && t.session;
+            const startedAt = isOccupied ? new Date(t.session.startTime) : null;
+            const startedLabel = startedAt && Number.isFinite(startedAt.getTime())
+              ? format(startedAt, 'h:mm a')
+              : 'Time unavailable';
 
             return (
               <div
@@ -447,7 +451,7 @@ export function AdminTableManagement() {
                       </div>
                       <div className="text-right flex-shrink-0">
                         <p className="text-[10px] text-neutral-500 font-medium">Started</p>
-                        <p className="text-xs font-mono text-neutral-300">{format(new Date(t.session.startTime), 'h:mm a')}</p>
+                        <p className="text-xs font-mono text-neutral-300">{startedLabel}</p>
                       </div>
                     </div>
                   ) : isMaintenance ? (

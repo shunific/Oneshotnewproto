@@ -1,5 +1,6 @@
 import { localFetch } from '../utils/localApi';
 import { loadOpenTimeAvailability, reviewedOpenTimeLimit, openTimeStop } from '../utils/openTimeAvailability.js';
+import { getStoreWindowInfo } from '../utils/storeHours.js';
 import { PendingQueueActions } from '../components/PendingQueueActions';
 import { previewSessionBill, selectWalkInStartPricing } from '../../../session-billing.mjs';
 
@@ -309,41 +310,6 @@ export function Tables() {
 
   const posInfo = getPosSessionInfo();
 
-  const getStoreWindowInfo = () => {
-    const now = new Date();
-    const isWeekend = now.getDay() === 5 || now.getDay() === 6;
-    const openTimeStr = isWeekend ? rates?.weekendStartTime : rates?.weekdayStartTime;
-    const closeTimeStr = isWeekend ? rates?.weekendEndTime : rates?.weekdayEndTime;
-    const parseTime = (value: any) => {
-      if (typeof value !== 'string') return null;
-      const match = /^(\d{1,2}):(\d{2})$/.exec(value.trim());
-      if (!match) return null;
-      const h = Number(match[1]);
-      const m = Number(match[2]);
-      if (!Number.isInteger(h) || !Number.isInteger(m) || h > 23 || m > 59) return null;
-      return h * 60 + m;
-    };
-    const openMins = parseTime(openTimeStr);
-    const closeMins = parseTime(closeTimeStr);
-    if (openMins === null || closeMins === null) return { configured: false, isOpen: true, remaining: null, windowMins: null };
-
-    // A closing time at or before opening time means the business day crosses midnight.
-    const overnight = closeMins <= openMins;
-    const windowMins = overnight ? (1440 - openMins + closeMins) : (closeMins - openMins);
-    const nowMins = now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60;
-
-    let elapsed: number | null = null;
-    if (overnight) {
-      if (nowMins >= openMins) elapsed = nowMins - openMins;
-      else if (nowMins < closeMins) elapsed = 1440 - openMins + nowMins;
-    } else if (nowMins >= openMins && nowMins < closeMins) {
-      elapsed = nowMins - openMins;
-    }
-
-    if (elapsed === null) return { configured: true, isOpen: false, remaining: 0, windowMins };
-    return { configured: true, isOpen: true, remaining: Math.max(0, windowMins - elapsed), windowMins };
-  };
-
   const getNextReservation = (tableId: string) => {
     const now = new Date();
     const upcoming = reservations
@@ -428,7 +394,7 @@ export function Tables() {
     let conflictWarning: string | null = null;
     let isBlocked = false;
 
-    const store = getStoreWindowInfo();
+    const store = getStoreWindowInfo(rates);
     if (store.configured) {
       if (!store.isOpen) {
         maxMins = 0;
@@ -524,7 +490,7 @@ export function Tables() {
     let blocksOpenTime = false;
     let conflictWarning = "";
 
-    const store = getStoreWindowInfo();
+    const store = getStoreWindowInfo(rates);
     if (store.configured) {
       if (!store.isOpen) {
         maxMins = 0;

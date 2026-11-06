@@ -675,12 +675,37 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const assignTable = (tableId: string, session: Session) => {
-    const updatedSession = { ...session, orders: [] };
+    const updatedSession = { ...session, orders: Array.isArray(session.orders) ? session.orders : [] };
     setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'occupied', session: updatedSession } : t));
     addActivity('table_assigned', `Assigned ${tables.find(t=>t.id===tableId)?.name} to ${session.customerName}`);
     syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'occupied', session: updatedSession }, `Table assigned`).then(runCloudBackup).catch(()=>{});
     supabase.from('tables').update({ status: 'occupied', sessionData: JSON.stringify(updatedSession), isActive: 1 }).eq('id', tableId).then();
   };
+
+  // Repair legacy sessions saved without a start time (older queue-seating bug) by
+  // recovering the assignment timestamp from the activity log.
+  const repairedSessionIds = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (isInitializing) return;
+    const broken = (tables || []).filter((t: any) =>
+      t.status === 'occupied' && t.session && !repairedSessionIds.current.has(t.id) &&
+      !Number.isFinite(new Date(t.session.startTime).getTime())
+    );
+    if (!broken.length) return;
+    broken.forEach((table: any) => {
+      repairedSessionIds.current.add(table.id);
+      const assignment = (activities || [])
+        .filter((a: any) => a?.type === 'table_assigned' && typeof a.description === 'string' && a.description.includes(table.name))
+        .map((a: any) => ({ at: Date.parse(a.timestamp) }))
+        .filter((entry: any) => Number.isFinite(entry.at))
+        .sort((a: any, b: any) => b.at - a.at)[0];
+      const startTime = assignment ? new Date(assignment.at) : new Date();
+      const session = { ...table.session, startTime, orders: Array.isArray(table.session.orders) ? table.session.orders : [] };
+      setTables(prev => prev.map(row => row.id === table.id ? { ...row, session } : row));
+      syncToDB(`/api/tables/${table.id}`, 'PUT', { status: 'occupied', session }, 'Repaired session start time').then(runCloudBackup).catch(() => {});
+      supabase.from('tables').update({ status: 'occupied', sessionData: JSON.stringify(session), isActive: 1 }).eq('id', table.id).then();
+    });
+  }, [tables, activities, isInitializing]);
 
   const freeTable = (tableId: string) => {
     setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'available', session: undefined, maintenanceReason: undefined } : t));
