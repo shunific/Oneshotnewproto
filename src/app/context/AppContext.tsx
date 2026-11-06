@@ -695,7 +695,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     broken.forEach((table: any) => {
       repairedSessionIds.current.add(table.id);
       const assignment = (activities || [])
-        .filter((a: any) => a?.type === 'table_assigned' && typeof a.description === 'string' && a.description.includes(table.name))
+        .filter((a: any) => a?.type === 'table_assigned' && typeof a.description === 'string' && a.description.startsWith(`Assigned ${table.name} to `))
         .map((a: any) => ({ at: Date.parse(a.timestamp) }))
         .filter((entry: any) => Number.isFinite(entry.at))
         .sort((a: any, b: any) => b.at - a.at)[0];
