@@ -45,6 +45,17 @@ export function AdminTableManagement() {
   const [isLoading, setIsLoading]   = useState(false);
   const [loadingMsg, setLoadingMsg] = useState('PROCESSING...');
 
+  // Watchdog: never let a hung network call keep the whole page blocked.
+  useEffect(() => {
+    if (!isLoading) return;
+    const timer = setTimeout(() => {
+      setIsLoading(false);
+      setIsSubmitting(false);
+      setIsConfirming(false);
+    }, 10000);
+    return () => clearTimeout(timer);
+  }, [isLoading]);
+
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {

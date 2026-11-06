@@ -185,9 +185,14 @@ export function Reservations() {
   const handleRefresh = async () => {
     setIsRefreshing(true);
     flash("Syncing live data...", "loading");
-    await forceFullSync();
-    flash("Data successfully synced!", "success");
-    setIsRefreshing(false);
+    try {
+      await forceFullSync();
+      flash("Data successfully synced!", "success");
+    } catch {
+      flash("Sync failed. Please try again.", "error");
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
   // Auto-fetch Supabase when opening reservations
@@ -2193,10 +2198,8 @@ export function Reservations() {
         </div>
       )}
 
-      {/* 🟢 GLOBAL REFRESH BLOCKER */}
-      {(isRefreshing || isVoiding || isSubmitting || isSettling || isActionSubmitting || isRescheduling) && (
-        <div className="fixed inset-0 z-[99999] cursor-wait" />
-      )}
+      {/* Inline processing hints replace the old full-screen invisible blocker:
+          a stuck action flag must never make the whole page unclickable. */}
 
     </div>
   );
