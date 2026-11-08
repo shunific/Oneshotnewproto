@@ -10,7 +10,7 @@ import {
   ChevronLeft, ChevronRight, X, Phone, MapPin,
   Clock, LogIn, Eye, EyeOff,
   Calendar, CheckCircle, ArrowRight, Users, ChevronDown,
-  Info, Shield, Award, Mail, Tag, BookOpen,
+  Info, Shield, Mail, Tag, BookOpen,
   Sparkles, Upload, Search, ExternalLink, AlertTriangle, XCircle, Bell, RefreshCw, Lock,
   Table2, LogOut, FileText, QrCode, Sun, Moon
 } from 'lucide-react';
@@ -1015,7 +1015,7 @@ export function HomePage() {
     }
   };
 
-  const publicEvents = events?.filter((e: any) => e.type !== 'Holiday') || [];
+  const publicEvents = events?.filter((e: any) => e.type !== 'Holiday' && !e.isCancelled) || [];
   const upcomingEvents = publicEvents.filter((e: any) => {
     const dates = e.date ? e.date.split(',') : [];
     const sortedDates = [...dates].sort((a,b) => new Date(a).getTime() - new Date(b).getTime());
@@ -1236,13 +1236,13 @@ export function HomePage() {
               <div className="bg-neutral-900 border-y border-neutral-800">
                 <div className="max-w-4xl mx-auto grid grid-cols-2 md:grid-cols-4 divide-x divide-neutral-800">
                   {(() => {
-                    const openAvailableTableCount = (tables || []).filter((t: any) => {
+                    const displayedTableCount = (tables || []).filter((t: any) => {
                       const isTableActive = t.isActive === true || t.isActive === 1 || t.isactive === 1 || t.isactive === true;
-                      return isTableActive && t.status === 'available';
+                      return isTableActive && t.status !== 'maintenance';
                     }).length;
 
                     return [
-                      { value: String(openAvailableTableCount), label: 'Available Tables', color: 'text-emerald-400' },
+                      { value: String(displayedTableCount), label: 'Tables', color: 'text-emerald-400' },
                       { value: `₱${effectiveHourly}`, label: 'Per Hour', color: 'text-amber-400' },
                       { value: getOpenHoursDisplay(), label: 'Hours Open Daily', color: 'text-sky-400' },
                       { value: 'A+', label: 'Facility Grade', color: 'text-rose-400' },
@@ -1548,12 +1548,11 @@ export function HomePage() {
                                 <div className="flex items-center gap-3 text-[10px]">
                                   <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> Free</span>
                                   <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> Active</span>
-                                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-rose-500" /> Maint.</span>
                                 </div>
                               </div>
 
                               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-                                {tables.filter((t: any) => t.isActive).map((table: any) => {
+                                {tables.filter((t: any) => t.isActive && t.status !== 'maintenance').map((table: any) => {
                                   const isSel = selectedTableId === table.id;
                                   const isOcc = table.status === 'occupied';
                                   const isMaint = table.status === 'maintenance';
@@ -2319,47 +2318,30 @@ export function HomePage() {
                 <div className="mb-10 space-y-4">
                   <h3 className="text-xs font-bold text-emerald-400 uppercase tracking-widest flex items-center gap-2"><Calendar size={14} /> Upcoming Events</h3>
                   {upcomingEvents.map((event: any) => (
-                    <div key={event.id} className={`bg-neutral-900 border rounded-2xl overflow-hidden p-6 ${event.isCancelled ? 'border-rose-900/60' : 'border-neutral-800'}`}>
+                    <div key={event.id} className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden p-6">
                       {getEventImage(event.attachments) && (
-                        <div className={`w-full h-48 sm:h-64 bg-neutral-800 overflow-hidden relative mb-4 rounded-xl ${event.isCancelled ? 'grayscale opacity-60' : ''}`}>
+                        <div className="w-full h-48 sm:h-64 bg-neutral-800 overflow-hidden relative mb-4 rounded-xl">
                           <ImageWithFallback src={getEventImage(event.attachments)} alt={event.title} className="w-full h-full object-cover" />
                         </div>
                       )}
                       <div className="flex justify-between items-start mb-2 gap-2">
                         <div className="flex flex-wrap items-center gap-1.5">
                           <span className="text-[10px] bg-emerald-500/20 text-emerald-400 font-bold px-2 py-0.5 rounded">{event.type}</span>
-                          {event.isCancelled && (
-                            <span className="text-[10px] bg-rose-950 text-rose-400 border border-rose-700/60 font-bold px-2 py-0.5 rounded uppercase tracking-wider">Cancelled</span>
-                          )}
-                          {!event.isCancelled && event.slotsFull && (
+                          {event.slotsFull && (
                             <span className="text-[10px] bg-rose-950 text-rose-400 border border-rose-800/50 font-bold px-2 py-0.5 rounded uppercase tracking-wider">Slots Full</span>
                           )}
                         </div>
                         <span className="text-xs font-bold text-neutral-400 whitespace-nowrap">{event.date}</span>
                       </div>
-                      <h4 className={`text-lg font-bold mb-2 ${event.isCancelled ? 'text-neutral-400 line-through' : 'text-white'}`}>{event.title}</h4>
+                      <h4 className="text-lg font-bold mb-2 text-white">{event.title}</h4>
                       {event.duration && <p className="text-[11px] text-neutral-500 font-medium mb-2 flex items-center gap-1.5"><Clock size={11} /> {event.duration}</p>}
                       <p className="text-xs text-neutral-400 leading-relaxed">{event.description}</p>
 
-                      {event.isCancelled && event.cancelReason && (
-                        <div className="mt-3 flex items-start gap-2 rounded-xl border border-rose-900/50 bg-rose-950/30 px-3 py-2.5">
-                          <AlertTriangle size={13} className="text-rose-400 flex-shrink-0 mt-0.5" />
-                          <p className="text-[11px] text-rose-300 leading-relaxed"><strong className="text-rose-200">Cancellation reason:</strong> {event.cancelReason}</p>
-                        </div>
-                      )}
-
-                      {!event.isCancelled && (event.registrationLink || event.bracketLink) && (
-                        <div className="mt-4 pt-4 border-t border-neutral-800 flex flex-col sm:flex-row gap-2">
-                          {event.registrationLink && (
-                            <a href={event.registrationLink} target="_blank" rel="noopener noreferrer" className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors">
-                              <ExternalLink size={13} /> Register / Google Form
-                            </a>
-                          )}
-                          {event.bracketLink && (
-                            <a href={event.bracketLink} target="_blank" rel="noopener noreferrer" className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-200 text-xs font-bold transition-colors">
-                              <Award size={13} /> View Bracket
-                            </a>
-                          )}
+                      {event.registrationLink && (
+                        <div className="mt-4 pt-4 border-t border-neutral-800">
+                          <a href={event.registrationLink} target="_blank" rel="noopener noreferrer" className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors">
+                            <ExternalLink size={13} /> Register via Google Form
+                          </a>
                         </div>
                       )}
                     </div>
