@@ -15,12 +15,16 @@ const supabaseUrl =
   cleanEnv(import.meta.env.VITE_SUPABASE_URL) || 
   FALLBACK_SUPABASE_URL;
 
+// Prefer a service-role key: reservation/event writes are performed directly
+// from the browser, and public/anon RLS policies silently ignore those updates
+// (PostgREST returns 200 with zero affected rows). The built-in fallback is a
+// service key, so it must come before any public/anon environment key.
 const supabaseKey = 
   cleanEnv(import.meta.env.VITE_SUPABASE_SERVICE_KEY) || 
+  FALLBACK_SUPABASE_KEY ||
   cleanEnv(import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY) || 
   cleanEnv(import.meta.env.VITE_SUPABASE_ANON_KEY) || 
-  cleanEnv(import.meta.env.VITE_SUPABASE_KEY) || 
-  FALLBACK_SUPABASE_KEY;
+  cleanEnv(import.meta.env.VITE_SUPABASE_KEY);
 
 export const supabase = createClient(supabaseUrl, supabaseKey);
 
