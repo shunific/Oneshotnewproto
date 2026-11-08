@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
-import { supabase } from '../utils/supabase';
+import { supabase, publicSupabase } from '../utils/supabase';
 import { motion, AnimatePresence } from 'motion/react';
 import { KeyRound, CheckCircle2, Copy, Download } from 'lucide-react';
 
@@ -87,6 +87,15 @@ export type Event = {
   allowReservations?: boolean;
   caterWalkIns?: boolean;
   walkInTableCount?: number;
+  bracketLink?: string;
+  minParticipants?: number;
+  reservationTableCount?: number;
+  eventTableIds?: string[];
+  dates?: string[];
+  duration?: string;
+  isCancelled?: boolean;
+  cancelReason?: string;
+  cancelledAt?: string;
 };
 
 export type StaffProfile = {
@@ -144,7 +153,7 @@ type AppContextType = {
   assignTable: (id: string, s: Session) => void; freeTable: (id: string) => void; reserveTable: (id: string) => void; extendSession: (id: string, mins: number, pay: number) => void; migrateSession: (fromTableId: string, toTableId: string) => void; setTableMaintenance: (id: string, reason: string) => void; setTableEvent: (id: string, eventName: string) => void; addTable: (n: string) => void; updateTable: (id: string, n: string) => void; toggleTableActive: (id: string) => void; deleteTable: (id: string) => void;
   addInventoryItem: (i: Omit<InventoryItem, 'id'>) => void; updateInventoryItem: (id: string, i: Partial<InventoryItem>) => void; deleteInventoryItem: (id: string) => void; submitTableOrders: (tableId: string, cart: SessionOrder[]) => void; voidTableOrder: (tableId: string, orderIndex: number, order: SessionOrder) => void;
   addToQueue: (i: Omit<QueueItem, 'id'|'arrivalTime'|'status'|'queueNumber'>) => void; removeFromQueue: (id: string) => void; callQueueItem: (id: string) => void;
-  addReservation: (i: Omit<Reservation, 'id'|'createdAt'>) => string; updateReservationStatus: (id: string, s: ReservationStatus) => void; updateReservation: (id: string, u: Partial<Reservation>) => void; cancelReservation: (id: string, r: string) => void; updateDownPayment: (id: string, p: boolean) => void; updateBalance: (id: string, p: boolean) => void;
+  addReservation: (i: Omit<Reservation, 'id'|'createdAt'>) => Promise<string>; updateReservationStatus: (id: string, s: ReservationStatus) => Promise<void>; updateReservation: (id: string, u: Partial<Reservation>) => void; cancelReservation: (id: string, r: string) => void; updateDownPayment: (id: string, p: boolean) => void; updateBalance: (id: string, p: boolean) => void;
   addFeedback: (i: Omit<Feedback, 'id'|'date'>) => void; resolveFeedback: (id: string, notes: string) => void; addActivity: (t: ActivityType, d: string, m?: Record<string, any>) => void;  
   addPromoCode: (i: Omit<PromoCode, 'id'|'createdAt'|'usageCount'>) => string; updatePromoCode: (id: string, u: Partial<Omit<PromoCode, 'id'|'createdAt'|'usageCount'>>) => void; togglePromoCode: (id: string) => void; deletePromoCode: (id: string) => void; applyPromoCode: (c: string) => PromoCode | null;
   events: Event[]; addEvent: (e: Omit<Event, 'id'>) => void; updateEvent: (id: string, updates: Partial<Omit<Event, 'id'>>) => void; deleteEvent: (id: string) => void;
@@ -362,11 +371,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         { data: settingsData }, { data: closedDatesData }, { data: promoData }, { data: eventsData }, { data: feedData },
         { data: cloudTablesData }
       ] = await Promise.all([
-        supabase.from('reservations').select('*'), supabase.from('announcements').select('*'), 
-        supabase.from('cms').select('*'), supabase.from('system_settings').select('*'), 
-        supabase.from('closed_dates').select('*'), supabase.from('promo_codes').select('*'), 
-        supabase.from('events').select('*'), supabase.from('feedback').select('*'),
-        supabase.from('tables').select('*')
+        publicSupabase.from('reservations').select('*'), publicSupabase.from('announcements').select('*'), 
+        publicSupabase.from('cms').select('*'), publicSupabase.from('system_settings').select('*'), 
+        publicSupabase.from('closed_dates').select('*'), publicSupabase.from('promo_codes').select('*'), 
+        publicSupabase.from('events').select('*'), publicSupabase.from('feedback').select('*'),
+        publicSupabase.from('tables').select('*')
       ]);
 
       if (resErr) throw new Error("Supabase is unreachable.");
@@ -449,6 +458,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }) as PromoCode[]);
       }
       if (eventsData) setEvents((eventsData as any[]).map(e => {
+        // Cloud rows use lowercase columns; normalize so cancelled events and
+        // their Google Form / bracket links render correctly on the website.
+        const bool = (value: any, fallback: boolean) =>
+          value === undefined || value === null
+            ? fallback
+            : !(value === false || value === 0 || value === '0' || value === 'false' || value === '');
         let parsedDates: string[] = [];
         if (Array.isArray(e.dates)) parsedDates = e.dates;
         else if (typeof e.dates === 'string') {
@@ -457,21 +472,41 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (e.date && !parsedDates.includes(e.date)) parsedDates.push(e.date);
 
         let parsedTableIds: string[] = [];
-        const rawTIds = e.eventTableIds || e.selectedTableIds || e.event_table_ids || e.tableIds;
+        const rawTIds = e.eventTableIds || e.selectedTableIds || e.eventtableids || e.event_table_ids || e.tableIds;
         if (Array.isArray(rawTIds)) parsedTableIds = rawTIds;
         else if (typeof rawTIds === 'string') {
           try { parsedTableIds = JSON.parse(rawTIds); } catch { parsedTableIds = [rawTIds]; }
+        }
+
+        let attachments: any[] = [];
+        const rawAttachments = e.attachments;
+        if (Array.isArray(rawAttachments)) attachments = rawAttachments;
+        else if (typeof rawAttachments === 'string' && rawAttachments.trim()) {
+          try {
+            const parsed = JSON.parse(rawAttachments);
+            attachments = Array.isArray(parsed) ? parsed : [rawAttachments];
+          } catch { attachments = [rawAttachments]; }
         }
 
         return { 
           ...e, 
           dates: parsedDates,
           eventTableIds: parsedTableIds,
-          slotsFull: !!e.slotsFull, 
-          allowReservations: e.allowReservations !== false, 
-          caterWalkIns: e.caterWalkIns !== false, 
-          walkInTableCount: e.walkInTableCount ?? 10, 
-          attachments: e.attachments ? (Array.isArray(e.attachments) ? e.attachments : [e.attachments]) : [] 
+          isCancelled: bool(e.isCancelled ?? e.iscancelled, false),
+          cancelReason: e.cancelReason ?? e.cancelreason ?? '',
+          cancelledAt: e.cancelledAt ?? e.cancelled_at ?? null,
+          registrationLink: e.registrationLink ?? e.registrationlink ?? '',
+          bracketLink: e.bracketLink ?? e.bracketlink ?? '',
+          slotsFull: bool(e.slotsFull ?? e.slotsfull, false), 
+          allowReservations: bool(e.allowReservations ?? e.allowreservations, true), 
+          caterWalkIns: bool(e.caterWalkIns ?? e.caterwalkins, true), 
+          walkInTableCount: e.walkInTableCount ?? e.walkintablecount ?? 10, 
+          reservationTableCount: e.reservationTableCount ?? e.reservationtablecount ?? 4,
+          minParticipants: e.minParticipants ?? e.minparticipants ?? 0,
+          maxParticipants: e.maxParticipants ?? e.maxparticipants ?? 0,
+          duration: e.duration ?? '',
+          createdAt: e.createdAt ?? e.createdat ?? null,
+          attachments
         };
       }) as Event[]);
       
@@ -1014,7 +1049,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     addActivity('admin_action', `Deleted menu item ID: ${id}`);
   };
 
-  const addReservation = (i: Omit<Reservation, 'id'|'createdAt'>): string => {
+  const addReservation = async (i: Omit<Reservation, 'id'|'createdAt'>): Promise<string> => {
     const id = Math.random().toString(36).substring(2, 8).toUpperCase();
     const newRes = { ...i, id, createdAt: new Date() };
     
@@ -1027,7 +1062,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       id: newRes.id,
       customerName: newRes.customerName,
       contactNumber: newRes.contactNumber,
-      email: newRes.email || null,
+      email: newRes.email ? newRes.email.trim() : null,
       date: newRes.date.toISOString(),
       timeSlot: newRes.timeSlot,
       durationHours: newRes.durationHours,
@@ -1044,25 +1079,39 @@ export function AppProvider({ children }: { children: ReactNode }) {
       discountAmount: newRes.discountAmount || null,
       createdAt: newRes.createdAt.toISOString()
     };
-    
-    supabase.from('reservations').insert([supabasePayload]).then(({ error }) => {
+
+    try {
+      const { error } = await publicSupabase.from('reservations').insert([supabasePayload]);
       if (error) console.error("Supabase insert error:", error);
-    });
+    } catch (insertErr) {
+      console.error("Supabase insert exception:", insertErr);
+    }
     
     return id;
   };
   
-  const updateReservationStatus = (id: string, status: ReservationStatus) => {
+  const updateReservationStatus = async (id: string, status: ReservationStatus): Promise<void> => {
+    const previousStatus = reservations.find(r => r.id === id)?.status;
     setReservations(prev => prev.map(r => r.id === id ? { ...r, status } : r));
     syncToDB(`/api/reservations/${id}`, 'PUT', { status }, `Reservation status updated`).then(runCloudBackup).catch(()=>{});
-    supabase.from('reservations').update({ status }).eq('id', id).then();
-    addActivity('reservation_updated', `Reservation ${id} status updated to ${status}`); 
+    addActivity('reservation_updated', `Reservation ${id} status updated to ${status}`);
+
+    try {
+      const { error } = await publicSupabase.from('reservations').update({ status }).eq('id', id);
+      if (error) throw error;
+    } catch (err) {
+      console.error("Supabase status update error:", err);
+      if (previousStatus) {
+        setReservations(prev => prev.map(r => r.id === id ? { ...r, status: previousStatus } : r));
+      }
+      throw err;
+    }
   };
 
   const cancelReservation = (id: string, reason: string) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, status: 'cancelled', cancellationReason: reason } : r));
     syncToDB(`/api/reservations/${id}`, 'PUT', { status: 'cancelled', cancellationReason: reason }, `Reservation cancelled`).then(runCloudBackup).catch(()=>{});
-    supabase.from('reservations').update({ 
+    publicSupabase.from('reservations').update({ 
       status: 'cancelled', 
       cancellation_reason: reason,
       cancellationreason: reason
@@ -1118,7 +1167,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (u.downPaymentPaid !== undefined) dbUpdates.downPaymentPaid = u.downPaymentPaid ? 1 : 0;
     if (u.balancePaid !== undefined) dbUpdates.balancePaid = u.balancePaid ? 1 : 0;
     
-    supabase.from('reservations').update(dbUpdates).eq('id', id).then(({error}) => {
+    publicSupabase.from('reservations').update(dbUpdates).eq('id', id).then(({error}) => {
       if (error) console.error("Supabase Reschedule/Void Error:", error);
     });
     addActivity('reservation_updated', `Reservation ${id} details were updated`);

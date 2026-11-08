@@ -241,7 +241,6 @@ export function HomePage() {
 
   const [heroSlideIdx, setHeroSlideIdx] = useState(0);
   const [heroSlideDir, setHeroSlideDir] = useState<1 | -1>(1);
-  const [_now, setNow] = useState(new Date());
   
   const [activeSection, setActiveSection] = useState<Section>('home');
   const [aboutSubTab, setAboutSubTab] = useState<'about' | 'feedback'>('about');
@@ -369,11 +368,6 @@ export function HomePage() {
       return () => clearInterval(interval);
     }
   }, [heroSlides.length]);
-
-  useEffect(() => {
-    const interval = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(interval);
-  }, []);
 
   const prevHeroSlide = () => { setHeroSlideDir(-1); setHeroSlideIdx(p => (p - 1 + heroSlides.length) % heroSlides.length); };
   const nextHeroSlide = () => { setHeroSlideDir(1); setHeroSlideIdx(p => (p + 1) % heroSlides.length); };
@@ -895,22 +889,21 @@ export function HomePage() {
       return;
     }
 
-    if(window.confirm(`Are you sure you want to cancel this booking?\n\nREFUND NOTICE: Your booking will be marked as "Pending Refund". To process your GCash refund, you must contact our staff at ${cms.phone.split('|')[0].trim()} with your Reservation ID and GCash Number.`)) {
-       
-       const { error } = await supabase.from('reservations').update({ 
-         status: 'pending-refund'
-       }).eq('id', id);
+    const supportPhone = (cms?.phone || '').split('|')[0].trim() || 'our staff';
 
-       if (error) {
+    if(window.confirm(`Are you sure you want to cancel this booking?\n\nREFUND NOTICE: Your booking will be marked as "Pending Refund". To process your GCash refund, you must contact our staff at ${supportPhone} with your Reservation ID and GCash Number.`)) {
+       
+       try {
+         await updateReservationStatus(id, 'pending-refund');
+
+         if (trackForm.reservationId || currentUser) {
+           setTrackedReservations(prev => prev ? prev.map(r => r.id === id ? { ...r, status: 'pending-refund' } : r) : null);
+         }
+         
+         setToastMsg({ title: "Booking Cancelled", desc: "Marked as Pending Refund. Please contact staff.", type: 'success' });
+       } catch (error) {
          setToastMsg({ title: "Error", desc: "Failed to cancel booking. Please check connection.", type: 'error' });
-         return;
        }
-       
-       if (trackForm.reservationId || currentUser) {
-         setTrackedReservations(prev => prev ? prev.map(r => r.id === id ? { ...r, status: 'pending-refund' } : r) : null);
-       }
-       
-       setToastMsg({ title: "Booking Cancelled", desc: "Marked as Pending Refund. Please contact staff.", type: 'success' });
     }
   };
 
@@ -1566,6 +1559,7 @@ export function HomePage() {
                                   const isMaint = table.status === 'maintenance';
 
                                   const eventForTable = (events || []).find((ev: any) => {
+                                    if (ev.isCancelled) return false;
                                     let evDates: any[] = [];
                                     if (Array.isArray(ev.dates)) evDates = ev.dates;
                                     else if (typeof ev.dates === 'string') {
@@ -1643,6 +1637,7 @@ export function HomePage() {
                                     const isActiveWalkIn = isToday(selectedDate) && targetTable?.status === 'occupied' && targetTable.session?.startTime;
 
                                     const eventForTable = (events || []).find((ev: any) => {
+                                      if (ev.isCancelled) return false;
                                       let evDates: any[] = [];
                                       if (Array.isArray(ev.dates)) evDates = ev.dates;
                                       else if (typeof ev.dates === 'string') {
@@ -2234,8 +2229,8 @@ export function HomePage() {
                                           exit={{ opacity: 0, y: 5, scale: 0.95 }} 
                                           className="absolute right-0 top-full mt-2 w-48 bg-neutral-900 border border-neutral-700 rounded-xl shadow-2xl overflow-hidden z-50 flex flex-col py-1"
                                         >
-                                          {/* Only logged-in users can cancel */}
-                                          {(r.status === 'pending' || r.status === 'pending-reschedule' || r.status === 'confirmed') && currentUser && (
+                                          {/* Guests tracking a booking may cancel within the policy window */}
+                                          {(r.status === 'pending' || r.status === 'pending-reschedule' || r.status === 'confirmed') && (
                                              <button onClick={(e) => { e.stopPropagation(); handleCancelBooking(r.id, r.date, r.timeSlot); setOpenActionRowId(null); }} className="px-4 py-3 text-left text-xs font-bold text-rose-400 hover:bg-neutral-800 transition-colors border-b border-neutral-800/50">
                                                Cancel Booking
                                              </button>
@@ -2324,18 +2319,49 @@ export function HomePage() {
                 <div className="mb-10 space-y-4">
                   <h3 className="text-xs font-bold text-emerald-400 uppercase tracking-widest flex items-center gap-2"><Calendar size={14} /> Upcoming Events</h3>
                   {upcomingEvents.map((event: any) => (
-                    <div key={event.id} className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden p-6">
+                    <div key={event.id} className={`bg-neutral-900 border rounded-2xl overflow-hidden p-6 ${event.isCancelled ? 'border-rose-900/60' : 'border-neutral-800'}`}>
                       {getEventImage(event.attachments) && (
-                        <div className="w-full h-48 sm:h-64 bg-neutral-800 overflow-hidden relative mb-4 rounded-xl">
+                        <div className={`w-full h-48 sm:h-64 bg-neutral-800 overflow-hidden relative mb-4 rounded-xl ${event.isCancelled ? 'grayscale opacity-60' : ''}`}>
                           <ImageWithFallback src={getEventImage(event.attachments)} alt={event.title} className="w-full h-full object-cover" />
                         </div>
                       )}
-                      <div className="flex justify-between items-start mb-2">
-                        <span className="text-[10px] bg-emerald-500/20 text-emerald-400 font-bold px-2 py-0.5 rounded">{event.type}</span>
-                        <span className="text-xs font-bold text-neutral-400">{event.date}</span>
+                      <div className="flex justify-between items-start mb-2 gap-2">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-[10px] bg-emerald-500/20 text-emerald-400 font-bold px-2 py-0.5 rounded">{event.type}</span>
+                          {event.isCancelled && (
+                            <span className="text-[10px] bg-rose-950 text-rose-400 border border-rose-700/60 font-bold px-2 py-0.5 rounded uppercase tracking-wider">Cancelled</span>
+                          )}
+                          {!event.isCancelled && event.slotsFull && (
+                            <span className="text-[10px] bg-rose-950 text-rose-400 border border-rose-800/50 font-bold px-2 py-0.5 rounded uppercase tracking-wider">Slots Full</span>
+                          )}
+                        </div>
+                        <span className="text-xs font-bold text-neutral-400 whitespace-nowrap">{event.date}</span>
                       </div>
-                      <h4 className="text-lg font-bold text-white mb-2">{event.title}</h4>
+                      <h4 className={`text-lg font-bold mb-2 ${event.isCancelled ? 'text-neutral-400 line-through' : 'text-white'}`}>{event.title}</h4>
+                      {event.duration && <p className="text-[11px] text-neutral-500 font-medium mb-2 flex items-center gap-1.5"><Clock size={11} /> {event.duration}</p>}
                       <p className="text-xs text-neutral-400 leading-relaxed">{event.description}</p>
+
+                      {event.isCancelled && event.cancelReason && (
+                        <div className="mt-3 flex items-start gap-2 rounded-xl border border-rose-900/50 bg-rose-950/30 px-3 py-2.5">
+                          <AlertTriangle size={13} className="text-rose-400 flex-shrink-0 mt-0.5" />
+                          <p className="text-[11px] text-rose-300 leading-relaxed"><strong className="text-rose-200">Cancellation reason:</strong> {event.cancelReason}</p>
+                        </div>
+                      )}
+
+                      {!event.isCancelled && (event.registrationLink || event.bracketLink) && (
+                        <div className="mt-4 pt-4 border-t border-neutral-800 flex flex-col sm:flex-row gap-2">
+                          {event.registrationLink && (
+                            <a href={event.registrationLink} target="_blank" rel="noopener noreferrer" className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors">
+                              <ExternalLink size={13} /> Register / Google Form
+                            </a>
+                          )}
+                          {event.bracketLink && (
+                            <a href={event.bracketLink} target="_blank" rel="noopener noreferrer" className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-200 text-xs font-bold transition-colors">
+                              <Award size={13} /> View Bracket
+                            </a>
+                          )}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

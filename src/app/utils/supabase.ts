@@ -23,5 +23,15 @@ const supabaseKey =
   FALLBACK_SUPABASE_KEY;
 
 export const supabase = createClient(supabaseUrl, supabaseKey);
-export const publicSupabase = supabase;
+
+// Public data client: never attaches a user session, so public reads and
+// reservation writes always run with the anon/public role instead of being
+// filtered by the logged-in user's RLS policies.
+export const publicSupabase = createClient(supabaseUrl, supabaseKey, {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+    detectSessionInUrl: false
+  }
+});
 
