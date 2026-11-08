@@ -138,7 +138,6 @@ function SidebarSmartTimer({ tables, onNavigate }: { tables: any[]; onNavigate: 
             {isOt ? <AlertTriangle size={13} className="animate-bounce" /> : <Clock size={13} />}
             <span>{isOt ? '⚠️ OVERTIME' : isWarn ? '⏳ ENDS SOON' : '⏱️ NEXT UP'} · {primary.table.name}</span>
           </span>
-          <span className="text-neutral-500 font-normal">#{occupiedTables.length} active</span>
         </div>
         <div className="flex items-baseline gap-1.5">
           <p className={`text-xl font-black ${isOt ? 'text-rose-400 animate-pulse' : 'text-neutral-100'}`}>

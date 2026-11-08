@@ -19,7 +19,7 @@ test('fixed, open and prorated sessions keep their selected start rate across Ha
   assert.equal(calculateSessionBill(session,start+120*60000,false).tableCents,expected*200);
   assert.equal(calculateSessionBill({...session,isOpenTime:true,durationMinutes:null},start+90*60000,false).totalCents,expected*150);
   assert.equal(calculateSessionBill(session,start+90*60000,true).totalCents,expected*150);
-  assert.equal(calculateSessionBill(session,start+121*60000,false).overtimeCents,500);
+  assert.equal(calculateSessionBill(session,start+123*60000,false).overtimeCents,500);
  }
 });
 test('invalid active policy fails closed while inactive Happy Hour uses the configured regular rate',()=>{

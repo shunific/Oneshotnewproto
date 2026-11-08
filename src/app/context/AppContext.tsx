@@ -498,6 +498,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }) as PromoCode[]);
       }
       if (eventsData) setEvents((eventsData as any[]).map(e => {
+        // Supabase stores event columns in lowercase (iscancelled, cancelreason,
+        // registrationlink, ...) while the app uses camelCase. Normalize both so
+        // cancelled events and their links survive a cloud reload.
+        const bool = (value: any, fallback: boolean) =>
+          value === undefined || value === null
+            ? fallback
+            : !(value === false || value === 0 || value === '0' || value === 'false' || value === '');
         let parsedDates: string[] = [];
         if (Array.isArray(e.dates)) parsedDates = e.dates;
         else if (typeof e.dates === 'string') {
@@ -506,21 +513,40 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (e.date && !parsedDates.includes(e.date)) parsedDates.push(e.date);
 
         let parsedTableIds: string[] = [];
-        const rawTIds = e.eventTableIds || e.selectedTableIds || e.event_table_ids || e.tableIds;
+        const rawTIds = e.eventTableIds || e.selectedTableIds || e.eventtableids || e.event_table_ids || e.tableIds;
         if (Array.isArray(rawTIds)) parsedTableIds = rawTIds;
         else if (typeof rawTIds === 'string') {
           try { parsedTableIds = JSON.parse(rawTIds); } catch { parsedTableIds = [rawTIds]; }
+        }
+
+        let attachments: any[] = [];
+        const rawAttachments = e.attachments;
+        if (Array.isArray(rawAttachments)) attachments = rawAttachments;
+        else if (typeof rawAttachments === 'string' && rawAttachments.trim()) {
+          try {
+            const parsed = JSON.parse(rawAttachments);
+            attachments = Array.isArray(parsed) ? parsed : [rawAttachments];
+          } catch { attachments = [rawAttachments]; }
         }
 
         return { 
           ...e, 
           dates: parsedDates,
           eventTableIds: parsedTableIds,
-          slotsFull: !!e.slotsFull, 
-          allowReservations: e.allowReservations !== false, 
-          caterWalkIns: e.caterWalkIns !== false, 
-          walkInTableCount: e.walkInTableCount ?? 10, 
-          attachments: e.attachments ? (Array.isArray(e.attachments) ? e.attachments : [e.attachments]) : [] 
+          isCancelled: bool(e.isCancelled ?? e.iscancelled, false),
+          cancelReason: e.cancelReason ?? e.cancelreason ?? '',
+          registrationLink: e.registrationLink ?? e.registrationlink ?? '',
+          bracketLink: e.bracketLink ?? e.bracketlink ?? '',
+          slotsFull: bool(e.slotsFull ?? e.slotsfull, false), 
+          allowReservations: bool(e.allowReservations ?? e.allowreservations, true), 
+          caterWalkIns: bool(e.caterWalkIns ?? e.caterwalkins, true), 
+          walkInTableCount: e.walkInTableCount ?? e.walkintablecount ?? 10, 
+          reservationTableCount: e.reservationTableCount ?? e.reservationtablecount ?? 4,
+          minParticipants: e.minParticipants ?? e.minparticipants ?? 0,
+          maxParticipants: e.maxParticipants ?? e.maxparticipants ?? 0,
+          duration: e.duration ?? '',
+          createdAt: e.createdAt ?? e.createdat ?? null,
+          attachments
         };
       }) as Event[]);
       
@@ -1562,22 +1588,65 @@ export function AppProvider({ children }: { children: ReactNode }) {
     syncToDB(`/api/closed-dates/${id}`, 'PUT', u, `Updated closed date`).then(runCloudBackup).catch(()=>{});
   };
 
+  // Map an app event (camelCase) to the lowercase columns used by Supabase.
+  const eventToCloud = (e: any) => {
+    const cloud: any = {
+      id: e.id,
+      title: e.title,
+      date: e.date,
+      type: e.type,
+      description: e.description,
+      duration: e.duration,
+      registrationlink: e.registrationLink || null,
+      bracketlink: e.bracketLink || null,
+      minparticipants: Number(e.minParticipants) || 0,
+      maxparticipants: Number(e.maxParticipants) || 0,
+      slotsfull: e.slotsFull ? 1 : 0,
+      attachments: typeof e.attachments === 'string' ? e.attachments : JSON.stringify(e.attachments || []),
+      allowreservations: e.allowReservations === false ? 0 : 1,
+      reservationtablecount: Number(e.reservationTableCount) || 0,
+      caterwalkins: e.caterWalkIns === false ? 0 : 1,
+      walkintablecount: Number(e.walkInTableCount) || 0,
+      iscancelled: e.isCancelled ? 1 : 0,
+      cancelreason: e.cancelReason || null,
+      createdat: e.createdAt || new Date().toISOString()
+    };
+    if (e.isCancelled) cloud.cancelled_at = e.cancelledAt || new Date().toISOString();
+    return cloud;
+  };
+
   const addEvent = (e: Omit<Event, 'id'>) => {
     const newEvent = { ...e, id: Date.now().toString() };
     setEvents(prev => [...prev, newEvent]);
     syncToDB('/api/events', 'POST', newEvent, `Created new event`).then(runCloudBackup).catch(()=>{});
+    supabase.from('events').upsert([eventToCloud(newEvent)], { onConflict: 'id' }).then(({ error }) => {
+      if (error) console.error('Supabase event insert error:', error);
+    });
     addActivity('admin_action', `Created special event: ${e.title}`);
   };
   
   const updateEvent = (id: string, updates: Partial<Omit<Event, 'id'>>) => {
-    setEvents(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e));
+    setEvents(prev => prev.map(e => {
+      if (e.id !== id) return e;
+      const next: any = { ...e, ...updates };
+      if ((updates as any).isCancelled && !next.cancelledAt) next.cancelledAt = new Date().toISOString();
+      return next;
+    }));
     syncToDB(`/api/events/${id}`, 'PUT', updates, `Updated event`).then(runCloudBackup).catch(()=>{});
+    const current = (events || []).find((e: any) => e.id === id);
+    const merged = { ...(current || { id }), ...updates } as any;
+    supabase.from('events').upsert([eventToCloud(merged)], { onConflict: 'id' }).then(({ error }) => {
+      if (error) console.error('Supabase event update error:', error);
+    });
     addActivity('admin_action', `Updated event ID: ${id}`);
   };
   
   const deleteEvent = (id: string) => {
     setEvents(prev => prev.filter(e => e.id !== id));
     syncToDB(`/api/events/${id}`, 'DELETE', {}, `Deleted event`).then(runCloudBackup).catch(()=>{});
+    supabase.from('events').delete().eq('id', id).then(({ error }) => {
+      if (error) console.error('Supabase event delete error:', error);
+    });
     addActivity('admin_action', `Deleted event ID: ${id}`);
   };
 

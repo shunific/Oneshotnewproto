@@ -137,12 +137,18 @@ export function Tables() {
     }).catch(error => { if (isCurrent()) setOpenPreviewError(error.message); });
     return () => { active = false; };
   }, [previewTableId,previewTableKey,staffProfile,openPreviewRefresh]);
+  // A reviewed preview is only valid for OPEN_PREVIEW_MAX_AGE (30s), so keep it
+  // fresh automatically instead of asking staff to press a refresh button.
+  useEffect(() => {
+    if (!previewTableId || !staffProfile) return;
+    const timer = setInterval(() => setOpenPreviewRefresh(value => value + 1), 20000);
+    return () => clearInterval(timer);
+  }, [previewTableId, staffProfile]);
   const currentOpenLimit = () => reviewedOpenTimeLimit(openPreview,{tableId:previewTableId,owner:staffProfile,tableKey:previewTableKey});
   let openLimit = null;
   try { openLimit = currentOpenLimit(); } catch { /* Open-time submit stays disabled until reviewed. */ }
-  const openLimitReview = <div className="rounded-xl border border-blue-900/50 bg-blue-950/20 p-3 text-xs space-y-2" aria-live="polite">
-    <p>{openLimit ? `Play stops at ${new Date(openLimit).toLocaleString('en-PH',{timeZone:'Asia/Manila'})} Manila (${openPreview.value.limitingReason}). Saved local schedule; checkout remains available.` : openPreviewError || (openPreview ? 'The reviewed limit expired. Refresh before starting open time.' : 'Checking the saved local open-time limit…')}</p>
-    <button type="button" className="underline text-blue-300" onClick={() => setOpenPreviewRefresh(value => value+1)}>Refresh open-time limit</button>
+  const openLimitReview = <div className="rounded-xl border border-blue-900/50 bg-blue-950/20 p-3 text-xs" aria-live="polite">
+    <p>{openLimit ? `Play stops at ${new Date(openLimit).toLocaleString('en-PH',{timeZone:'Asia/Manila'})} Manila (${openPreview.value.limitingReason}). Saved local schedule; checkout remains available.` : openPreviewError || (openPreview ? 'The reviewed limit expired. Re-checking automatically…' : 'Checking the saved local open-time limit…')}</p>
   </div>;
 
   

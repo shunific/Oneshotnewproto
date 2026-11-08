@@ -1,10 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { Lock, Eye, EyeOff, ShieldAlert, User } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
-import { authRequest } from '../utils/localApi';
 
 export function LockScreen({ onUnlock }: { onUnlock: () => void }) {
-  const { staffProfile } = useAppContext();
+  const { staffProfile, staffUsers, verifyPassword, hashPassword } = useAppContext();
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const identity = useRef(staffProfile?.id);
@@ -41,8 +40,24 @@ export function LockScreen({ onUnlock }: { onUnlock: () => void }) {
 
     try {
       const originalIdentity = identity.current;
-      const result = await authRequest('unlock', administrator ? { username, password } : { password });
-      if (mounted.current && result.success === true && originalIdentity && identity.current === originalIdentity) onUnlock();
+      if (administrator) {
+        const cleanUsername = username.trim().toLowerCase();
+        if (!cleanUsername) throw new Error('Enter an administrator username.');
+        const hashed = await hashPassword(password);
+        const admin = (staffUsers || []).find(
+          (user: any) => (user.username || '').toLowerCase() === cleanUsername && user.isActive !== false && user.isAdmin
+        );
+        if (!admin || (admin.password !== password && admin.password !== hashed)) {
+          throw new Error('Administrator credentials are incorrect.');
+        }
+      } else if (!await verifyPassword(password)) {
+        throw new Error('That password does not match the account signed in on this terminal.');
+      }
+      if (!mounted.current) return;
+      if (originalIdentity && identity.current !== originalIdentity) return;
+      setPassword('');
+      setUsername('');
+      onUnlock();
     } catch (failure) {
       if (!mounted.current) return;
       setError(failure instanceof Error ? failure.message : 'Unable to verify password. Please try again.');
@@ -89,7 +104,7 @@ export function LockScreen({ onUnlock }: { onUnlock: () => void }) {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               disabled={isProcessing}
-              placeholder="Enter password to unlock"
+              placeholder={administrator ? 'Enter administrator password' : 'Enter your password to unlock'}
               className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 pr-12 py-3.5 text-center text-sm text-white focus:outline-none focus:border-rose-500/50 focus:ring-1 focus:ring-rose-500/20 transition-all placeholder-neutral-600 tracking-widest"
             />
             <button type="button" tabIndex={-1} onClick={() => setShowPw(!showPw)} className="absolute right-4 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300">

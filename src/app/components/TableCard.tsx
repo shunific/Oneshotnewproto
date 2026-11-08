@@ -64,7 +64,9 @@ export function TableCard({ table, held=false, availabilityVerified=true, onAssi
     }
     const endTime = addMinutes(startTime, durationMins);
     const secsLeft = differenceInSeconds(endTime, currentTime);
-    const isOvertime = secsLeft < 0;
+    // Match session-billing.mjs: 2-minute courtesy window before overtime.
+    const OVERTIME_GRACE_SECS = 2 * 60;
+    const isOvertime = secsLeft < -OVERTIME_GRACE_SECS;
     const absSecs = Math.abs(secsLeft);
     
     const hrs = Math.floor(absSecs / 3600);

@@ -1348,6 +1348,15 @@ export function Reservations() {
 
               {actionModal.type === 'receipt' && (
                 <>
+                  <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-3 text-xs text-neutral-300 space-y-1">
+                    <p className="text-[10px] uppercase tracking-wider font-bold text-neutral-500">Reference Number</p>
+                    <p className="font-mono text-sm font-bold text-emerald-400 break-all">
+                      {actionModal.reservation.paymentRef && actionModal.reservation.paymentRef !== 'EVENT'
+                        ? actionModal.reservation.paymentRef
+                        : 'No payment reference provided'}
+                    </p>
+                    <p className="text-[10px] text-neutral-500">Booking ID: <span className="font-mono text-neutral-300">{actionModal.reservation.id}</span></p>
+                  </div>
                   {actionModal.reservation.receiptImg ? (
                     <div className="w-full bg-neutral-900 rounded-xl border border-neutral-800 overflow-hidden flex items-center justify-center">
                       <img src={actionModal.reservation.receiptImg} alt="Uploaded Receipt" className="max-w-full object-contain" />

@@ -5,10 +5,10 @@ const {calculateCheckout}=require('../server-checkout.cjs');
 const start=Date.parse('2026-10-19T00:00:00Z');
 const base={customerName:'QA',startTime:new Date(start).toISOString(),durationMinutes:60,isOpenTime:false,hourlyRate:150,pricingVersion:1,overtimeRate:75,amountPaid:0,orders:[]};
 test('configured overtime uses its immutable snapshot with whole-second minute boundaries',()=>{
- for(const [offset,minutes,cents] of [[0,0,0],[999,0,0],[1000,1,125],[60000,1,125],[60999,1,125],[61000,2,250]]) {
+ for(const [offset,minutes,cents] of [[119999,0,0],[120000,0,0],[121000,1,125],[180000,1,125],[180999,1,125],[181000,2,250]]) {
   const bill=calculateSessionBill(base,start+3600000+offset,false);assert.equal(bill.tableCents,15000);assert.equal(bill.overtimeMins,minutes);assert.equal(bill.overtimeCents,cents);assert.equal(bill.overtimeRateCents,7500);assert.equal(bill.pricingVersion,1);
  }
- const fractional=calculateSessionBill({...base,overtimeRate:75.01},start+3661000,false);assert.equal(fractional.overtimeCents,250);
+ const fractional=calculateSessionBill({...base,overtimeRate:75.01},start+3781000,false);assert.equal(fractional.overtimeCents,250);
 });
 test('shared UI preview exactly maps authoritative cents for booked, prorated, open and refund cases',()=>{
  for(const session of [base,{...base,isOpenTime:true},{...base,amountPaid:400,orders:[{id:'food',price:0.29,qty:3}]}]) for(const prorated of [false,true]) {
@@ -21,7 +21,7 @@ test('shared UI preview exactly maps authoritative cents for booked, prorated, o
 });
 test('legacy bills retain the original hourly overtime and ignore unsnapshotted overtime',()=>{
  const legacy={...base};delete legacy.pricingVersion;
- for(const overtimeRate of [1,9999,null,'bad']) {const bill=calculateSessionBill({...legacy,overtimeRate},start+3720000,false);assert.equal(bill.overtimeCents,500);assert.equal(bill.overtimeRateCents,15000);assert.equal(bill.pricingVersion,0);}
+ for(const overtimeRate of [1,9999,null,'bad']) {const bill=calculateSessionBill({...legacy,overtimeRate},start+3840000,false);assert.equal(bill.overtimeCents,500);assert.equal(bill.overtimeRateCents,15000);assert.equal(bill.pricingVersion,0);}
 });
 test('unsupported versions, missing or malformed positive snapshot and invalid inputs fail closed',()=>{
  for(const fields of [{hourlyRate:0},{pricingVersion:0},{pricingVersion:null},{pricingVersion:2},{pricingVersion:'1'},{overtimeRate:undefined},{overtimeRate:null},{overtimeRate:0},{overtimeRate:-1},{overtimeRate:Infinity},{overtimeRate:NaN},{overtimeRate:'75'},{overtimeRate:75.001},{overtimeRate:0.000000001}]) {
@@ -32,9 +32,9 @@ test('unsupported versions, missing or malformed positive snapshot and invalid i
 });
 const reservationSession=require('./reservation-billing-fixture.cjs');
 test('reservation version2 preserves exact gross discount net and verified credit with separate overtime',()=>{
- const session=reservationSession({startTime:new Date(start).toISOString()});const bill=calculateSessionBill(session,start+120*60000+61000,false);
+ const session=reservationSession({startTime:new Date(start).toISOString()});const bill=calculateSessionBill(session,start+120*60000+181000,false);
  assert.equal(bill.tableCents,30101);assert.equal(bill.discountCents,10001);assert.equal(bill.overtimeMins,2);assert.equal(bill.overtimeCents,1000);assert.equal(bill.totalCents,23600);assert.equal(bill.alreadyPaid,4020);assert.equal(bill.balanceCents,19580);
- const preview=previewSessionBill(session,start+120*60000+61000,false);assert.equal(preview.bookedCharge,301.01);assert.equal(preview.bookingDiscount,100.01);assert.equal(preview.totalDue,236);assert.equal(preview.balance,195.8);assert.equal(preview.overtimeRate,300);
+ const preview=previewSessionBill(session,start+120*60000+181000,false);assert.equal(preview.bookedCharge,301.01);assert.equal(preview.bookingDiscount,100.01);assert.equal(preview.totalDue,236);assert.equal(preview.balance,195.8);assert.equal(preview.overtimeRate,300);
  assert.equal(calculateSessionBill({...session,orders:[]},start+600000,false).totalCents,20100);
 });
 test('reservation pricing rejects malformed claims, lost deposit credit and unsupported commercial changes',()=>{

@@ -145,12 +145,18 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 const { registerAuthRoutes } = require('./server-auth.cjs');
+const { registerVenueAvailabilityRoutes } = require('./server-table-start.cjs');
 
 // ====================================================================
 // 🟢 SQLITE DATABASE INITIALIZATION & AUTO-MIGRATIONS
 // ====================================================================
 const userDataPath = process.env.USER_DATA_PATH || __dirname;
 const dbPath = path.resolve(userDataPath, 'oneshot.db');
+
+// Open-time availability preview used by the staff table screen. Without this
+// registration the request falls through to the SPA HTML fallback, and the
+// client fails to parse the response as JSON.
+registerVenueAvailabilityRoutes(app, dbPath);
 
 function createFallbackDb() {
   const dummy = {

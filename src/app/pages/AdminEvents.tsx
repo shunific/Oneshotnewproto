@@ -61,8 +61,8 @@ export function AdminEvents() {
     events, addEvent, updateEvent, deleteEvent, 
     promoCodes, addPromoCode, updatePromoCode, togglePromoCode, deletePromoCode,
     closedDates, addClosedDate, removeClosedDate, updateClosedDate,
-    reservations = [], updateReservation, updateReservationStatus, tables = [],
-    rates = {}
+    reservations = [], updateReservation, updateReservationStatus, cancelReservation, tables = [],
+    freeTable, rates = {}
   } = useAppContext() as any;
 
   const [activeTab, setActiveTab] = useState<'calendar' | 'events' | 'promos'>('calendar');
@@ -314,8 +314,8 @@ export function AdminEvents() {
     }
 
     if (eventForm.type === 'Tournament') {
-      if (!eventForm.registrationLink || !eventForm.bracketLink) {
-        flash("Registration and Bracket links are strictly mandatory for Tournaments.", "error");
+      if (!eventForm.bracketLink) {
+        flash("Bracket link is required for Tournaments. The registration form link is optional.", "error");
         return;
       }
     }
@@ -1188,6 +1188,15 @@ export function AdminEvents() {
 
               {actionModal.type === 'receipt' && (
                 <>
+                  <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-3 text-xs text-neutral-300 space-y-1">
+                    <p className="text-[10px] uppercase tracking-wider font-bold text-neutral-500">Reference Number</p>
+                    <p className="font-mono text-sm font-bold text-emerald-400 break-all">
+                      {actionModal.reservation.paymentRef && actionModal.reservation.paymentRef !== 'EVENT'
+                        ? actionModal.reservation.paymentRef
+                        : 'No payment reference provided'}
+                    </p>
+                    <p className="text-[10px] text-neutral-500">Booking ID: <span className="font-mono text-neutral-300">{actionModal.reservation.id}</span></p>
+                  </div>
                   {actionModal.reservation.receiptImg ? (
                     <div className="w-full bg-neutral-900 rounded-xl border border-neutral-800 overflow-hidden flex items-center justify-center">
                       <img src={actionModal.reservation.receiptImg} alt="Uploaded Receipt" className="max-w-full object-contain" />
@@ -1597,7 +1606,7 @@ export function AdminEvents() {
                     <div className="p-4 rounded-xl border border-emerald-900/30 bg-emerald-950/10 space-y-3">
                       <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest">Tournament Links</p>
                       <div>
-                        <label className="text-[10px] font-semibold text-neutral-400 block mb-1.5 flex items-center gap-1.5"><Link size={10} /> Registration / Form Link <span className="text-rose-500">*</span></label>
+                        <label className="text-[10px] font-semibold text-neutral-400 block mb-1.5 flex items-center gap-1.5"><Link size={10} /> Registration / Google Form Link <span className="text-neutral-500 font-normal">(optional)</span></label>
                         <Input value={eventForm.registrationLink} onChange={e => setEventForm({...eventForm, registrationLink: e.target.value})} placeholder="https://forms.google.com/..." className="bg-neutral-950 border-neutral-800 h-8 text-xs" />
                       </div>
                       <div>
@@ -2005,17 +2014,42 @@ export function AdminEvents() {
               <button
                 type="button"
                 onClick={async () => {
+                  const targetEvent = (events || []).find((ev: any) => ev.id === cancelEventModal.id);
+                  const eventTitle = targetEvent?.title || cancelEventModal.title;
+                  const eventTableIds: string[] = Array.isArray(targetEvent?.eventTableIds) ? targetEvent.eventTableIds : [];
+
                   updateEvent(cancelEventModal.id, { 
                     isCancelled: true, 
                     cancelReason: eventCancelReason,
                     eventTableIds: []
                   });
-                  // Also cancel associated reservations tag
-                  const { error } = await supabase.from('reservations').update({ status: 'cancelled', cancellationReason: `Event Cancelled: ${eventCancelReason}` }).eq('paymentRef', 'EVENT').like('id', `%EVT-%`);
-                  if(error) console.error("Failed to cancel event tags", error);
+
+                  // Cancel only this event's table-hold reservations, and never
+                  // touch unrelated events that also use EVENT tags.
+                  const eventReservations = (reservations || []).filter((r: any) =>
+                    r.paymentRef === 'EVENT' && (
+                      r.customerName === `EVENT: ${eventTitle}` ||
+                      (String(r.id).startsWith('EVT-') && r.tableId && eventTableIds.includes(r.tableId))
+                    )
+                  );
+                  eventReservations.forEach((r: any) =>
+                    cancelReservation(r.id, `Event Cancelled: ${eventCancelReason}`)
+                  );
+
+                  // Release tables held by this event so they can be booked again.
+                  const releaseIds = new Set<string>([
+                    ...eventTableIds,
+                    ...(tables || [])
+                      .filter((t: any) => t.status === 'event' && t.maintenanceReason === eventTitle)
+                      .map((t: any) => t.id)
+                  ]);
+                  releaseIds.forEach((tableId: string) => {
+                    const table = (tables || []).find((t: any) => t.id === tableId);
+                    if (!table || table.status === 'event' || table.status === 'maintenance') freeTable(tableId);
+                  });
 
                   setCancelEventModal(null);
-                  flash(`Event "${cancelEventModal.title}" marked as cancelled and tables released.`);
+                  flash(`Event "${eventTitle}" marked as cancelled and tables released.`);
                 }}
                 className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition-colors shadow-lg shadow-rose-950/40"
               >

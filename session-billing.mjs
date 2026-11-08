@@ -1,4 +1,7 @@
 const fail = (status, message) => Object.assign(new Error(message), { status });
+// Small courtesy window after the booked end before overtime is billed.
+// The session-end alert still fires exactly at the booked end.
+export const OVERTIME_GRACE_MINUTES = 2;
 function money(value, status = 409) {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || !Number.isSafeInteger(Math.round(value * 100)) || Number(value.toFixed(2)) !== value) throw fail(status, 'Amounts must be nonnegative currency values with at most two decimal places.');
   return Math.round(value * 100);
@@ -49,7 +52,7 @@ export function calculateSessionBill(session, now, useProrated) {
   const elapsedMins = Math.ceil(Math.floor((billUntil - start) / 1000) / 60);
   if (!Number.isSafeInteger(elapsedMins)) throw fail(409, 'Stored session elapsed time is invalid.');
   const elapsedBilling = session.isOpenTime || booked === null || useProrated;
-  const overtimeMins = elapsedBilling ? 0 : Math.max(0, Math.ceil(Math.floor((now - start - booked * 60000) / 1000) / 60));
+  const overtimeMins = elapsedBilling ? 0 : Math.max(0, Math.ceil(Math.floor((now - start - booked * 60000 - OVERTIME_GRACE_MINUTES * 60000) / 1000) / 60));
   const billableMins = Math.max(60, elapsedMins);
   const tableCents = pricingVersion === 2 ? reservation.grossCents : elapsedBilling ? Math.round(Math.ceil(billableMins / 30) * rate / 2) : Math.round(booked * rate / 60);
   const overtimeCents = Math.round(overtimeMins * overtimeRateCents / 60);

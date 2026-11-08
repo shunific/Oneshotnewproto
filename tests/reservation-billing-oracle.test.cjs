@@ -7,7 +7,7 @@ const start = Date.parse('2026-10-19T08:00:00.000Z');
 test('reservation money conservation agrees with independent fixed-quote and overtime examples', () => {
   let checked = 0;
   for (const [gross, discount, paid] of [[30101,10001,4020],[30000,0,30000],[100,100,0],[0,0,0],[240000000,1,10000]]) {
-    for (const [milliseconds, overtimeMinutes] of [[0,0],[7199999,0],[7200000,0],[7200999,0],[7201000,1],[7260000,1],[7261000,2],[9000000,30]]) {
+    for (const [milliseconds, overtimeMinutes] of [[0,0],[7199999,0],[7200000,0],[7200999,0],[7320000,0],[7321000,1],[7380000,1],[7381000,2],[9000000,28]]) {
       for (const [rate, expectedPerMinute] of [[300,500],[75,125]]) {
         for (const orders of [[],[{id:'qa',price:12.34,qty:3}]]) {
           const session = reservationSession({ startTime: new Date(start).toISOString(), overtimeRate: rate, amountPaid: paid/100, orders });
@@ -33,7 +33,7 @@ test('reservation money conservation agrees with independent fixed-quote and ove
       }
     }
   }
-  assert.equal(checked,160);
+  assert.equal(checked,180);
 });
 
 test('reservation charges reject aggregate currency overflow before issuing a bill', () => {

@@ -77,7 +77,7 @@ test('authoritative billing preserves prepaid, minimum hour, half-hour steps, ov
  assert.equal(calculateCheckout(base,now,false).totalCents,30000);
  const prorated=calculateCheckout(base,now,true);assert.equal(prorated.totalCents,15000);assert.equal(prorated.refundCents,15000);
  assert.equal(calculateCheckout({...base,isOpenTime:true,startTime:'2026-10-19T06:59:00Z'},now,false).totalCents,22500);
- assert.equal(calculateCheckout({...base,durationMinutes:60,startTime:'2026-10-19T06:58:00Z'},now,false).overtimeCents,500);
+ assert.equal(calculateCheckout({...base,durationMinutes:60,startTime:'2026-10-19T06:56:00Z'},now,false).overtimeCents,500);
  assert.throws(()=>calculateCheckout({...base,startTime:'2026-10-19T09:00:00Z'},now,false));
 });
 
@@ -142,7 +142,7 @@ test('void validation and failed receipt insertion preserve the active session a
 
 
 test('versioned overtime snapshot is audited and exact retries produce one immutable receipt',async t=>{
- const f=await fixture(t);const session={...f.session,startTime:new Date(Date.now()-62*60000).toISOString(),durationMinutes:60,pricingVersion:1,overtimeRate:75,orders:[],amountPaid:0};
+ const f=await fixture(t);const session={...f.session,startTime:new Date(Date.now()-64*60000).toISOString(),durationMinutes:60,pricingVersion:1,overtimeRate:75,orders:[],amountPaid:0};
  await run(f.db,'UPDATE tables SET sessionData=?',[JSON.stringify(session)]);
  await run(f.db,'CREATE TABLE systemSettings(keyName TEXT PRIMARY KEY,settingValue TEXT)');await run(f.db,"INSERT INTO systemSettings VALUES('overtimeRate','4999')");
  const payload=f.body({expectedSession:session,expectedSessionStartTime:session.startTime,tendered:500});
@@ -198,7 +198,7 @@ test('reservation checkout commits exact booking discount and verified deposit o
 });
 test('reservation overtime and F&B add to the immutable net quote; void preserves discount and pending prepaid liability',async t=>{
  for(const isVoid of [false,true])await t.test(isVoid?'void':'checkout',async t=>{
-  const f=await fixture(t,{id:'qa_admin',isAdmin:true,fullName:'QA admin'});const s=reservationSession({startTime:new Date(Date.now()-121*60000-10000).toISOString()});await admitted(f,s);const r=await f.call(f.body({expectedSession:s,expectedSessionStartTime:s.startTime,tendered:isVoid?0:200,paymentStatus:isVoid?'unpaid':'paid',...(isVoid?{closureKind:'void',reason:'QA reservation waiver'}:{})}));assert.equal(r.status,200);assert.equal(r.body.receipt.overtime_charge,10);assert.equal(r.body.receipt.subtotal,336.01);assert.equal(r.body.receipt.booking_discount_amount,100.01);assert.equal(r.body.receipt.original_amount,236);assert.equal(r.body.receipt.total_amount,isVoid?0:236);assert.equal(r.body.receipt.discount_amount,isVoid?336.01:100.01);assert.equal(r.body.receipt.amount_paid,isVoid?0:236);assert.equal(r.body.history.totalAmount,r.body.receipt.total_amount);assert.equal(r.body.receipt.refund_due,isVoid?40.2:0);assert.equal(r.body.receipt.refund_status,isVoid?'pending':'none');assert.equal(r.body.receipt.table_rate,null);assert.equal(r.body.receipt.owner_user_id,s.reservationPricing.ownerUserId);
+  const f=await fixture(t,{id:'qa_admin',isAdmin:true,fullName:'QA admin'});const s=reservationSession({startTime:new Date(Date.now()-123*60000-10000).toISOString()});await admitted(f,s);const r=await f.call(f.body({expectedSession:s,expectedSessionStartTime:s.startTime,tendered:isVoid?0:200,paymentStatus:isVoid?'unpaid':'paid',...(isVoid?{closureKind:'void',reason:'QA reservation waiver'}:{})}));assert.equal(r.status,200);assert.equal(r.body.receipt.overtime_charge,10);assert.equal(r.body.receipt.subtotal,336.01);assert.equal(r.body.receipt.booking_discount_amount,100.01);assert.equal(r.body.receipt.original_amount,236);assert.equal(r.body.receipt.total_amount,isVoid?0:236);assert.equal(r.body.receipt.discount_amount,isVoid?336.01:100.01);assert.equal(r.body.receipt.amount_paid,isVoid?0:236);assert.equal(r.body.history.totalAmount,r.body.receipt.total_amount);assert.equal(r.body.receipt.refund_due,isVoid?40.2:0);assert.equal(r.body.receipt.refund_status,isVoid?'pending':'none');assert.equal(r.body.receipt.table_rate,null);assert.equal(r.body.receipt.owner_user_id,s.reservationPricing.ownerUserId);
  });
 });
 test('invalid reservation billing and failed receipt persistence preserve session and verified credit for exact retry',async t=>{
