@@ -12,7 +12,7 @@ import {
   Calendar, CheckCircle, ArrowRight, Users, ChevronDown,
   Info, Shield, Award, Mail, Tag, BookOpen,
   Sparkles, Upload, Search, ExternalLink, AlertTriangle, XCircle, Bell, RefreshCw, Lock,
-  Table2, LogOut, FileText, QrCode, Sun, Moon
+  Table2, LogOut, FileText, QrCode, Sun, Moon, HelpCircle
 } from 'lucide-react';
 import { useAppContext, HOURLY_RATE, DOWN_PAYMENT_RATE } from '../context/AppContext';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
@@ -285,6 +285,8 @@ export function HomePage() {
   const [showTermsModal, setShowTermsModal] = useState(false);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [receiptImg, setReceiptImg] = useState<string | null>(null);
+  const [showLogoMenu, setShowLogoMenu] = useState(false);
+  const [showHelpModal, setShowHelpModal] = useState(false);
 
 
   useEffect(() => {
@@ -1106,14 +1108,77 @@ export function HomePage() {
 
         <div className="flex items-center gap-4 pr-5 flex-shrink-0 relative">
 
-          {/* Quick Header Theme Toggle */}
-          <button
-            onClick={toggleLightMode}
-            title={isLightMode ? "Switch to Dark Mode" : "Switch to Light Mode"}
-            className="p-2 text-neutral-400 hover:text-white transition-colors rounded-full hover:bg-neutral-800 flex items-center justify-center"
-          >
-            {isLightMode ? <Moon size={19} className="text-emerald-600" /> : <Sun size={19} className="text-amber-400" />}
-          </button>
+          {/* Quick Header Theme & Help One Shot Logo Trigger */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setShowLogoMenu(v => !v)}
+              title="One Shot Menu (Theme & Help)"
+              className="p-1 rounded-full hover:bg-neutral-800 transition-colors flex items-center justify-center border border-emerald-500/30 hover:border-emerald-500 cursor-pointer"
+            >
+              <img src={logoImg} alt="One Shot Logo" className="w-6 h-6 object-contain rounded-full shadow-sm" />
+            </button>
+
+            <AnimatePresence>
+              {showLogoMenu && (
+                <motion.div
+                  initial={{ opacity: 0, y: 8, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 8, scale: 0.95 }}
+                  className={`absolute top-full right-0 mt-2 w-52 rounded-2xl shadow-2xl border p-2 z-50 flex flex-col gap-1 backdrop-blur-md ${
+                    isLightMode
+                      ? 'bg-white/95 border-slate-200 text-slate-800 shadow-slate-300/40'
+                      : 'bg-neutral-900/95 border-neutral-800 text-neutral-100 shadow-black/80'
+                  }`}
+                >
+                  <div className="px-3 py-1.5 border-b border-neutral-700/20 flex items-center justify-between">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-500">One Shot</span>
+                    <span className="text-[10px] text-neutral-400">Options</span>
+                  </div>
+
+                  {/* Light / Dark Mode Button */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      toggleLightMode();
+                      setShowLogoMenu(false);
+                    }}
+                    className={`flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors text-left cursor-pointer ${
+                      isLightMode ? 'hover:bg-slate-100 text-slate-800' : 'hover:bg-neutral-800 text-neutral-200'
+                    }`}
+                  >
+                    <span className="flex items-center justify-center w-6 h-6 rounded-lg bg-emerald-500/15 text-emerald-500 shrink-0">
+                      {isLightMode ? <Moon size={14} className="text-emerald-600" /> : <Sun size={14} className="text-amber-400" />}
+                    </span>
+                    <div className="flex flex-col">
+                      <span className="font-bold">{isLightMode ? 'Dark Mode' : 'Light Mode'}</span>
+                      <span className="text-[10px] text-neutral-400 font-normal">{isLightMode ? 'Switch to dark theme' : 'Switch to light theme'}</span>
+                    </div>
+                  </button>
+
+                  {/* Help Button */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowLogoMenu(false);
+                      setShowHelpModal(true);
+                    }}
+                    className={`flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors text-left cursor-pointer ${
+                      isLightMode ? 'hover:bg-slate-100 text-slate-800' : 'hover:bg-neutral-800 text-neutral-200'
+                    }`}
+                  >
+                    <span className="flex items-center justify-center w-6 h-6 rounded-lg bg-sky-500/15 text-sky-500 shrink-0">
+                      <HelpCircle size={14} className="text-sky-500" />
+                    </span>
+                    <div className="flex flex-col">
+                      <span className="font-bold">Help & Support</span>
+                      <span className="text-[10px] text-neutral-400 font-normal">Assistance & hotline</span>
+                    </div>
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
           
           {/* Notifications */}
           <div className="relative">
@@ -1427,7 +1492,7 @@ export function HomePage() {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
                         <label className="block text-xs text-neutral-400 mb-1.5">Contact Number <span className="text-rose-500">*</span></label>
-                        <input type="tel" inputMode="numeric" value={feedbackForm.contact} onChange={e => setFeedbackForm(f => ({ ...f, contact: e.target.value.replace(/\D/g, '').slice(0, 13) }))} placeholder="09XX-XXX-XXXX" required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500 outline-none" />
+                        <input type="tel" inputMode="numeric" maxLength={9} value={feedbackForm.contact} onChange={e => setFeedbackForm(f => ({ ...f, contact: e.target.value.replace(/\D/g, '').slice(0, 9) }))} placeholder="9XXXXXXXX (9 digits)" required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500 outline-none" />
                       </div>
                       <div>
                         <label className="block text-xs text-neutral-400 mb-1.5">Reservation ID <span className="text-neutral-600">(Optional)</span></label>
@@ -1583,7 +1648,11 @@ export function HomePage() {
                               </div>
 
                               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-                                {tables.filter((t: any) => t.isActive).map((table: any) => {
+                                {tables.filter((t: any) => {
+                                  if (!t.isActive) return false;
+                                  const num = parseInt(String(t.id).replace(/\D/g, '') || String(t.name).replace(/\D/g, '') || '0', 10);
+                                  return num === 0 || (num >= 1 && num <= 8);
+                                }).slice(0, 8).map((table: any) => {
                                   const isSel = selectedTableId === table.id;
                                   const isOcc = table.status === 'occupied';
                                   const isMaint = table.status === 'maintenance';
@@ -1834,11 +1903,19 @@ export function HomePage() {
                                 </div>
                                 <div>
                                   <label className="block text-xs text-neutral-400 mb-1">Phone Number *</label>
-                                  <input type="tel" inputMode="numeric" value={resForm.phone} onChange={e => setResForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 13) }))} placeholder="09XX-XXX-XXXX" className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-100 outline-none focus:border-emerald-500" />
+                                  <input 
+                                    type="tel" 
+                                    inputMode="numeric" 
+                                    maxLength={9} 
+                                    value={resForm.phone} 
+                                    onChange={e => setResForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 9) }))} 
+                                    placeholder="9XXXXXXXX (9 digits)" 
+                                    className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-100 outline-none focus:border-emerald-500" 
+                                  />
                                 </div>
                               </div>
 
-                              <div className="grid grid-cols-3 gap-3">
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                                 <div className="col-span-1">
                                   <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end">
                                     <span>Pax</span>
@@ -1895,15 +1972,22 @@ export function HomePage() {
                                   />
                                 </div>
                                 <div className="col-span-1">
-                                  <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end flex-shrink-0">
+                                  <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-center">
                                     <span>Duration</span>
-                                    {resForm.timeSlot && <span className="text-[9px] text-amber-500 text-right leading-tight max-w-[80px]">Max ~{maxAllowedDuration}h</span>}
+                                    {resForm.timeSlot && <span className="text-[10px] text-amber-500 font-semibold">Max: {maxAllowedDuration}h</span>}
                                   </label>
-                                  <select value={resForm.duration} onChange={e => setResForm(f => ({ ...f, duration: parseInt(e.target.value) }))} className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-100 outline-none focus:border-emerald-500 text-center appearance-none">
-                                    {Array.from({ length: maxAllowedDuration }, (_, i) => i + 1).map(h => (
-                                      <option key={h} value={h}>{h}h</option>
-                                    ))}
-                                  </select>
+                                  <div className="relative">
+                                    <select 
+                                      value={resForm.duration} 
+                                      onChange={e => setResForm(f => ({ ...f, duration: parseInt(e.target.value) }))} 
+                                      className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-100 outline-none focus:border-emerald-500 text-center appearance-none cursor-pointer pr-8"
+                                    >
+                                      {Array.from({ length: maxAllowedDuration }, (_, i) => i + 1).map(h => (
+                                        <option key={h} value={h} className="bg-neutral-900 text-white">{h} {h === 1 ? 'Hour' : 'Hours'} ({h}h)</option>
+                                      ))}
+                                    </select>
+                                    <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none" />
+                                  </div>
                                 </div>
                               </div>
 
@@ -2273,13 +2357,6 @@ export function HomePage() {
                                           exit={{ opacity: 0, y: 5, scale: 0.95 }} 
                                           className="absolute right-0 top-full mt-2 w-48 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-2xl overflow-hidden z-50 flex flex-col py-1"
                                         >
-                                          {/* Cancel / Request Refund available to all tracking users */}
-                                          {(r.status === 'pending' || r.status === 'pending-reschedule' || r.status === 'confirmed') && (
-                                             <button onClick={(e) => { e.stopPropagation(); handleCancelBooking(r.id, r.date, r.timeSlot); setOpenActionRowId(null); }} className="px-4 py-3 text-left text-xs font-bold text-rose-600 dark:text-rose-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors border-b border-neutral-100 dark:border-neutral-800/50">
-                                               Cancel / Request Refund
-                                             </button>
-                                          )}
-                                          
                                           {/* Request Reschedule */}
                                           {(r.status === 'pending' || r.status === 'confirmed') && currentUser && (
                                              <button onClick={(e) => { e.stopPropagation(); handleRequestReschedule(r.id, r); setOpenActionRowId(null); }} className="px-4 py-3 text-left text-xs font-bold text-violet-600 dark:text-violet-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors border-b border-neutral-100 dark:border-neutral-800/50">
@@ -2941,7 +3018,18 @@ export function HomePage() {
                   {registerForm.error && <div className="bg-rose-950/40 border border-rose-800/50 text-rose-400 text-xs px-3 py-2 rounded-lg">{registerForm.error}</div>}
                   <div className="space-y-3">
                     {[ { key: 'name', label: 'Full Name', type: 'text' }, { key: 'email', label: 'Email Address', type: 'email' }, { key: 'phone', label: 'Contact Number', type: 'tel' }].map(({ key, label, type }) => (
-                      <div key={key}><label className="block text-xs text-neutral-400 mb-1.5">{label}</label><input type={type} inputMode={key === 'phone' ? 'numeric' : undefined} value={(registerForm as any)[key]} onChange={e => setRegisterForm(f => ({ ...f, [key]: key === 'phone' ? e.target.value.replace(/\D/g, '').slice(0, 13) : e.target.value, error: '' }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-sm text-neutral-100 focus:border-emerald-500 outline-none transition-colors" /></div>
+                      <div key={key}>
+                        <label className="block text-xs text-neutral-400 mb-1.5">{label}</label>
+                        <input 
+                          type={type} 
+                          inputMode={key === 'phone' ? 'numeric' : undefined} 
+                          maxLength={key === 'phone' ? 9 : undefined}
+                          placeholder={key === 'phone' ? '9XXXXXXXX (9 digits)' : undefined}
+                          value={(registerForm as any)[key]} 
+                          onChange={e => setRegisterForm(f => ({ ...f, [key]: key === 'phone' ? e.target.value.replace(/\D/g, '').slice(0, 9) : e.target.value, error: '' }))} 
+                          className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-sm text-neutral-100 focus:border-emerald-500 outline-none transition-colors" 
+                        />
+                      </div>
                     ))}
                     <div><label className="block text-xs text-neutral-400 mb-1.5">Password</label><div className="relative"><input type={registerForm.showPw ? 'text' : 'password'} value={registerForm.password} onChange={e => setRegisterForm(f => ({ ...f, password: e.target.value, error: '' }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 pr-10 text-sm text-neutral-100 focus:border-emerald-500 outline-none transition-colors" /><button onClick={() => setRegisterForm(f => ({ ...f, showPw: !f.showPw }))} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300">{registerForm.showPw ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></div>
                     <div><label className="block text-xs text-neutral-400 mb-1.5">Confirm Password</label><input type="password" value={registerForm.confirm} onChange={e => setRegisterForm(f => ({ ...f, confirm: e.target.value, error: '' }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-sm text-neutral-100 focus:border-emerald-500 outline-none transition-colors" /></div>
@@ -3083,28 +3171,173 @@ export function HomePage() {
         )}
       </AnimatePresence>
 
-      {/* 🟢 FLOATING LIGHT/DARK MODE TOGGLE BUTTON */}
-      <motion.button
-        type="button"
-        initial={{ scale: 0, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.95 }}
-        onClick={toggleLightMode}
-        title={isLightMode ? "Switch to Dark Mode" : "Switch to Light Mode"}
-        className={`fixed bottom-6 right-6 z-40 flex items-center gap-2.5 px-4 py-3 rounded-full font-bold text-xs shadow-2xl transition-all duration-300 backdrop-blur-md border cursor-pointer ${
-          isLightMode
-            ? 'bg-white/95 text-slate-800 border-slate-200 shadow-slate-400/40 hover:bg-white ring-1 ring-slate-200'
-            : 'bg-neutral-900/90 text-neutral-100 border-neutral-700/80 shadow-black/80 hover:bg-neutral-800 ring-1 ring-neutral-700/50'
-        }`}
-      >
-        <span className="flex items-center justify-center w-6 h-6 rounded-full bg-emerald-500/15 text-emerald-500 shrink-0">
-          {isLightMode ? <Moon size={15} className="text-emerald-600" /> : <Sun size={15} className="text-amber-400" />}
-        </span>
-        <span className="font-semibold tracking-wide">
-          {isLightMode ? 'Dark Mode' : 'Light Mode'}
-        </span>
-      </motion.button>
+      {/* 🟢 FLOATING ONE SHOT LOGO BUTTON WITH THEME & HELP POPUP */}
+      <div className="fixed bottom-6 right-6 z-40 flex flex-col items-end">
+        <AnimatePresence>
+          {showLogoMenu && (
+            <motion.div
+              initial={{ opacity: 0, y: 10, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 10, scale: 0.95 }}
+              className={`mb-3 p-2.5 rounded-2xl shadow-2xl border backdrop-blur-md flex flex-col gap-1 min-w-[210px] ${
+                isLightMode 
+                  ? 'bg-white/95 border-slate-200 text-slate-800 shadow-slate-300/40 ring-1 ring-slate-200' 
+                  : 'bg-neutral-900/95 border-neutral-800 text-neutral-100 shadow-black/80 ring-1 ring-neutral-700/50'
+              }`}
+            >
+              <div className="px-3 py-1.5 border-b border-neutral-700/20 flex items-center justify-between">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-500">One Shot</span>
+                <span className="text-[10px] text-neutral-400">Quick Access</span>
+              </div>
+
+              {/* Light / Dark Mode Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  toggleLightMode();
+                  setShowLogoMenu(false);
+                }}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors text-left cursor-pointer ${
+                  isLightMode ? 'hover:bg-slate-100 text-slate-800' : 'hover:bg-neutral-800 text-neutral-200'
+                }`}
+              >
+                <span className="flex items-center justify-center w-7 h-7 rounded-lg bg-emerald-500/15 text-emerald-500 shrink-0">
+                  {isLightMode ? <Moon size={16} className="text-emerald-600" /> : <Sun size={16} className="text-amber-400" />}
+                </span>
+                <div className="flex flex-col">
+                  <span className="font-bold">{isLightMode ? 'Dark Mode' : 'Light Mode'}</span>
+                  <span className="text-[10px] text-neutral-400 font-normal">{isLightMode ? 'Switch to dark theme' : 'Switch to light theme'}</span>
+                </div>
+              </button>
+
+              {/* Help Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  setShowLogoMenu(false);
+                  setShowHelpModal(true);
+                }}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors text-left cursor-pointer ${
+                  isLightMode ? 'hover:bg-slate-100 text-slate-800' : 'hover:bg-neutral-800 text-neutral-200'
+                }`}
+              >
+                <span className="flex items-center justify-center w-7 h-7 rounded-lg bg-sky-500/15 text-sky-500 shrink-0">
+                  <HelpCircle size={16} className="text-sky-500" />
+                </span>
+                <div className="flex flex-col">
+                  <span className="font-bold">Help & Support</span>
+                  <span className="text-[10px] text-neutral-400 font-normal">Assistance & hotline</span>
+                </div>
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <motion.button
+          type="button"
+          initial={{ scale: 0, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          whileHover={{ scale: 1.08 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={() => setShowLogoMenu(!showLogoMenu)}
+          title="One Shot Menu (Theme & Help)"
+          className={`flex items-center justify-center w-13 h-13 rounded-full shadow-2xl transition-all duration-300 border cursor-pointer relative group ${
+            isLightMode
+              ? 'bg-white border-emerald-500/40 shadow-emerald-500/20 ring-2 ring-emerald-500/20 hover:bg-slate-50'
+              : 'bg-neutral-900 border-emerald-500/40 shadow-black/80 ring-2 ring-emerald-500/30 hover:bg-neutral-800'
+          }`}
+        >
+          <img src={logoImg} alt="One Shot" className="w-8 h-8 object-contain rounded-full transition-transform group-hover:scale-105" />
+          <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-emerald-500 rounded-full border-2 border-neutral-950 animate-pulse" />
+        </motion.button>
+      </div>
+
+      {/* 🟢 CUSTOMER HELP & SUPPORT MODAL */}
+      <AnimatePresence>
+        {showHelpModal && (
+          <motion.div 
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }} 
+            exit={{ opacity: 0 }} 
+            className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }} 
+              animate={{ scale: 1, opacity: 1 }} 
+              exit={{ scale: 0.95, opacity: 0 }} 
+              className={`border rounded-3xl p-6 w-full max-w-md shadow-2xl space-y-5 transition-colors ${
+                isLightMode ? 'bg-white border-slate-200 text-slate-800' : 'bg-neutral-950 border-neutral-800 text-neutral-100'
+              }`}
+            >
+              <div className="flex justify-between items-start">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+                    <img src={logoImg} alt="One Shot" className="w-7 h-7 object-contain rounded-lg" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-emerald-500">One Shot Customer Help</h3>
+                    <p className="text-xs text-neutral-400">Assistance, reservations & inquiries</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setShowHelpModal(false)} 
+                  className="p-1 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                <div className={`p-4 rounded-2xl border ${isLightMode ? 'bg-slate-50 border-slate-200' : 'bg-neutral-900 border-neutral-800'}`}>
+                  <p className="text-xs font-bold text-emerald-400 mb-1 flex items-center gap-1.5">
+                    <Phone size={13} /> Customer Hotline & GCash Inquiries
+                  </p>
+                  <p className="text-sm font-semibold">{cms.phone || '0917-123-4567 | 0998-765-4321'}</p>
+                  <p className="text-[11px] text-neutral-400 mt-1">Available during operating hours for table bookings and instant support.</p>
+                </div>
+
+                <div className={`p-4 rounded-2xl border ${isLightMode ? 'bg-slate-50 border-slate-200' : 'bg-neutral-900 border-neutral-800'}`}>
+                  <p className="text-xs font-bold text-amber-400 mb-1 flex items-center gap-1.5">
+                    <Clock size={13} /> Venue Operating Hours
+                  </p>
+                  <div className="text-xs space-y-1 text-neutral-300">
+                    <p>• Weekdays: {rates.weekdayStartTime || '14:00'} – {rates.weekdayEndTime || '02:00'}</p>
+                    <p>• Weekends: {rates.weekendStartTime || '12:00'} – {rates.weekendEndTime || '03:00'}</p>
+                  </div>
+                </div>
+
+                <div className={`p-4 rounded-2xl border ${isLightMode ? 'bg-slate-50 border-slate-200' : 'bg-neutral-900 border-neutral-800'}`}>
+                  <p className="text-xs font-bold text-sky-400 mb-1 flex items-center gap-1.5">
+                    <AlertTriangle size={13} /> Need to Report an Issue?
+                  </p>
+                  <p className="text-xs text-neutral-300 mb-3">
+                    If you experienced an unexpected cancellation, payment verification delay, or queue discrepancy, report it directly to staff.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowHelpModal(false);
+                      setReportModalResId('GENERAL_INQUIRY');
+                      setReportMessage('');
+                    }}
+                    className="w-full py-2.5 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl text-xs transition-colors flex items-center justify-center gap-1.5"
+                  >
+                    <AlertTriangle size={14} /> Report an Issue to Staff
+                  </button>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowHelpModal(false)}
+                className="w-full py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 font-bold rounded-xl text-xs transition-colors border border-neutral-700"
+              >
+                Close
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
