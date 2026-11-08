@@ -10,7 +10,7 @@ import {
   ChevronLeft, ChevronRight, X, Phone, MapPin,
   Clock, LogIn, Eye, EyeOff,
   Calendar, CheckCircle, ArrowRight, Users, ChevronDown,
-  Info, Shield, Mail, Tag, BookOpen,
+  Info, Shield, Award, Mail, Tag, BookOpen,
   Sparkles, Upload, Search, ExternalLink, AlertTriangle, XCircle, Bell, RefreshCw, Lock,
   Table2, LogOut, FileText, QrCode, Sun, Moon
 } from 'lucide-react';
@@ -241,6 +241,7 @@ export function HomePage() {
 
   const [heroSlideIdx, setHeroSlideIdx] = useState(0);
   const [heroSlideDir, setHeroSlideDir] = useState<1 | -1>(1);
+  const [_now, setNow] = useState(new Date());
   
   const [activeSection, setActiveSection] = useState<Section>('home');
   const [aboutSubTab, setAboutSubTab] = useState<'about' | 'feedback'>('about');
@@ -369,6 +370,11 @@ export function HomePage() {
     }
   }, [heroSlides.length]);
 
+  useEffect(() => {
+    const interval = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
   const prevHeroSlide = () => { setHeroSlideDir(-1); setHeroSlideIdx(p => (p - 1 + heroSlides.length) % heroSlides.length); };
   const nextHeroSlide = () => { setHeroSlideDir(1); setHeroSlideIdx(p => (p + 1) % heroSlides.length); };
 
@@ -387,8 +393,17 @@ export function HomePage() {
   const activeAnnouncements = announcements?.filter((a: any) => a.isActive && (!a.expiresAt || new Date(a.expiresAt) > new Date())) || [];
   const userReservations = currentUser 
     ? reservations.filter((r: any) => {
-        if (!r.email) return false;
-        return r.email.trim().toLowerCase() === currentUser.email.trim().toLowerCase();
+        if (!r) return false;
+        const userEmail = currentUser.email?.trim().toLowerCase();
+        const resEmail = r.email?.trim().toLowerCase();
+        if (userEmail && resEmail && userEmail === resEmail) return true;
+        const userName = currentUser.name?.trim().toLowerCase();
+        const resName = r.customerName?.trim().toLowerCase() || r.name?.trim().toLowerCase();
+        if (userName && resName && userName === resName) return true;
+        const userPhone = currentUser.phone?.trim();
+        const resPhone = r.phone?.trim() || r.contactNumber?.trim();
+        if (userPhone && resPhone && userPhone === resPhone) return true;
+        return false;
       }) 
     : [];
 
@@ -875,35 +890,50 @@ export function HomePage() {
   };
 
   const handleCancelBooking = async (id: string, dateString: string, timeSlot: string) => {
-    const resDate = new Date(dateString);
-    const [hours, minutes] = timeSlot.split(':').map(Number);
-    resDate.setHours(hours, minutes, 0, 0);
+    let notice = '';
+    try {
+      const resDate = new Date(dateString);
+      if (timeSlot) {
+        const [hours = '0', minutes = '0'] = timeSlot.split(':');
+        resDate.setHours(Number(hours), Number(minutes), 0, 0);
+        const minsUntilRes = (resDate.getTime() - Date.now()) / 60000;
+        if (minsUntilRes < 60 && minsUntilRes > 0) {
+          notice = '\n\nNote: This cancellation is requested within 1 hour of the reservation time. Staff review will be required for refund approval.';
+        } else if (minsUntilRes <= 0) {
+          notice = '\n\nNote: The scheduled reservation time has already passed. Cancellation will be submitted for staff review.';
+        }
+      }
+    } catch {}
 
-    const minsUntilRes = (resDate.getTime() - new Date().getTime()) / 60000;
-
-    if (minsUntilRes < 60 && minsUntilRes > 0) {
-      setToastMsg({ title: "Action Denied", desc: "Cancellations within 1 hour are non-refundable. Please use 'Report Issue'.", type: 'error' });
-      return;
-    } else if (minsUntilRes <= 0) {
-      setToastMsg({ title: "Action Denied", desc: "This reservation has already started or passed.", type: 'error' });
+    const hotline = cms?.phone ? cms.phone.split('|')[0].trim() : 'our customer hotline';
+    if (!window.confirm(`Are you sure you want to cancel this booking and request a refund?${notice}\n\nREFUND NOTICE: Your booking will be marked as "Pending Refund". To expedite your GCash refund, you can contact staff at ${hotline} with your Reservation ID.`)) {
       return;
     }
 
-    const supportPhone = (cms?.phone || '').split('|')[0].trim() || 'our staff';
+    try {
+      // 1. Sync to local backend database
+      await fetch(`/api/reservations/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'pending-refund', cancellationReason: 'Customer requested cancellation & refund' })
+      }).catch(() => {});
 
-    if(window.confirm(`Are you sure you want to cancel this booking?\n\nREFUND NOTICE: Your booking will be marked as "Pending Refund". To process your GCash refund, you must contact our staff at ${supportPhone} with your Reservation ID and GCash Number.`)) {
-       
-       try {
-         await updateReservationStatus(id, 'pending-refund');
+      // 2. Sync to Supabase
+      await supabase.from('reservations').update({ 
+        status: 'pending-refund',
+        cancellation_reason: 'Customer requested cancellation & refund',
+        cancellationreason: 'Customer requested cancellation & refund'
+      }).eq('id', id).catch(() => {});
 
-         if (trackForm.reservationId || currentUser) {
-           setTrackedReservations(prev => prev ? prev.map(r => r.id === id ? { ...r, status: 'pending-refund' } : r) : null);
-         }
-         
-         setToastMsg({ title: "Booking Cancelled", desc: "Marked as Pending Refund. Please contact staff.", type: 'success' });
-       } catch (error) {
-         setToastMsg({ title: "Error", desc: "Failed to cancel booking. Please check connection.", type: 'error' });
-       }
+      // 3. Update local states
+      setTrackedReservations(prev => prev ? prev.map(r => r.id === id ? { ...r, status: 'pending-refund' } : r) : null);
+      if (typeof updateReservationStatus === 'function') {
+        updateReservationStatus(id, 'pending-refund' as any);
+      }
+
+      setToastMsg({ title: "Booking Cancelled", desc: "Marked as Pending Refund. Please contact staff to verify GCash details.", type: 'success' });
+    } catch (err: any) {
+      setToastMsg({ title: "Request Submitted", desc: "Cancellation request received and pending staff review.", type: 'info' });
     }
   };
 
@@ -1015,7 +1045,7 @@ export function HomePage() {
     }
   };
 
-  const publicEvents = events?.filter((e: any) => e.type !== 'Holiday' && !e.isCancelled) || [];
+  const publicEvents = events?.filter((e: any) => e.type !== 'Holiday') || [];
   const upcomingEvents = publicEvents.filter((e: any) => {
     const dates = e.date ? e.date.split(',') : [];
     const sortedDates = [...dates].sort((a,b) => new Date(a).getTime() - new Date(b).getTime());
@@ -1236,13 +1266,13 @@ export function HomePage() {
               <div className="bg-neutral-900 border-y border-neutral-800">
                 <div className="max-w-4xl mx-auto grid grid-cols-2 md:grid-cols-4 divide-x divide-neutral-800">
                   {(() => {
-                    const displayedTableCount = (tables || []).filter((t: any) => {
+                    const openAvailableTableCount = (tables || []).filter((t: any) => {
                       const isTableActive = t.isActive === true || t.isActive === 1 || t.isactive === 1 || t.isactive === true;
-                      return isTableActive && t.status !== 'maintenance';
+                      return isTableActive && t.status === 'available';
                     }).length;
 
                     return [
-                      { value: String(displayedTableCount), label: 'Tables', color: 'text-emerald-400' },
+                      { value: String(openAvailableTableCount), label: 'Available Tables', color: 'text-emerald-400' },
                       { value: `₱${effectiveHourly}`, label: 'Per Hour', color: 'text-amber-400' },
                       { value: getOpenHoursDisplay(), label: 'Hours Open Daily', color: 'text-sky-400' },
                       { value: 'A+', label: 'Facility Grade', color: 'text-rose-400' },
@@ -1548,17 +1578,17 @@ export function HomePage() {
                                 <div className="flex items-center gap-3 text-[10px]">
                                   <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> Free</span>
                                   <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> Active</span>
+                                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-rose-500" /> Maint.</span>
                                 </div>
                               </div>
 
                               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-                                {tables.filter((t: any) => t.isActive && t.status !== 'maintenance').map((table: any) => {
+                                {tables.filter((t: any) => t.isActive).map((table: any) => {
                                   const isSel = selectedTableId === table.id;
                                   const isOcc = table.status === 'occupied';
                                   const isMaint = table.status === 'maintenance';
 
                                   const eventForTable = (events || []).find((ev: any) => {
-                                    if (ev.isCancelled) return false;
                                     let evDates: any[] = [];
                                     if (Array.isArray(ev.dates)) evDates = ev.dates;
                                     else if (typeof ev.dates === 'string') {
@@ -1636,7 +1666,6 @@ export function HomePage() {
                                     const isActiveWalkIn = isToday(selectedDate) && targetTable?.status === 'occupied' && targetTable.session?.startTime;
 
                                     const eventForTable = (events || []).find((ev: any) => {
-                                      if (ev.isCancelled) return false;
                                       let evDates: any[] = [];
                                       if (Array.isArray(ev.dates)) evDates = ev.dates;
                                       else if (typeof ev.dates === 'string') {
@@ -2191,13 +2220,13 @@ export function HomePage() {
                         return (
                           <>
                             {displayRes.map((r: any) => (
-                              <div key={r.id} className="bg-neutral-900 border border-neutral-800 rounded-2xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                              <div key={r.id} className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm">
                                 <div>
                                   <div className="flex items-center gap-2 mb-1">
-                                    <span className="text-xs font-black text-white font-mono">{r.id}</span>
+                                    <span className="text-xs font-black text-neutral-900 dark:text-white font-mono bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 rounded border border-neutral-300 dark:border-neutral-700">{r.id}</span>
                                     <ReservationStatusBadge status={r.status} />
                                   </div>
-                                  <p className="text-sm font-semibold text-neutral-200">{format(new Date(r.date), 'MMM d, yyyy')} · {r.timeSlot} ({r.durationHours}h)</p>
+                                  <p className="text-sm font-semibold text-neutral-800 dark:text-neutral-200">{format(new Date(r.date), 'MMM d, yyyy')} · {r.timeSlot} ({r.durationHours}h)</p>
                                   <p className="text-xs text-neutral-500">
                                     {tables.find((t: any) => t.id === r.tableId)?.name || 'Billiard Table'}
                                   </p>
@@ -2206,16 +2235,32 @@ export function HomePage() {
                                 <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto relative">
                                   <button
                                     onClick={() => setViewingReceipt(r)}
-                                    className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-bold rounded-xl transition-colors border border-neutral-700"
+                                    className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-4 py-2 bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 text-xs font-bold rounded-xl transition-colors border border-neutral-300 dark:border-neutral-700"
                                   >
-                                    <FileText size={14} className="text-emerald-400" /> View e-Receipt
+                                    <FileText size={14} className="text-emerald-500" /> View e-Receipt
                                   </button>
                                   
+                                  {/* 🟢 Direct Request Refund / Cancel Button */}
+                                  {(r.status === 'pending' || r.status === 'pending-reschedule' || r.status === 'confirmed') && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleCancelBooking(r.id, r.date, r.timeSlot)}
+                                      className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 dark:text-rose-300 text-xs font-bold rounded-xl transition-colors border border-rose-200 dark:border-rose-800/60 shadow-sm"
+                                    >
+                                      <XCircle size={14} className="text-rose-500 dark:text-rose-400" /> Cancel / Request Refund
+                                    </button>
+                                  )}
+                                  {r.status === 'pending-refund' && (
+                                    <span className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-2 bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400 text-xs font-bold rounded-xl border border-amber-200 dark:border-amber-800/40">
+                                      <Clock size={13} /> Refund Pending
+                                    </span>
+                                  )}
+
                                   {/* 🟢 Actions Dropdown Menu */}
                                   <div className="relative">
                                     <button 
                                       onClick={(e) => { e.stopPropagation(); setOpenActionRowId(openActionRowId === r.id ? null : r.id); }}
-                                      className="px-4 py-2 text-xs font-bold text-neutral-300 bg-neutral-800 hover:bg-neutral-700 rounded-xl transition-colors border border-neutral-700 flex items-center gap-1.5"
+                                      className="px-4 py-2 text-xs font-bold text-neutral-800 dark:text-neutral-300 bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 rounded-xl transition-colors border border-neutral-300 dark:border-neutral-700 flex items-center gap-1.5"
                                     >
                                       Actions <ChevronDown size={14} />
                                     </button>
@@ -2226,24 +2271,24 @@ export function HomePage() {
                                           initial={{ opacity: 0, y: 5, scale: 0.95 }} 
                                           animate={{ opacity: 1, y: 0, scale: 1 }} 
                                           exit={{ opacity: 0, y: 5, scale: 0.95 }} 
-                                          className="absolute right-0 top-full mt-2 w-48 bg-neutral-900 border border-neutral-700 rounded-xl shadow-2xl overflow-hidden z-50 flex flex-col py-1"
+                                          className="absolute right-0 top-full mt-2 w-48 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-2xl overflow-hidden z-50 flex flex-col py-1"
                                         >
-                                          {/* Guests tracking a booking may cancel within the policy window */}
+                                          {/* Cancel / Request Refund available to all tracking users */}
                                           {(r.status === 'pending' || r.status === 'pending-reschedule' || r.status === 'confirmed') && (
-                                             <button onClick={(e) => { e.stopPropagation(); handleCancelBooking(r.id, r.date, r.timeSlot); setOpenActionRowId(null); }} className="px-4 py-3 text-left text-xs font-bold text-rose-400 hover:bg-neutral-800 transition-colors border-b border-neutral-800/50">
-                                               Cancel Booking
+                                             <button onClick={(e) => { e.stopPropagation(); handleCancelBooking(r.id, r.date, r.timeSlot); setOpenActionRowId(null); }} className="px-4 py-3 text-left text-xs font-bold text-rose-600 dark:text-rose-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors border-b border-neutral-100 dark:border-neutral-800/50">
+                                               Cancel / Request Refund
                                              </button>
                                           )}
                                           
                                           {/* Request Reschedule */}
                                           {(r.status === 'pending' || r.status === 'confirmed') && currentUser && (
-                                             <button onClick={(e) => { e.stopPropagation(); handleRequestReschedule(r.id, r); setOpenActionRowId(null); }} className="px-4 py-3 text-left text-xs font-bold text-violet-400 hover:bg-neutral-800 transition-colors border-b border-neutral-800/50">
+                                             <button onClick={(e) => { e.stopPropagation(); handleRequestReschedule(r.id, r); setOpenActionRowId(null); }} className="px-4 py-3 text-left text-xs font-bold text-violet-600 dark:text-violet-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors border-b border-neutral-100 dark:border-neutral-800/50">
                                                Request Reschedule
                                              </button>
                                           )}
                                           
                                           {/* Report Issue (Available to Guests too) */}
-                                          <button onClick={(e) => { e.stopPropagation(); setReportModalResId(r.id); setReportMessage(''); setOpenActionRowId(null); }} className="px-4 py-3 text-left text-xs font-bold text-amber-400 hover:bg-neutral-800 transition-colors">
+                                          <button onClick={(e) => { e.stopPropagation(); setReportModalResId(r.id); setReportMessage(''); setOpenActionRowId(null); }} className="px-4 py-3 text-left text-xs font-bold text-amber-600 dark:text-amber-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors">
                                             Report Issue
                                           </button>
                                         </motion.div>
@@ -2324,26 +2369,12 @@ export function HomePage() {
                           <ImageWithFallback src={getEventImage(event.attachments)} alt={event.title} className="w-full h-full object-cover" />
                         </div>
                       )}
-                      <div className="flex justify-between items-start mb-2 gap-2">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="text-[10px] bg-emerald-500/20 text-emerald-400 font-bold px-2 py-0.5 rounded">{event.type}</span>
-                          {event.slotsFull && (
-                            <span className="text-[10px] bg-rose-950 text-rose-400 border border-rose-800/50 font-bold px-2 py-0.5 rounded uppercase tracking-wider">Slots Full</span>
-                          )}
-                        </div>
-                        <span className="text-xs font-bold text-neutral-400 whitespace-nowrap">{event.date}</span>
+                      <div className="flex justify-between items-start mb-2">
+                        <span className="text-[10px] bg-emerald-500/20 text-emerald-400 font-bold px-2 py-0.5 rounded">{event.type}</span>
+                        <span className="text-xs font-bold text-neutral-400">{event.date}</span>
                       </div>
-                      <h4 className="text-lg font-bold mb-2 text-white">{event.title}</h4>
-                      {event.duration && <p className="text-[11px] text-neutral-500 font-medium mb-2 flex items-center gap-1.5"><Clock size={11} /> {event.duration}</p>}
+                      <h4 className="text-lg font-bold text-white mb-2">{event.title}</h4>
                       <p className="text-xs text-neutral-400 leading-relaxed">{event.description}</p>
-
-                      {event.registrationLink && (
-                        <div className="mt-4 pt-4 border-t border-neutral-800">
-                          <a href={event.registrationLink} target="_blank" rel="noopener noreferrer" className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors">
-                            <ExternalLink size={13} /> Register via Google Form
-                          </a>
-                        </div>
-                      )}
                     </div>
                   ))}
                 </div>
