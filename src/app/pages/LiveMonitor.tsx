@@ -236,7 +236,7 @@ export function LiveMonitor() {
   // --- GLOBAL AI WAIT-TIME ESTIMATOR ---
   const calculateAIWaitTime = (position: number) => {
     if(reservationMoveError||heldTableIds.size)return 'Check transfer recovery';
-    const activeTables = (tables || []).filter(t => t.isActive && t.status === 'occupied' && t.session);
+    const activeTables = tables.filter(t => t.isActive && t.status === 'occupied' && t.session);
     if (activeTables.length === 0) return "0 mins";
 
     const remainingTimes = activeTables.map(t => {
@@ -256,10 +256,10 @@ export function LiveMonitor() {
     return m > 0 ? `${h}h ${m}m` : `${h}h`;
   };
 
-  const availableCount = reservationMoveError?'—':(availableTables || []).length;
-  const occupiedCount = (tables || []).filter(t => t.isActive && t.status === 'occupied').length;
-  const reservedCount = (tables || []).filter(t => t.isActive && t.status === 'reserved').length;
-  const waitingQueue = (queue || []).filter(q => q.status === 'waiting' || q.status === 'called');
+  const availableCount = reservationMoveError?'—':availableTables.length;
+  const occupiedCount = tables.filter(t => t.isActive && t.status === 'occupied').length;
+  const reservedCount = tables.filter(t => t.isActive && t.status === 'reserved').length;
+  const waitingQueue = queue.filter(q => q.status === 'waiting' || q.status === 'called');
 
   const timeStr = now.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
   const dateStr = now.toLocaleDateString('en-PH', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
@@ -329,8 +329,8 @@ export function LiveMonitor() {
             <h2 className="text-sm font-bold text-neutral-300 uppercase tracking-widest">Table Status</h2>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3">
-            {(tables || []).filter(table=>table.isActive).map(table => (
-              <TableCard key={table.id} table={table} held={heldTableIds?.has(table.id) ?? false} availabilityVerified={(availableTables || []).some(available=>available.id===table.id)} />
+            {tables.filter(table=>table.isActive).map(table => (
+              <TableCard key={table.id} table={table} held={heldTableIds.has(table.id)} availabilityVerified={availableTables.some(available=>available.id===table.id)} />
             ))}
           </div>
 

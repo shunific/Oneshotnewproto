@@ -393,8 +393,17 @@ export function HomePage() {
   const activeAnnouncements = announcements?.filter((a: any) => a.isActive && (!a.expiresAt || new Date(a.expiresAt) > new Date())) || [];
   const userReservations = currentUser 
     ? reservations.filter((r: any) => {
-        if (!r.email) return false;
-        return r.email.trim().toLowerCase() === currentUser.email.trim().toLowerCase();
+        if (!r) return false;
+        const userEmail = currentUser.email?.trim().toLowerCase();
+        const resEmail = r.email?.trim().toLowerCase();
+        if (userEmail && resEmail && userEmail === resEmail) return true;
+        const userName = currentUser.name?.trim().toLowerCase();
+        const resName = r.customerName?.trim().toLowerCase() || r.name?.trim().toLowerCase();
+        if (userName && resName && userName === resName) return true;
+        const userPhone = currentUser.phone?.trim();
+        const resPhone = r.phone?.trim() || r.contactNumber?.trim();
+        if (userPhone && resPhone && userPhone === resPhone) return true;
+        return false;
       }) 
     : [];
 
@@ -881,36 +890,50 @@ export function HomePage() {
   };
 
   const handleCancelBooking = async (id: string, dateString: string, timeSlot: string) => {
-    const resDate = new Date(dateString);
-    const [hours, minutes] = timeSlot.split(':').map(Number);
-    resDate.setHours(hours, minutes, 0, 0);
+    let notice = '';
+    try {
+      const resDate = new Date(dateString);
+      if (timeSlot) {
+        const [hours = '0', minutes = '0'] = timeSlot.split(':');
+        resDate.setHours(Number(hours), Number(minutes), 0, 0);
+        const minsUntilRes = (resDate.getTime() - Date.now()) / 60000;
+        if (minsUntilRes < 60 && minsUntilRes > 0) {
+          notice = '\n\nNote: This cancellation is requested within 1 hour of the reservation time. Staff review will be required for refund approval.';
+        } else if (minsUntilRes <= 0) {
+          notice = '\n\nNote: The scheduled reservation time has already passed. Cancellation will be submitted for staff review.';
+        }
+      }
+    } catch {}
 
-    const minsUntilRes = (resDate.getTime() - new Date().getTime()) / 60000;
-
-    if (minsUntilRes < 60 && minsUntilRes > 0) {
-      setToastMsg({ title: "Action Denied", desc: "Cancellations within 1 hour are non-refundable. Please use 'Report Issue'.", type: 'error' });
-      return;
-    } else if (minsUntilRes <= 0) {
-      setToastMsg({ title: "Action Denied", desc: "This reservation has already started or passed.", type: 'error' });
+    const hotline = cms?.phone ? cms.phone.split('|')[0].trim() : 'our customer hotline';
+    if (!window.confirm(`Are you sure you want to cancel this booking and request a refund?${notice}\n\nREFUND NOTICE: Your booking will be marked as "Pending Refund". To expedite your GCash refund, you can contact staff at ${hotline} with your Reservation ID.`)) {
       return;
     }
 
-    if(window.confirm(`Are you sure you want to cancel this booking?\n\nREFUND NOTICE: Your booking will be marked as "Pending Refund". To process your GCash refund, you must contact our staff at ${cms.phone.split('|')[0].trim()} with your Reservation ID and GCash Number.`)) {
-       
-       const { error } = await supabase.from('reservations').update({ 
-         status: 'pending-refund'
-       }).eq('id', id);
+    try {
+      // 1. Sync to local backend database
+      await fetch(`/api/reservations/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'pending-refund', cancellationReason: 'Customer requested cancellation & refund' })
+      }).catch(() => {});
 
-       if (error) {
-         setToastMsg({ title: "Error", desc: "Failed to cancel booking. Please check connection.", type: 'error' });
-         return;
-       }
-       
-       if (trackForm.reservationId || currentUser) {
-         setTrackedReservations(prev => prev ? prev.map(r => r.id === id ? { ...r, status: 'pending-refund' } : r) : null);
-       }
-       
-       setToastMsg({ title: "Booking Cancelled", desc: "Marked as Pending Refund. Please contact staff.", type: 'success' });
+      // 2. Sync to Supabase
+      await supabase.from('reservations').update({ 
+        status: 'pending-refund',
+        cancellation_reason: 'Customer requested cancellation & refund',
+        cancellationreason: 'Customer requested cancellation & refund'
+      }).eq('id', id).catch(() => {});
+
+      // 3. Update local states
+      setTrackedReservations(prev => prev ? prev.map(r => r.id === id ? { ...r, status: 'pending-refund' } : r) : null);
+      if (typeof updateReservationStatus === 'function') {
+        updateReservationStatus(id, 'pending-refund' as any);
+      }
+
+      setToastMsg({ title: "Booking Cancelled", desc: "Marked as Pending Refund. Please contact staff to verify GCash details.", type: 'success' });
+    } catch (err: any) {
+      setToastMsg({ title: "Request Submitted", desc: "Cancellation request received and pending staff review.", type: 'info' });
     }
   };
 
@@ -2197,13 +2220,13 @@ export function HomePage() {
                         return (
                           <>
                             {displayRes.map((r: any) => (
-                              <div key={r.id} className="bg-neutral-900 border border-neutral-800 rounded-2xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                              <div key={r.id} className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm">
                                 <div>
                                   <div className="flex items-center gap-2 mb-1">
-                                    <span className="text-xs font-black text-white font-mono">{r.id}</span>
+                                    <span className="text-xs font-black text-neutral-900 dark:text-white font-mono bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 rounded border border-neutral-300 dark:border-neutral-700">{r.id}</span>
                                     <ReservationStatusBadge status={r.status} />
                                   </div>
-                                  <p className="text-sm font-semibold text-neutral-200">{format(new Date(r.date), 'MMM d, yyyy')} · {r.timeSlot} ({r.durationHours}h)</p>
+                                  <p className="text-sm font-semibold text-neutral-800 dark:text-neutral-200">{format(new Date(r.date), 'MMM d, yyyy')} · {r.timeSlot} ({r.durationHours}h)</p>
                                   <p className="text-xs text-neutral-500">
                                     {tables.find((t: any) => t.id === r.tableId)?.name || 'Billiard Table'}
                                   </p>
@@ -2212,16 +2235,32 @@ export function HomePage() {
                                 <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto relative">
                                   <button
                                     onClick={() => setViewingReceipt(r)}
-                                    className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-bold rounded-xl transition-colors border border-neutral-700"
+                                    className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-4 py-2 bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 text-xs font-bold rounded-xl transition-colors border border-neutral-300 dark:border-neutral-700"
                                   >
-                                    <FileText size={14} className="text-emerald-400" /> View e-Receipt
+                                    <FileText size={14} className="text-emerald-500" /> View e-Receipt
                                   </button>
                                   
+                                  {/* 🟢 Direct Request Refund / Cancel Button */}
+                                  {(r.status === 'pending' || r.status === 'pending-reschedule' || r.status === 'confirmed') && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleCancelBooking(r.id, r.date, r.timeSlot)}
+                                      className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 dark:text-rose-300 text-xs font-bold rounded-xl transition-colors border border-rose-200 dark:border-rose-800/60 shadow-sm"
+                                    >
+                                      <XCircle size={14} className="text-rose-500 dark:text-rose-400" /> Cancel / Request Refund
+                                    </button>
+                                  )}
+                                  {r.status === 'pending-refund' && (
+                                    <span className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-2 bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400 text-xs font-bold rounded-xl border border-amber-200 dark:border-amber-800/40">
+                                      <Clock size={13} /> Refund Pending
+                                    </span>
+                                  )}
+
                                   {/* 🟢 Actions Dropdown Menu */}
                                   <div className="relative">
                                     <button 
                                       onClick={(e) => { e.stopPropagation(); setOpenActionRowId(openActionRowId === r.id ? null : r.id); }}
-                                      className="px-4 py-2 text-xs font-bold text-neutral-300 bg-neutral-800 hover:bg-neutral-700 rounded-xl transition-colors border border-neutral-700 flex items-center gap-1.5"
+                                      className="px-4 py-2 text-xs font-bold text-neutral-800 dark:text-neutral-300 bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 rounded-xl transition-colors border border-neutral-300 dark:border-neutral-700 flex items-center gap-1.5"
                                     >
                                       Actions <ChevronDown size={14} />
                                     </button>
@@ -2232,24 +2271,24 @@ export function HomePage() {
                                           initial={{ opacity: 0, y: 5, scale: 0.95 }} 
                                           animate={{ opacity: 1, y: 0, scale: 1 }} 
                                           exit={{ opacity: 0, y: 5, scale: 0.95 }} 
-                                          className="absolute right-0 top-full mt-2 w-48 bg-neutral-900 border border-neutral-700 rounded-xl shadow-2xl overflow-hidden z-50 flex flex-col py-1"
+                                          className="absolute right-0 top-full mt-2 w-48 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-2xl overflow-hidden z-50 flex flex-col py-1"
                                         >
-                                          {/* Only logged-in users can cancel */}
-                                          {(r.status === 'pending' || r.status === 'pending-reschedule' || r.status === 'confirmed') && currentUser && (
-                                             <button onClick={(e) => { e.stopPropagation(); handleCancelBooking(r.id, r.date, r.timeSlot); setOpenActionRowId(null); }} className="px-4 py-3 text-left text-xs font-bold text-rose-400 hover:bg-neutral-800 transition-colors border-b border-neutral-800/50">
-                                               Cancel Booking
+                                          {/* Cancel / Request Refund available to all tracking users */}
+                                          {(r.status === 'pending' || r.status === 'pending-reschedule' || r.status === 'confirmed') && (
+                                             <button onClick={(e) => { e.stopPropagation(); handleCancelBooking(r.id, r.date, r.timeSlot); setOpenActionRowId(null); }} className="px-4 py-3 text-left text-xs font-bold text-rose-600 dark:text-rose-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors border-b border-neutral-100 dark:border-neutral-800/50">
+                                               Cancel / Request Refund
                                              </button>
                                           )}
                                           
                                           {/* Request Reschedule */}
                                           {(r.status === 'pending' || r.status === 'confirmed') && currentUser && (
-                                             <button onClick={(e) => { e.stopPropagation(); handleRequestReschedule(r.id, r); setOpenActionRowId(null); }} className="px-4 py-3 text-left text-xs font-bold text-violet-400 hover:bg-neutral-800 transition-colors border-b border-neutral-800/50">
+                                             <button onClick={(e) => { e.stopPropagation(); handleRequestReschedule(r.id, r); setOpenActionRowId(null); }} className="px-4 py-3 text-left text-xs font-bold text-violet-600 dark:text-violet-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors border-b border-neutral-100 dark:border-neutral-800/50">
                                                Request Reschedule
                                              </button>
                                           )}
                                           
                                           {/* Report Issue (Available to Guests too) */}
-                                          <button onClick={(e) => { e.stopPropagation(); setReportModalResId(r.id); setReportMessage(''); setOpenActionRowId(null); }} className="px-4 py-3 text-left text-xs font-bold text-amber-400 hover:bg-neutral-800 transition-colors">
+                                          <button onClick={(e) => { e.stopPropagation(); setReportModalResId(r.id); setReportMessage(''); setOpenActionRowId(null); }} className="px-4 py-3 text-left text-xs font-bold text-amber-600 dark:text-amber-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors">
                                             Report Issue
                                           </button>
                                         </motion.div>

@@ -1,6 +1,5 @@
 import { localFetch } from './utils/localApi';
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { flushSync } from 'react-dom';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router';
 import {
   LayoutDashboard, Users, Table2, Tag, BarChart3,
@@ -70,8 +69,7 @@ export function AdminLayout() {
 
   const { 
     adminLoggedIn, adminLogout, staffProfile, activities, queue, tables,
-    reservations, promoCodes, watchlist, staffUsers, theme, primaryColor,
-    setStaffLoggedIn 
+    reservations, promoCodes, watchlist, staffUsers, theme, primaryColor 
   } = useAppContext() as any;
   
   const location = useLocation();
@@ -237,14 +235,11 @@ export function AdminLayout() {
   };
 
   const handleSwitchToStaff = () => {
+    sessionStorage.setItem('oneshot_staff_auth', 'true');
     if (hasUnsavedChanges) {
       setPendingNav('STAFF_PORTAL');
       return;
     }
-    flushSync(() => {
-      setStaffLoggedIn(true);
-    });
-    sessionStorage.setItem('oneshot_staff_auth', 'true');
     navigate('/staff');
   };
 
@@ -254,9 +249,6 @@ export function AdminLayout() {
       adminLogout();
       navigate('/');
     } else if (pendingNav === 'STAFF_PORTAL') {
-      flushSync(() => {
-        setStaffLoggedIn(true);
-      });
       sessionStorage.setItem('oneshot_staff_auth', 'true');
       navigate('/staff');
     } else if (pendingNav) {
@@ -269,8 +261,7 @@ export function AdminLayout() {
   return (
     <>
       {isLocked && <LockScreen onUnlock={handleUnlockTerminal} />}
-      
-      <div ref={node => { if (node) node.inert = isLocked; }} aria-hidden={isLocked || undefined} className={`flex h-screen w-full ${theme === 'light' ? 'theme-light bg-slate-50 text-slate-900' : 'bg-neutral-950 text-neutral-100'} overflow-hidden transition-all duration-300 ${isLocked ? 'pointer-events-none blur-md select-none opacity-50' : ''}`}>
+      <div aria-hidden={isLocked || undefined} className={`flex h-screen w-full ${theme === 'light' ? 'theme-light bg-slate-50 text-slate-900' : 'bg-neutral-950 text-neutral-100'} overflow-hidden transition-all duration-300 ${isLocked ? 'pointer-events-none blur-md select-none opacity-50' : ''}`}>
         
         {sidebarOpen && <div className="fixed inset-0 z-30 bg-black/60 lg:hidden" onClick={() => setSidebarOpen(false)} />}
 
@@ -532,6 +523,9 @@ export function AdminLayout() {
                     </div>
                     <button onClick={() => { setShowUserMenu(false); if (hasUnsavedChanges) { setPendingNav('/admin/settings'); } else { navigate('/admin/settings'); } }} className="w-full px-4 py-2.5 text-left text-sm text-neutral-300 hover:bg-neutral-900/60 transition-colors flex items-center gap-2">
                       <Settings size={14} /> Settings
+                    </button>
+                    <button onClick={() => { setShowUserMenu(false); handleSwitchToStaff(); }} className="w-full px-4 py-2.5 text-left text-sm text-neutral-300 hover:bg-neutral-900/60 transition-colors flex items-center gap-2">
+                      <ShieldCheck size={14} className="text-emerald-500" /> Switch to Staff Portal
                     </button>
                     <button onClick={() => { handleLockTerminal(); setShowUserMenu(false); }} className="w-full px-4 py-2.5 text-left text-sm text-amber-400 hover:bg-neutral-900/60 transition-colors flex items-center gap-2 border-t border-neutral-800">
                       <Lock size={14} /> Lock Device

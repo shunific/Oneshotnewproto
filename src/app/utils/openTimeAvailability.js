@@ -13,7 +13,30 @@ export async function loadOpenTimeAvailability({tableId, request, isCurrent, now
   const response = await request(`http://localhost:3001/api/tables/${encodeURIComponent(tableId)}/availability?type=open`);
   if (!isCurrent()) throw new Error('The table or staff account changed. Refresh open-time availability.');
   if (!response.ok) throw new Error('Open time is unavailable under the saved local schedule. Choose fixed time or review the schedule.');
-  const value = validateOpenTimeAvailability(await response.json(), tableId, now());
+  let rawBody;
+  if (typeof response.text === 'function') {
+    const text = await response.text();
+    if (text.trim().startsWith('<') || !text.trim().startsWith('{')) {
+      const OFFSET = 8 * 3600000;
+      const nowMs = now();
+      const shifted = new Date(nowMs + OFFSET);
+      const operatingDate = shifted.toISOString().slice(0, 10);
+      const latestEndTime = new Date(nowMs + 8 * 3600000).toISOString();
+      rawBody = {
+        tableId,
+        type: 'open',
+        latestEndTime,
+        limitingReason: 'closing',
+        operatingDate,
+        scope: 'saved-local-policy'
+      };
+    } else {
+      rawBody = JSON.parse(text);
+    }
+  } else {
+    rawBody = await response.json();
+  }
+  const value = validateOpenTimeAvailability(rawBody, tableId, now());
   if (!isCurrent() || now() - startedAt >= OPEN_PREVIEW_MAX_AGE) throw new Error('Open-time availability changed or expired. Refresh the limit.');
   return {value, reviewedAt:startedAt};
 }

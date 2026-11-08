@@ -16,7 +16,7 @@ const COMMON_MAINTENANCE_REASONS = [
 ];
 
 export function AdminTableManagement() {
-  const { tables = [], addTable, updateTable, updateTableState } = useAppContext() as any;
+  const { tables, addTable, updateTable, updateTableState } = useAppContext() as any;
 
   const [newName, setNewName]               = useState('');
   const [showAddForm, setShowAddForm]       = useState(false);
@@ -44,17 +44,6 @@ export function AdminTableManagement() {
 
   const [isLoading, setIsLoading]   = useState(false);
   const [loadingMsg, setLoadingMsg] = useState('PROCESSING...');
-
-  // Watchdog: never let a hung network call keep the whole page blocked.
-  useEffect(() => {
-    if (!isLoading) return;
-    const timer = setTimeout(() => {
-      setIsLoading(false);
-      setIsSubmitting(false);
-      setIsConfirming(false);
-    }, 10000);
-    return () => clearTimeout(timer);
-  }, [isLoading]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -327,10 +316,6 @@ export function AdminTableManagement() {
           {filtered.map((t: any) => {
             const isMaintenance = t.status === 'maintenance' || !t.isActive;
             const isOccupied = t.status === 'occupied' && t.session;
-            const startedAt = isOccupied ? new Date(t.session.startTime) : null;
-            const startedLabel = startedAt && Number.isFinite(startedAt.getTime())
-              ? format(startedAt, 'h:mm a')
-              : 'Time unavailable';
 
             return (
               <div
@@ -462,7 +447,7 @@ export function AdminTableManagement() {
                       </div>
                       <div className="text-right flex-shrink-0">
                         <p className="text-[10px] text-neutral-500 font-medium">Started</p>
-                        <p className="text-xs font-mono text-neutral-300">{startedLabel}</p>
+                        <p className="text-xs font-mono text-neutral-300">{format(new Date(t.session.startTime), 'h:mm a')}</p>
                       </div>
                     </div>
                   ) : isMaintenance ? (

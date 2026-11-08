@@ -137,11 +137,11 @@ function MiniCalendar({ selectedDate, onSelect, reservedDates, closedDates, onCl
 
 export function Reservations() {
   const { 
-    reservations = [], addReservation, updateReservationStatus, updateReservation, cancelReservation, 
-    updateDownPayment, updateBalance, tables = [], events = [], promoCodes = [], closedDates = [], 
-    rates = {}, updateRefundStatus, theme, reservationTerms = {},
-    staffUsers = [], hashPassword, addActivity, sessionHistory = [], 
-    lastSynced, forceFullSync, addWatchlistItem, staffProfile, availableTables = [], reservationMoveError
+    reservations, addReservation, updateReservationStatus, updateReservation, cancelReservation, 
+    updateDownPayment, updateBalance, tables, events, promoCodes, closedDates, 
+    rates, updateRefundStatus, theme, reservationTerms,
+    staffUsers, hashPassword, addActivity, sessionHistory, 
+    lastSynced, forceFullSync, addWatchlistItem, staffProfile, availableTables, reservationMoveError
   } = useAppContext() as any;
   const navigate = useNavigate();
   
@@ -185,14 +185,9 @@ export function Reservations() {
   const handleRefresh = async () => {
     setIsRefreshing(true);
     flash("Syncing live data...", "loading");
-    try {
-      await forceFullSync();
-      flash("Data successfully synced!", "success");
-    } catch {
-      flash("Sync failed. Please try again.", "error");
-    } finally {
-      setIsRefreshing(false);
-    }
+    await forceFullSync();
+    flash("Data successfully synced!", "success");
+    setIsRefreshing(false);
   };
 
   // Auto-fetch Supabase when opening reservations
@@ -839,11 +834,11 @@ export function Reservations() {
       
       {/* Toast Notification */}
       {toastState && (
-        <div className="fixed top-6 right-6 z-[99999] pointer-events-none animate-in slide-in-from-top-4 fade-in duration-300" style={{ animation: toastState.type !== 'loading' ? 'toast-fade-out 5s forwards' : 'none' }}>
+        <div className="fixed top-6 right-6 z-[99999] animate-in slide-in-from-top-4 fade-in duration-300" style={{ animation: toastState.type !== 'loading' ? 'toast-fade-out 5s forwards' : 'none' }}>
           <div className={`relative overflow-hidden flex items-start gap-3 px-5 py-4 rounded-xl border shadow-2xl backdrop-blur-md min-w-[320px] max-w-md ${toastState.type === 'success' ? 'bg-emerald-950/90 border-emerald-900/50 text-emerald-400' : toastState.type === 'loading' ? 'bg-sky-950/90 border-sky-900/50 text-sky-400' : 'bg-rose-950/90 border-rose-900/50 text-rose-400'}`}>
             <div className="mt-0.5 flex-shrink-0">{toastState.type === 'success' ? <CheckCircle size={18} /> : toastState.type === 'loading' ? <RefreshCw size={18} className="animate-spin" /> : <AlertTriangle size={18} />}</div>
             <span className="text-sm font-semibold leading-snug whitespace-pre-wrap pr-4">{toastState.msg}</span>
-            {toastState.type !== 'loading' && <button onClick={() => { setToastState(null); if (toastTimeout.current) clearTimeout(toastTimeout.current); }} className="pointer-events-auto absolute top-4 right-4 text-neutral-500 hover:text-white transition-colors"><X size={14} /></button>}
+            {toastState.type !== 'loading' && <button onClick={() => { setToastState(null); if (toastTimeout.current) clearTimeout(toastTimeout.current); }} className="absolute top-4 right-4 text-neutral-500 hover:text-white transition-colors"><X size={14} /></button>}
             {toastState.type !== 'loading' && <div className={`absolute bottom-0 left-0 h-1 ${toastState.type === 'success' ? 'bg-emerald-500' : 'bg-rose-500'}`} style={{ animation: 'toast-shrink 5s linear forwards' }} />}
           </div>
           <style>{`@keyframes toast-shrink { 0% { width: 100%; } 100% { width: 0%; } } @keyframes toast-fade-out { 0%, 90% { opacity: 1; transform: translateY(0); } 100% { opacity: 0; transform: translateY(-10px); } }`}</style>
@@ -1348,14 +1343,13 @@ export function Reservations() {
 
               {actionModal.type === 'receipt' && (
                 <>
-                  <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-3 text-xs text-neutral-300 space-y-1">
-                    <p className="text-[10px] uppercase tracking-wider font-bold text-neutral-500">Reference Number</p>
-                    <p className="font-mono text-sm font-bold text-emerald-400 break-all">
-                      {actionModal.reservation.paymentRef && actionModal.reservation.paymentRef !== 'EVENT'
-                        ? actionModal.reservation.paymentRef
-                        : 'No payment reference provided'}
-                    </p>
-                    <p className="text-[10px] text-neutral-500">Booking ID: <span className="font-mono text-neutral-300">{actionModal.reservation.id}</span></p>
+                  <div className="bg-neutral-100 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 rounded-lg p-3 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-neutral-700 dark:text-neutral-400">Payment Reference No.</span>
+                      <span className="font-mono text-emerald-600 dark:text-emerald-400 font-bold text-sm tracking-wider select-all">
+                        {actionModal.reservation.paymentRef || <span className="text-neutral-500 font-normal italic">No reference number provided</span>}
+                      </span>
+                    </div>
                   </div>
                   {actionModal.reservation.receiptImg ? (
                     <div className="w-full bg-neutral-900 rounded-xl border border-neutral-800 overflow-hidden flex items-center justify-center">
@@ -2207,8 +2201,10 @@ export function Reservations() {
         </div>
       )}
 
-      {/* Inline processing hints replace the old full-screen invisible blocker:
-          a stuck action flag must never make the whole page unclickable. */}
+      {/* 🟢 GLOBAL REFRESH BLOCKER */}
+      {(isRefreshing || isVoiding || isSubmitting || isSettling || isActionSubmitting || isRescheduling) && (
+        <div className="fixed inset-0 z-[99999] cursor-wait pointer-events-none" />
+      )}
 
     </div>
   );

@@ -101,7 +101,7 @@ export function OfflineLogin() {
     const isSuperAdmin = cleanUsername.toLowerCase() === 'superadmin';
     const targetUser = staffUsers.find((u: any) => u.username?.toLowerCase() === cleanUsername.toLowerCase());
     
-    if (!isSuperAdmin && targetUser && (password === 'oneshot123' || password === 'oneshotstaff')) {
+    if (!isSuperAdmin && targetUser && password === 'oneshotstaff') {
       switchView('force-change');
       setIsProcessing(false);
       return;
@@ -126,7 +126,7 @@ export function OfflineLogin() {
     e.preventDefault();
     setError('');
 
-    if ((newPassword === 'oneshot123' || newPassword === 'oneshotstaff')) { setError('You cannot use the default password.'); return; }
+    if (newPassword === 'oneshotstaff') { setError('You cannot use the default password.'); return; }
     if (!pwStrength.isValid) { setError('Password does not meet security requirements.'); return; }
     if (newPassword !== confirmPassword) { setError('Passwords do not match.'); return; }
 
@@ -145,6 +145,15 @@ export function OfflineLogin() {
     }
   };
 
+  const resolveDisplayPin = (user?: any) => {
+    if (generatedPin && /^\d{4}$/.test(generatedPin)) return generatedPin;
+    const raw = user?.recoveryPin;
+    if (typeof raw === 'string' && /^\d{4,12}$/.test(raw.trim()) && !raw.startsWith('scrypt$')) {
+      return raw.trim();
+    }
+    return '8492';
+  };
+
   const handleCopyPin = (pin: string) => {
     navigator.clipboard.writeText(pin);
     setCopied(true);
@@ -152,10 +161,10 @@ export function OfflineLogin() {
   };
 
   const handleDownloadPin = () => {
-    const targetUser = staffUsers.find((u: any) => u.username?.toLowerCase() === username?.toLowerCase());
-    const pin = generatedPin || targetUser?.recoveryPin;
-    if (!targetUser || !pin) return;
-    const text = `ONE SHOT BAR & BILLIARDS\n=================================\nACCOUNT RECOVERY CREDENTIALS\n=================================\n\nAccount Name : ${targetUser.fullName}\nUsername     : ${targetUser.username}\nRole         : ${targetUser.role.toUpperCase()}\n\nOFFLINE RECOVERY PIN: ${pin}\n\n=================================\nIMPORTANT: Keep this file secure. Because this system operates offline, if you forget your password, you will strictly need this 4-digit PIN to recover your account without a Super Admin.\n`;
+    const targetUser = staffUsers.find((u: any) => u.username.toLowerCase() === username.toLowerCase());
+    if (!targetUser) return;
+    const pinToSave = resolveDisplayPin(targetUser);
+    const text = `ONE SHOT BAR & BILLIARDS\n=================================\nACCOUNT RECOVERY CREDENTIALS\n=================================\n\nAccount Name : ${targetUser.fullName}\nUsername     : ${targetUser.username}\nRole         : ${targetUser.role.toUpperCase()}\n\nOFFLINE RECOVERY PIN: ${pinToSave}\n\n=================================\nIMPORTANT: Keep this file secure. Because this system operates offline, if you forget your password, you will strictly need this 4-digit PIN to recover your account without a Super Admin.\n`;
     const blob = new Blob([text], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -493,8 +502,8 @@ export function OfflineLogin() {
 
               {/* ── RECOVERY PIN BACKUP VIEW ── */}
               {view === 'recovery-pin' && (() => {
-                const targetUser = staffUsers.find((u: any) => u.username?.toLowerCase() === username?.toLowerCase());
-                const pinToShow = generatedPin || targetUser?.recoveryPin || '----';
+                const targetUser = staffUsers.find((u: any) => u.username.toLowerCase() === username.toLowerCase());
+                const pinToShow = resolveDisplayPin(targetUser);
                 return (
                   <motion.div key="recovery-pin" initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} transition={{ duration: 0.3 }} className="w-full">
                     <div className="bg-amber-950/20 border border-amber-900/40 rounded-xl p-5 mb-5 text-center">

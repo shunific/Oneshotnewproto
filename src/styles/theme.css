@@ -693,6 +693,63 @@
   color: #1e293b !important;
 }
 
+.theme-light .text-white:not(button.bg-emerald-600 *):not(button.bg-emerald-500 *):not(button.bg-emerald-700 *):not(button.bg-amber-600 *):not(button.bg-amber-500 *):not(button.bg-rose-600 *):not(button.bg-rose-500 *):not(button.bg-sky-600 *):not(button.bg-blue-600 *):not(button.bg-violet-600 *):not(button.bg-purple-600 *):not(.hero-banner *):not(.keep-white) {
+  color: #0f172a !important;
+}
+
+.theme-light div.bg-neutral-900 p.text-white,
+.theme-light div.bg-neutral-950 p.text-white,
+.theme-light div.bg-neutral-900 h2.text-white,
+.theme-light div.bg-neutral-950 h2.text-white,
+.theme-light div.bg-neutral-900 h3.text-white,
+.theme-light div.bg-neutral-950 h3.text-white,
+.theme-light div.bg-neutral-900 .text-white:not(button.bg-emerald-600 *):not(button.bg-emerald-500 *):not(button.bg-sky-600 *):not(button.bg-rose-600 *),
+.theme-light div.bg-neutral-950 .text-white:not(button.bg-emerald-600 *):not(button.bg-emerald-500 *):not(button.bg-sky-600 *):not(button.bg-rose-600 *) {
+  color: #0f172a !important;
+}
+
+.theme-light .tabular-nums,
+.theme-light .tabular-nums.text-white,
+.theme-light .text-4xl.font-black.text-white,
+.theme-light .text-3xl.font-black.text-white,
+.theme-light .text-2xl.font-black.text-white,
+.theme-light .text-xl.font-black.text-white {
+  color: #0f172a !important;
+}
+
+/* Ensure Settings stats numbers are high contrast in light mode */
+.theme-light .text-3xl.font-black:not(.text-emerald-500):not(.text-blue-500):not(.text-amber-500):not(.text-purple-500):not(.text-rose-500):not(.text-emerald-400):not(.text-rose-400):not(.text-amber-400):not(.text-violet-400) {
+  color: #0f172a !important;
+}
+
+.theme-light button.bg-neutral-800:not(.bg-emerald-600):not(.bg-rose-600):not(.bg-sky-600) {
+  background-color: #f1f5f9 !important;
+  color: #0f172a !important;
+  border: 1px solid #cbd5e1 !important;
+}
+
+.theme-light button.bg-neutral-800:not(.bg-emerald-600):not(.bg-rose-600):not(.bg-sky-600):hover {
+  background-color: #e2e8f0 !important;
+  color: #0f172a !important;
+}
+
+.theme-light button.bg-neutral-900:not(.bg-emerald-600):not(.bg-rose-600):not(.bg-sky-600) {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border: 1px solid #cbd5e1 !important;
+}
+
+/* Lost & Found buttons in light mode */
+.theme-light .bg-neutral-900\/50 {
+  background-color: #f8fafc !important;
+}
+
+/* Queue section readability and table card alignment in light mode */
+.theme-light .queue-card,
+.theme-light .divide-neutral-800\/50 > div {
+  border-color: #e2e8f0 !important;
+}
+
 /* ═════════════════════════════════════════════════════════════════
    🎨 LOCAL MACHINE COLOR PALETTES (data-color)
    ═════════════════════════════════════════════════════════════════ */

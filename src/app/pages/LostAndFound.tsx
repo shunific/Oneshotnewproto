@@ -149,7 +149,7 @@ export function LostAndFound() {
       {/* 🟢 TOP-RIGHT FLOATING TOAST */}
       {toastState && (
         <div 
-          className="fixed top-6 right-6 z-[99999] pointer-events-none animate-in slide-in-from-top-4 fade-in duration-300"
+          className="fixed top-6 right-6 z-[99999] animate-in slide-in-from-top-4 fade-in duration-300"
           style={{ animation: toastState.type !== 'loading' ? 'toast-fade-out 5s forwards' : 'none' }}
         >
           <div className={`relative overflow-hidden flex items-start gap-3 px-5 py-4 rounded-xl border shadow-2xl backdrop-blur-md min-w-[320px] max-w-md ${
@@ -166,7 +166,7 @@ export function LostAndFound() {
             {toastState.type !== 'loading' && (
               <button 
                 onClick={() => { setToastState(null); if (toastTimeout.current) clearTimeout(toastTimeout.current); }} 
-                className="pointer-events-auto absolute top-4 right-4 text-neutral-500 hover:text-white transition-colors"
+                className="absolute top-4 right-4 text-neutral-500 hover:text-white transition-colors"
               >
                 <X size={14} />
               </button>
@@ -195,7 +195,7 @@ export function LostAndFound() {
       <div className="flex flex-col gap-5 bg-neutral-950 p-6 rounded-2xl border border-neutral-800 relative overflow-hidden">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 relative z-10">
           <div>
-            <h2 className="text-2xl font-black text-white flex items-center gap-2"><Package className="text-emerald-500" /> Lost & Found</h2>
+            <h2 className="text-2xl font-black text-neutral-900 dark:text-white flex items-center gap-2"><Package className="text-emerald-500" /> Lost & Found</h2>
             <p className="text-sm text-neutral-500 mt-1">Manage items left behind by customers.</p>
           </div>
           <button disabled={isSubmitting} onClick={() => setShowModal(true)} className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-xl font-semibold flex items-center gap-2 transition-colors flex-shrink-0 w-full md:w-auto justify-center">
@@ -204,7 +204,7 @@ export function LostAndFound() {
         </div>
         
         <div className="flex flex-col lg:flex-row justify-between items-stretch lg:items-center gap-3 relative z-10">
-          <div className="flex bg-neutral-900 border border-neutral-800 rounded-xl p-1 overflow-x-auto w-full lg:w-auto hide-scrollbar">
+          <div className="flex bg-neutral-100 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 rounded-xl p-1 overflow-x-auto w-full lg:w-auto hide-scrollbar">
             {[
               { id: 'found', label: 'Unclaimed Items' },
               { id: 'claimed', label: 'Claimed Items' },
@@ -214,7 +214,7 @@ export function LostAndFound() {
               <button
                 key={f.id}
                 onClick={() => setFilter(f.id as any)}
-                className={`flex-1 lg:flex-none px-4 py-2 text-xs font-semibold rounded-lg whitespace-nowrap transition-all ${filter === f.id ? 'bg-neutral-800 text-emerald-400 shadow-sm' : 'text-neutral-500 hover:text-neutral-300 hover:bg-neutral-800/50'}`}
+                className={`flex-1 lg:flex-none px-4 py-2 text-xs font-semibold rounded-lg whitespace-nowrap transition-all ${filter === f.id ? 'bg-white dark:bg-neutral-800 text-emerald-600 dark:text-emerald-400 font-bold shadow-sm' : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200 hover:bg-neutral-200/60 dark:hover:bg-neutral-800/50'}`}
               >
                 {f.label}
               </button>
@@ -223,7 +223,7 @@ export function LostAndFound() {
           
           <div className="relative w-full lg:w-72 flex-shrink-0">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500" />
-            <input type="text" placeholder="Search items..." value={search} onChange={e => setSearch(e.target.value)} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl pl-9 pr-4 py-2.5 text-sm text-white focus:border-emerald-500 outline-none transition-colors" />
+            <input type="text" placeholder="Search items..." value={search} onChange={e => setSearch(e.target.value)} className="w-full bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 rounded-xl pl-9 pr-4 py-2.5 text-sm text-neutral-900 dark:text-white focus:border-emerald-500 outline-none transition-colors" />
           </div>
         </div>
       </div>
@@ -253,7 +253,7 @@ export function LostAndFound() {
               </div>
             </div>
             <div className="p-5 flex-1 flex flex-col">
-              <h3 className="text-lg font-bold text-white mb-1">{item.itemName}</h3>
+              <h3 className="text-lg font-bold text-neutral-900 dark:text-white mb-1">{item.itemName}</h3>
               <p className="text-xs text-neutral-500 mb-4 line-clamp-2">{item.description}</p>
               
               <div className="mt-auto space-y-2 text-[10px] text-neutral-400">
@@ -265,13 +265,13 @@ export function LostAndFound() {
             </div>
             {!item.isArchived && item.status !== 'claimed' && (
               <div className="border-t border-neutral-800 p-3 flex gap-2 bg-neutral-900/50">
-                <button disabled={isSubmitting} onClick={() => setClaimModalId(item.id)} className="flex-1 bg-neutral-800 hover:bg-neutral-700 text-white text-xs font-semibold py-2 rounded-lg transition-colors">Mark as Claimed</button>
+                <button disabled={isSubmitting} onClick={() => setClaimModalId(item.id)} className="flex-1 bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-600 dark:text-emerald-400 border border-emerald-600/30 text-xs font-bold py-2 rounded-lg transition-colors">Mark as Claimed</button>
                 <button disabled={isSubmitting} onClick={() => runLostAction(()=>deleteLostItem(item.id),"Item moved to archives.")} className="px-3 bg-neutral-900 hover:bg-rose-900/50 border border-neutral-800 text-neutral-500 hover:text-rose-500 rounded-lg transition-colors" title="Move to History/Archive"><Archive size={14}/></button>
               </div>
             )}
             {item.status === 'claimed' && (
               <div className="border-t border-neutral-800 p-3 flex gap-2 bg-neutral-900/50">
-                <button disabled={isSubmitting} onClick={() => runLostAction(()=>updateLostItem(item.id, { status: 'found', claimedBy: null, claimedDate: null, isArchived: false }),"Reverted to unclaimed status.")} className="flex-1 bg-neutral-900 border border-neutral-700 text-neutral-400 hover:text-white text-xs font-semibold py-2 rounded-lg transition-colors">Revert to Unclaimed</button>
+                <button disabled={isSubmitting} onClick={() => runLostAction(()=>updateLostItem(item.id, { status: 'found', claimedBy: null, claimedDate: null, isArchived: false }),"Reverted to unclaimed status.")} className="flex-1 bg-neutral-100 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-white text-xs font-semibold py-2 rounded-lg transition-colors">Revert to Unclaimed</button>
               </div>
             )}
           </div>

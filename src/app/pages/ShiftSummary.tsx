@@ -17,7 +17,7 @@ const statusConfig: Record<string, { label: string; color: string }> = {
 };
 
 export function ShiftSummary() {
-  const { tables = [], reservations = [], queue = [] } = useAppContext();
+  const { tables, reservations, queue } = useAppContext();
 
   const [selectedDate, setSelectedDate] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
 

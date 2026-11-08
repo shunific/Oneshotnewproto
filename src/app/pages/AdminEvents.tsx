@@ -61,8 +61,8 @@ export function AdminEvents() {
     events, addEvent, updateEvent, deleteEvent, 
     promoCodes, addPromoCode, updatePromoCode, togglePromoCode, deletePromoCode,
     closedDates, addClosedDate, removeClosedDate, updateClosedDate,
-    reservations = [], updateReservation, updateReservationStatus, cancelReservation, tables = [],
-    freeTable, rates = {}
+    reservations, updateReservation, updateReservationStatus, tables,
+    rates 
   } = useAppContext() as any;
 
   const [activeTab, setActiveTab] = useState<'calendar' | 'events' | 'promos'>('calendar');
@@ -308,14 +308,14 @@ export function AdminEvents() {
 
     if (!eventForm.isWholeDay) {
       if (eventForm.startTime === eventForm.endTime) {
-        alert("Start time and End time cannot be exactly the same.");
+        flash("Start time and End time cannot be exactly the same.", "error");
         return;
       }
     }
 
     if (eventForm.type === 'Tournament') {
-      if (!eventForm.bracketLink) {
-        flash("Bracket link is required for Tournaments. The registration form link is optional.", "error");
+      if (!eventForm.registrationLink || !eventForm.bracketLink) {
+        flash("Registration and Bracket links are strictly mandatory for Tournaments.", "error");
         return;
       }
     }
@@ -325,26 +325,26 @@ export function AdminEvents() {
       const maxP = parseInt(eventForm.maxParticipants) || 0;
 
       if (!eventForm.minParticipants || !eventForm.maxParticipants) {
-        alert("Both Min Participants and Max Participants are required for Tournaments and Leagues.");
+        flash("Both Min Participants and Max Participants are required for Tournaments and Leagues.", "error");
         return;
       }
       if (minP <= 0 || maxP <= 0) {
-        alert("Min and Max participants must be greater than 0.");
+        flash("Min and Max participants must be greater than 0.", "error");
         return;
       }
       if (minP >= 100 || maxP >= 100) {
-        alert("Participants must be less than 100 (maximum establishment capacity is 99).");
+        flash("Participants must be less than 100 (maximum establishment capacity is 99).", "error");
         return;
       }
       if (minP > maxP) {
-        alert(`Minimum participants (${minP}) cannot be greater than Maximum participants (${maxP}).`);
+        flash(`Minimum participants (${minP}) cannot be greater than Maximum participants (${maxP}).`, "error");
         return;
       }
     }
 
     const highwayClosed = eventForm.dates.some(d => closedMap.has(d));
     if (highwayClosed) {
-      alert("You cannot schedule an event on a date that is marked as Closed.");
+      flash("You cannot schedule an event on a date that is marked as Closed.", "error");
       return;
     }
 
@@ -391,7 +391,7 @@ export function AdminEvents() {
       });
 
       if (hasInvalidDate && eventForm.type !== 'Holiday') {
-        alert("New events must be scheduled at least 24 hours in advance (tomorrow or later).");
+        flash("New events must be scheduled at least 24 hours in advance (tomorrow or later).", "error");
         return;
       }
     }
@@ -991,7 +991,7 @@ export function AdminEvents() {
 
       {/* 🟢 NEW TOP-RIGHT FLOATING TOAST WITH 5S TIMER */}
       {toast && (
-        <div className="fixed top-6 right-6 z-[9999] pointer-events-none animate-in slide-in-from-top-4 fade-in duration-300">
+        <div className="fixed top-6 right-6 z-[9999] animate-in slide-in-from-top-4 fade-in duration-300">
           <div className={`relative overflow-hidden flex items-start gap-3 px-5 py-4 rounded-xl border shadow-2xl backdrop-blur-md min-w-[320px] max-w-md ${
             toast.type === 'success' 
               ? 'bg-emerald-950/90 border-emerald-900/50 text-emerald-400' 
@@ -1003,7 +1003,7 @@ export function AdminEvents() {
             <span className="text-sm font-semibold leading-snug whitespace-pre-wrap pr-4">{toast.msg}</span>
             <button 
               onClick={() => { setToast(null); if (toastTimeout.current) clearTimeout(toastTimeout.current); }} 
-              className="pointer-events-auto absolute top-4 right-4 text-neutral-500 hover:text-white transition-colors"
+              className="absolute top-4 right-4 text-neutral-500 hover:text-white transition-colors"
             >
               <X size={14} />
             </button>
@@ -1188,14 +1188,13 @@ export function AdminEvents() {
 
               {actionModal.type === 'receipt' && (
                 <>
-                  <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-3 text-xs text-neutral-300 space-y-1">
-                    <p className="text-[10px] uppercase tracking-wider font-bold text-neutral-500">Reference Number</p>
-                    <p className="font-mono text-sm font-bold text-emerald-400 break-all">
-                      {actionModal.reservation.paymentRef && actionModal.reservation.paymentRef !== 'EVENT'
-                        ? actionModal.reservation.paymentRef
-                        : 'No payment reference provided'}
-                    </p>
-                    <p className="text-[10px] text-neutral-500">Booking ID: <span className="font-mono text-neutral-300">{actionModal.reservation.id}</span></p>
+                  <div className="bg-neutral-100 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 rounded-lg p-3 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-neutral-700 dark:text-neutral-400">Payment Reference No.</span>
+                      <span className="font-mono text-emerald-600 dark:text-emerald-400 font-bold text-sm tracking-wider select-all">
+                        {actionModal.reservation.paymentRef || <span className="text-neutral-500 font-normal italic">No reference number provided</span>}
+                      </span>
+                    </div>
                   </div>
                   {actionModal.reservation.receiptImg ? (
                     <div className="w-full bg-neutral-900 rounded-xl border border-neutral-800 overflow-hidden flex items-center justify-center">
@@ -1606,7 +1605,7 @@ export function AdminEvents() {
                     <div className="p-4 rounded-xl border border-emerald-900/30 bg-emerald-950/10 space-y-3">
                       <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest">Tournament Links</p>
                       <div>
-                        <label className="text-[10px] font-semibold text-neutral-400 block mb-1.5 flex items-center gap-1.5"><Link size={10} /> Registration / Google Form Link <span className="text-neutral-500 font-normal">(optional)</span></label>
+                        <label className="text-[10px] font-semibold text-neutral-400 block mb-1.5 flex items-center gap-1.5"><Link size={10} /> Registration / Form Link <span className="text-rose-500">*</span></label>
                         <Input value={eventForm.registrationLink} onChange={e => setEventForm({...eventForm, registrationLink: e.target.value})} placeholder="https://forms.google.com/..." className="bg-neutral-950 border-neutral-800 h-8 text-xs" />
                       </div>
                       <div>
@@ -2014,42 +2013,17 @@ export function AdminEvents() {
               <button
                 type="button"
                 onClick={async () => {
-                  const targetEvent = (events || []).find((ev: any) => ev.id === cancelEventModal.id);
-                  const eventTitle = targetEvent?.title || cancelEventModal.title;
-                  const eventTableIds: string[] = Array.isArray(targetEvent?.eventTableIds) ? targetEvent.eventTableIds : [];
-
                   updateEvent(cancelEventModal.id, { 
                     isCancelled: true, 
                     cancelReason: eventCancelReason,
                     eventTableIds: []
                   });
-
-                  // Cancel only this event's table-hold reservations, and never
-                  // touch unrelated events that also use EVENT tags.
-                  const eventReservations = (reservations || []).filter((r: any) =>
-                    r.paymentRef === 'EVENT' && (
-                      r.customerName === `EVENT: ${eventTitle}` ||
-                      (String(r.id).startsWith('EVT-') && r.tableId && eventTableIds.includes(r.tableId))
-                    )
-                  );
-                  eventReservations.forEach((r: any) =>
-                    cancelReservation(r.id, `Event Cancelled: ${eventCancelReason}`)
-                  );
-
-                  // Release tables held by this event so they can be booked again.
-                  const releaseIds = new Set<string>([
-                    ...eventTableIds,
-                    ...(tables || [])
-                      .filter((t: any) => t.status === 'event' && t.maintenanceReason === eventTitle)
-                      .map((t: any) => t.id)
-                  ]);
-                  releaseIds.forEach((tableId: string) => {
-                    const table = (tables || []).find((t: any) => t.id === tableId);
-                    if (!table || table.status === 'event' || table.status === 'maintenance') freeTable(tableId);
-                  });
+                  // Also cancel associated reservations tag
+                  const { error } = await supabase.from('reservations').update({ status: 'cancelled', cancellationReason: `Event Cancelled: ${eventCancelReason}` }).eq('paymentRef', 'EVENT').like('id', `%EVT-%`);
+                  if(error) console.error("Failed to cancel event tags", error);
 
                   setCancelEventModal(null);
-                  flash(`Event "${eventTitle}" marked as cancelled and tables released.`);
+                  flash(`Event "${cancelEventModal.title}" marked as cancelled and tables released.`);
                 }}
                 className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition-colors shadow-lg shadow-rose-950/40"
               >

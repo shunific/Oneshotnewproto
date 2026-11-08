@@ -33,7 +33,7 @@ export function PromoCodesPage() {
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
-          { label: 'Total Codes',   value: promoCodes.length,  color: 'text-white' },
+          { label: 'Total Codes',   value: promoCodes.length,  color: 'text-neutral-900 dark:text-white' },
           { label: 'Active',        value: activeCount,         color: 'text-emerald-400' },
           { label: 'Total Uses',    value: totalUsage,          color: 'text-violet-400' },
           { label: 'Avg. Discount', value: promoCodes.length ? `${Math.round(promoCodes.reduce((s,p)=>s+p.discountPercent,0)/promoCodes.length)}%` : '—', color: 'text-amber-400' },

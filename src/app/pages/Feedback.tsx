@@ -107,7 +107,7 @@ export function FeedbackPage() {
       {/* ── Stats Row ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
-          { label: 'Total Messages',  value: total,       color: 'text-neutral-200',  icon: MessageSquare },
+          { label: 'Total Messages',  value: total,       color: 'text-neutral-900 dark:text-neutral-200',  icon: MessageSquare },
           { label: 'Compliments',     value: compliments, color: 'text-emerald-400',  icon: ThumbsUp },
           { label: 'Concerns',        value: complaints,  color: 'text-amber-400',    icon: AlertTriangle },
           { label: 'Suggestions',     value: suggestions, color: 'text-blue-400',     icon: Lightbulb },
@@ -223,9 +223,9 @@ export function FeedbackPage() {
           </p>
           <div className="flex flex-wrap gap-2">
             {topTags.map(([tag, count]) => (
-              <span key={tag} className="flex items-center gap-1.5 bg-neutral-900 border border-neutral-800 rounded-full px-3 py-1 text-xs text-neutral-300">
+              <span key={tag} className="flex items-center gap-1.5 bg-neutral-100 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 rounded-full px-3 py-1 text-xs text-neutral-900 dark:text-neutral-300">
                 {tag}
-                <span className="bg-neutral-700 text-neutral-400 text-[10px] font-black px-1.5 rounded-full">{count}</span>
+                <span className="bg-neutral-800 text-white dark:bg-neutral-700 dark:text-neutral-200 text-[10px] font-black px-1.5 py-0.5 rounded-full">{count}</span>
               </span>
             ))}
           </div>

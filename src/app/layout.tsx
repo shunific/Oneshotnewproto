@@ -64,7 +64,7 @@ function SidebarSmartTimer({ tables, onNavigate }: { tables: any[]; onNavigate: 
     return totalSeconds < 0 ? `+${parts}` : parts;
   };
 
-  const occupiedTables = (tables || []).filter((t: any) => t.isActive && t.status === 'occupied' && t.session);
+  const occupiedTables = tables.filter((t: any) => t.isActive && t.status === 'occupied' && t.session);
 
   if (occupiedTables.length === 0) {
     return (
@@ -140,15 +140,15 @@ function SidebarSmartTimer({ tables, onNavigate }: { tables: any[]; onNavigate: 
           </span>
         </div>
         <div className="flex items-baseline gap-1.5">
-          <p className={`text-xl font-black ${isOt ? 'text-rose-400 animate-pulse' : 'text-neutral-100'}`}>
+          <p className={`text-xl font-black ${isOt ? 'text-rose-400 animate-pulse' : 'text-neutral-900 dark:text-neutral-100'}`}>
             {formatDuration(primary.secs)}
           </p>
-          <span className="text-[10px] text-neutral-400 font-semibold">
+          <span className="text-[10px] text-neutral-600 dark:text-neutral-400 font-semibold">
             {isOt ? 'unpaid' : isOpen ? 'elapsed' : 'left'}
           </span>
         </div>
-        <p className="text-[11px] text-neutral-400 mt-1 truncate">
-          Player: <span className="font-semibold text-neutral-200">{primary.table.session?.customerName}</span>
+        <p className="text-[11px] text-neutral-600 dark:text-neutral-400 mt-1 truncate">
+          Player: <span className="font-semibold text-neutral-900 dark:text-neutral-200">{primary.table.session?.customerName}</span>
         </p>
       </button>
     </div>
@@ -180,10 +180,11 @@ export function Layout() {
 
   const [isLocked, setIsLocked] = useState(() => sessionStorage.getItem('oneshot_is_locked') === 'true');
   
-  const { queue = [], tables = [], reservations, promoCodes, watchlist, activities, staffLoggedIn, adminLoggedIn, staffLogout, staffProfile, theme, primaryColor } = useAppContext() as any;
+  const { queue, tables, reservations, promoCodes, watchlist, activities, staffLoggedIn, adminLoggedIn, staffLogout, staffProfile, theme, primaryColor } = useAppContext() as any;
   const location = useLocation();
   const navigate = useNavigate();
 
+  const isAllowedStaff = staffLoggedIn || adminLoggedIn || staffProfile?.isAdmin || staffProfile?.username?.toLowerCase() === 'superadmin';
 
   // Sync recent searches to local storage whenever they change
   useEffect(() => {
@@ -208,13 +209,12 @@ export function Layout() {
     setIsLocked(false);
   };
   
-  const isStaffOrAdminAuth = staffLoggedIn || adminLoggedIn || sessionStorage.getItem('oneshot_staff_auth') === 'true' || sessionStorage.getItem('oneshot_admin_auth') === 'true';
   useEffect(() => {
-    if (!isStaffOrAdminAuth) navigate('/', { replace: true });
-  }, [isStaffOrAdminAuth, navigate]);
+    if (!isAllowedStaff) navigate('/', { replace: true });
+  }, [isAllowedStaff, navigate]);
 
   useEffect(() => {
-    if (!staffLoggedIn || isLocked) return;
+    if (!isAllowedStaff || isLocked) return;
     let timeoutId: NodeJS.Timeout;
     const resetIdleTimer = () => {
       clearTimeout(timeoutId);
@@ -282,7 +282,7 @@ export function Layout() {
     return results.slice(0, 4);
   }, [globalSearch, tables, reservations, promoCodes, watchlist]);
 
-  if (!isStaffOrAdminAuth) return null;
+  if (!isAllowedStaff) return null;
 
   const waitingCount = queue.filter((q: any) => q.status === 'waiting').length;
   const overtimeCount = tables.filter((t: any) => {
@@ -333,7 +333,7 @@ export function Layout() {
       
       {isLocked && <LockScreen onUnlock={handleUnlockTerminal} />}
         
-      <div ref={node => { if (node) node.inert = isLocked; }} aria-hidden={isLocked || undefined} className={`flex h-screen ${theme === 'light' ? 'theme-light bg-slate-50 text-slate-900' : 'bg-neutral-900 text-neutral-100'} overflow-hidden transition-all duration-300 ${isLocked ? 'pointer-events-none blur-md select-none opacity-50' : ''}`}>
+      <div aria-hidden={isLocked || undefined} className={`flex h-screen ${theme === 'light' ? 'theme-light bg-slate-50 text-slate-900' : 'bg-neutral-900 text-neutral-100'} overflow-hidden transition-all duration-300 ${isLocked ? 'pointer-events-none blur-md select-none opacity-50' : ''}`}>
         
         {/* Mobile Overlay */}
         {sidebarOpen && (
@@ -396,7 +396,7 @@ export function Layout() {
           </nav>
 
           {/* Switch to Admin */}
-          {staffProfile?.isAdmin && (
+          {(staffProfile?.isAdmin || staffProfile?.username?.toLowerCase() === 'superadmin') && (
             <div className="px-4 pb-4">
               <button
                 onClick={() => {

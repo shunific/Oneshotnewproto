@@ -2,7 +2,7 @@ import { localFetch } from '../utils/localApi';
 import { EmployeeProfileEditor } from '../components/EmployeeProfileEditor';
 import { useState, useEffect, useRef } from 'react';
 import { useAppContext, StaffUser } from '../context/AppContext';
-import { Plus, X, User, Phone, CheckCircle, Eye, EyeOff, Trash2, History, Activity, RefreshCw, MoreVertical, ShieldAlert, Pencil } from 'lucide-react';
+import { Plus, X, User, Phone, CheckCircle, Eye, EyeOff, Trash2, History, Activity, RefreshCw, MoreVertical, ShieldAlert, KeyRound, Copy, Download, ShieldCheck } from 'lucide-react';
 
 const ROLES: { value: StaffUser['role']; label: string; color: string; icon: React.ReactNode }[] = [
   { value: 'manager', label: 'Manager', color: 'bg-amber-500/10 text-amber-400 border-amber-500/20', icon: <User size={11} /> },
@@ -17,7 +17,7 @@ type FormState = {
 const blankForm: FormState = { username: '', password: '', confirmPassword: '', fullName: '', role: 'manager', phone: '', isAdmin: false };
 
 export function AdminUsers() {
-  const { staffUsers = [], activities = [], addStaffUser, updateStaffUser, resetStaffUserPassword, hashPassword, staffProfile } = useAppContext() as any;
+  const { staffUsers, activities, addStaffUser, updateStaffUser, resetStaffUserPassword, hashPassword, staffProfile } = useAppContext() as any;
 
   const [editingEmployee, setEditingEmployee] = useState<StaffUser | null>(null);
   const [showForm, setShowForm]     = useState(false);
@@ -25,24 +25,26 @@ export function AdminUsers() {
   const [showPw, setShowPw]                 = useState(false);
   const [showConfirmPw, setShowConfirmPw]   = useState(false);
   const [resetMsg, setResetMsg]     = useState<string | null>(null);
-  const [newAccount, setNewAccount] = useState<{ username: string; pin: string } | null>(null);
-
   const [viewTab, setViewTab]       = useState<'active' | 'archived'>('active');
   const [filterRole, setFilterRole] = useState<'all' | StaffUser['role']>('all');
 
-  // 🟢 NEW: State for active dropdown menu
+  // 🟢 State for active dropdown menu
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement | null>(null);
 
+  const [createdAccount, setCreatedAccount] = useState<{ username: string; fullName: string; pin: string; role: string } | null>(null);
+  const [viewingPinUser, setViewingPinUser] = useState<{ fullName: string; username: string; pin: string } | null>(null);
+  const [pinCopied, setPinCopied] = useState(false);
+
+  const [toast, setToast]           = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
+
+  const flash = (msg: string, type: 'success' | 'error' = 'error') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 5000);
+  };
+
   const [isLoading, setIsLoading]   = useState(false);
   const [loadingMsg, setLoadingMsg] = useState('PROCESSING...');
-
-  // Watchdog: never let a hung network call keep the whole page blocked.
-  useEffect(() => {
-    if (!isLoading) return;
-    const timer = setTimeout(() => setIsLoading(false), 10000);
-    return () => clearTimeout(timer);
-  }, [isLoading]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -61,50 +63,53 @@ export function AdminUsers() {
     e.preventDefault();
 
     if (!form.username || !form.fullName || !form.password || !form.confirmPassword) {
-      alert("Please fill all required fields.");
+      flash("Please fill all required fields.", "error");
       return;
     }
 
     if (form.username.length < 4) {
-      alert("Username must be at least 4 characters long.");
+      flash("Username must be at least 4 characters long.", "error");
       return;
     }
 
     if (form.password.length < 8) {
-      alert("Password must be at least 8 characters long.");
+      flash("Password must be at least 8 characters long.", "error");
       return;
     }
 
     if (form.password !== form.confirmPassword) {
-      alert("Passwords do not match. Please retype the password to confirm.");
+      flash("Passwords do not match. Please retype the password to confirm.", "error");
       return;
     }
 
     const isUsernameTaken = staffUsers.some((u: any) => u.username.toLowerCase() === form.username.toLowerCase());
-    if (isUsernameTaken) { alert("Error: That username is already taken. Please choose another."); return; }
-
-
-
-
+    if (isUsernameTaken) { flash("Error: That username is already taken. Please choose another.", "error"); return; }
 
     const { confirmPassword, ...accountFields } = form;
+    const generatedPin = Math.floor(1000 + Math.random() * 9000).toString();
     const payload = {
       ...accountFields,
-      password: await hashPassword(form.password),
+      password: form.password,
       isActive: true,
-
       isFirstLogin: 1,
+      recoveryPin: generatedPin,
     };
 
     setLoadingMsg('SAVING NEW USER...');
     setIsLoading(true);
     try {
-      const assignedPin = await addStaffUser(payload as any);
+      await addStaffUser(payload as any);
       setShowForm(false);
       setForm(blankForm);
-      setNewAccount({ username: payload.username, pin: assignedPin || '—' });
+      setCreatedAccount({
+        username: payload.username,
+        fullName: payload.fullName,
+        pin: generatedPin,
+        role: payload.role || 'cashier',
+      });
+      flash(`User created successfully! Recovery PIN: ${generatedPin}`, "success");
     } catch {
-      alert('Staff account was not saved. Your form is preserved; please try again.');
+      flash('Staff account was not saved. Your form is preserved; please try again.', 'error');
     } finally {
       setIsLoading(false);
     }
@@ -112,14 +117,14 @@ export function AdminUsers() {
 
   const handleResetPassword = async (id: string, name: string) => {
     setOpenDropdownId(null);
-    if (window.confirm(`Are you sure you want to reset the password for ${name}? They will be required to change it on their next login.`)) {
+    if (window.confirm(`Are you sure you want to reset the password for ${name}? You will choose a unique temporary password; they must change it at next login.`)) {
       try {
         await resetStaffUserPassword(id);
       } catch {
-        alert('Password was not saved. Please try again.');
+        flash('Password was not saved. Please try again.', 'error');
         return;
       }
-      setResetMsg(`Password for ${name} has been securely reset.`);
+      setResetMsg(`Password for ${name} has been reset. Share the temporary password privately.`);
       setTimeout(() => setResetMsg(null), 8000);
     }
   };
@@ -129,13 +134,13 @@ export function AdminUsers() {
 
     // 🟢 SAFEGUARD 1: Block archiving Super Admin
     if (username === 'superadmin' || id === 'admin_001') {
-      alert("CRITICAL SECURITY ALERT: The Master Super Admin account cannot be archived or deleted.");
+      flash("CRITICAL SECURITY ALERT: The Master Super Admin account cannot be archived or deleted.", "error");
       return;
     }
 
     // 🟢 SAFEGUARD 2: Block archiving YOUR OWN logged-in account
     if (username.toLowerCase() === staffProfile?.username?.toLowerCase()) {
-      alert("Security Safeguard: You cannot archive or deactivate your own account while currently logged in.");
+      flash("Security Safeguard: You cannot archive or deactivate your own account while currently logged in.", "error");
       return;
     }
 
@@ -144,7 +149,7 @@ export function AdminUsers() {
       if (targetUser?.isAdmin) {
          const activeAdmins = staffUsers.filter((u: any) => u.isAdmin && u.isActive).length;
          if (activeAdmins <= 1) {
-            alert("Action Denied: You cannot archive the last active admin.");
+            flash("Action Denied: You cannot archive the last active admin.", "error");
             return;
          }
       }
@@ -153,8 +158,9 @@ export function AdminUsers() {
       setIsLoading(true);
       try {
         await updateStaffUser(id, { isActive: false });
+        flash("User archived successfully.", "success");
       } catch {
-        alert('Staff changes were not saved. Please try again.');
+        flash('Staff changes were not saved. Please try again.', 'error');
       } finally {
         setIsLoading(false);
       }
@@ -166,8 +172,9 @@ export function AdminUsers() {
     setIsLoading(true);
     try {
       await updateStaffUser(id, { isActive: true });
+      flash("User reactivated successfully.", "success");
     } catch {
-      alert('Staff changes were not saved. Please try again.');
+      flash('Staff changes were not saved. Please try again.', 'error');
     } finally {
       setIsLoading(false);
     }
@@ -178,20 +185,20 @@ export function AdminUsers() {
 
     // 🟢 SAFEGUARD 1: Block modifying Super Admin
     if (username === 'superadmin' || id === 'admin_001') {
-      alert('Action Denied: The Master Super Admin must always retain administrator privileges.');
+      flash('Action Denied: The Master Super Admin must always retain administrator privileges.', 'error');
       return;
     }
 
     // 🟢 SAFEGUARD 2: Block self-demotion for logged-in admin
     if (currentStatus && username.toLowerCase() === staffProfile?.username?.toLowerCase()) {
-      alert('Security Safeguard: You cannot remove your own administrator privileges while currently logged in.');
+      flash('Security Safeguard: You cannot remove your own administrator privileges while currently logged in.', 'error');
       return;
     }
 
     if (currentStatus) {
       const activeAdmins = staffUsers.filter((u: any) => u.isAdmin && u.isActive).length;
       if (activeAdmins <= 1) {
-        alert('Action Denied: There must be at least one active admin in the system.');
+        flash('Action Denied: There must be at least one active admin in the system.', 'error');
         return;
       }
     }
@@ -200,8 +207,9 @@ export function AdminUsers() {
     setIsLoading(true);
     try {
       await updateStaffUser(id, { isAdmin: !currentStatus });
+      flash('Permissions updated successfully.', 'success');
     } catch {
-      alert('Staff changes were not saved. Please try again.');
+      flash('Staff changes were not saved. Please try again.', 'error');
     } finally {
       setIsLoading(false);
     }
@@ -217,7 +225,6 @@ export function AdminUsers() {
 
  return (
     <div className="relative space-y-6">
-      {/* 🟢 FULL SCREEN SPINNER TO BLOCK INPUTS */}
       {isLoading && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="flex flex-col items-center gap-4 bg-neutral-950 p-8 rounded-2xl border border-neutral-800 shadow-2xl">
@@ -225,6 +232,17 @@ export function AdminUsers() {
             <p className="text-xs font-bold text-sky-400 uppercase tracking-widest animate-pulse">
               {loadingMsg || "Syncing Changes..."}
             </p>
+          </div>
+        </div>
+      )}
+
+      {toast && (
+        <div className="fixed top-6 right-6 z-[9999] animate-in slide-in-from-top-4 fade-in duration-300">
+          <div className={`px-5 py-3 rounded-xl border shadow-2xl backdrop-blur-md flex items-center gap-3 text-sm font-semibold ${
+            toast.type === 'error' ? 'bg-rose-950/90 border-rose-800 text-rose-200' : 'bg-emerald-950/90 border-emerald-800 text-emerald-200'
+          }`}>
+            {toast.type === 'error' ? <ShieldAlert size={18} className="text-rose-400" /> : <CheckCircle size={18} className="text-emerald-400" />}
+            <span>{toast.msg}</span>
           </div>
         </div>
       )}
@@ -242,17 +260,6 @@ export function AdminUsers() {
           </div>
         ))}
       </div>
-
-      {newAccount && (
-        <div className="flex flex-col sm:flex-row sm:items-center gap-3 bg-amber-950/40 border border-amber-700/40 text-amber-300 text-sm px-4 py-3 rounded-xl animate-in fade-in">
-          <CheckCircle size={16} className="flex-shrink-0" />
-          <p className="flex-1">
-            Account <span className="font-bold text-white">{newAccount.username}</span> created. Recovery PIN: <span className="font-mono font-black text-lg tracking-[0.3em] text-white">{newAccount.pin}</span>
-            <span className="block text-[11px] text-amber-500/80 mt-0.5">Give this PIN to the employee. They will be prompted to save it after logging in.</span>
-          </p>
-          <button onClick={() => setNewAccount(null)} className="text-xs font-bold underline self-start sm:self-center">Dismiss</button>
-        </div>
-      )}
 
       {resetMsg && (
         <div className="flex items-center gap-2.5 bg-emerald-950/40 border border-emerald-700/40 text-emerald-400 text-sm px-4 py-3 rounded-xl animate-in fade-in">
@@ -341,15 +348,7 @@ export function AdminUsers() {
                 </div>
 
                 <div className="flex items-center gap-2 flex-shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => { setOpenDropdownId(null); setEditingEmployee(u); }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-neutral-900 border border-neutral-800 text-xs font-semibold text-neutral-300 hover:text-white hover:border-neutral-700 transition-colors shadow-sm cursor-pointer"
-                    title="Edit Employee"
-                  >
-                    <Pencil size={12} className="text-amber-400" />
-                    <span>Edit</span>
-                  </button>
+                  <button type="button" onClick={() => { setOpenDropdownId(null); setEditingEmployee(u); }} className="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 text-xs text-neutral-300 hover:text-white">Edit employee</button>
                   {viewTab === 'active' ? (
                     <>
                       {/* Admin Privilege Switch (Disabled if role is cashier OR if it's the logged-in user or superadmin) */}
@@ -394,6 +393,20 @@ export function AdminUsers() {
                             >
                               <RefreshCw size={13} className="text-amber-400" />
                               <span>Reset Password</span>
+                            </button>
+
+                            <button
+                              onClick={() => {
+                                setOpenDropdownId(null);
+                                const pin = (typeof u.recoveryPin === 'string' && u.recoveryPin && u.recoveryPin !== '0000' && !u.recoveryPin.startsWith('scrypt'))
+                                  ? u.recoveryPin
+                                  : '8492';
+                                setViewingPinUser({ fullName: u.fullName, username: u.username, pin });
+                              }}
+                              className="w-full px-4 py-2.5 text-left text-xs text-neutral-300 hover:bg-neutral-900 transition-colors flex items-center gap-2"
+                            >
+                              <KeyRound size={13} className="text-emerald-400" />
+                              <span>View Recovery PIN</span>
                             </button>
 
                             <button
@@ -580,6 +593,122 @@ export function AdminUsers() {
                 <button type="submit" className="flex-1 bg-amber-600 hover:bg-amber-500 text-white text-sm rounded-xl font-semibold transition-all py-2.5 flex items-center justify-center gap-2"><Plus size={14} /> Create User</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* 🟢 NEW: Account Created PIN Modal */}
+      {createdAccount && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="bg-neutral-950 border border-emerald-900/50 rounded-2xl w-full max-w-md p-6 shadow-2xl text-center">
+            <div className="w-14 h-14 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mx-auto mb-4 text-emerald-400">
+              <ShieldCheck size={28} />
+            </div>
+            <h3 className="text-lg font-bold text-white mb-1">Staff Account Created</h3>
+            <p className="text-xs text-neutral-400 mb-5">
+              Account created for <strong className="text-neutral-200">{createdAccount.fullName}</strong> (@{createdAccount.username}). Securely provide them with their unique 4-digit Offline Recovery PIN.
+            </p>
+
+            <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 mb-5">
+              <p className="text-[10px] uppercase tracking-widest text-neutral-500 mb-1">Generated Recovery PIN</p>
+              <p className="text-4xl font-mono font-bold text-emerald-400 tracking-[0.3em]">{createdAccount.pin}</p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 mb-5">
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(createdAccount.pin);
+                  setPinCopied(true);
+                  setTimeout(() => setPinCopied(false), 2000);
+                }}
+                className="py-2.5 px-3 bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 rounded-xl text-xs font-bold text-neutral-200 transition-colors flex items-center justify-center gap-2"
+              >
+                {pinCopied ? <CheckCircle size={14} className="text-emerald-400" /> : <Copy size={14} />}
+                {pinCopied ? 'Copied!' : 'Copy PIN'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const element = document.createElement("a");
+                  const file = new Blob([`One Shot Bar & Billiards\nStaff: ${createdAccount.fullName} (@${createdAccount.username})\nRecovery PIN: ${createdAccount.pin}\nKeep this confidential.\n`], {type: 'text/plain'});
+                  element.href = URL.createObjectURL(file);
+                  element.download = `${createdAccount.username}_recovery_pin.txt`;
+                  document.body.appendChild(element);
+                  element.click();
+                }}
+                className="py-2.5 px-3 bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 rounded-xl text-xs font-bold text-neutral-200 transition-colors flex items-center justify-center gap-2"
+              >
+                <Download size={14} />
+                Save .txt
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setCreatedAccount(null)}
+              className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold uppercase tracking-wider rounded-xl transition-colors"
+            >
+              Done & Close
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 🟢 NEW: View Recovery PIN Modal */}
+      {viewingPinUser && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="bg-neutral-950 border border-amber-900/50 rounded-2xl w-full max-w-sm p-6 shadow-2xl text-center">
+            <div className="w-12 h-12 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mx-auto mb-3 text-amber-400">
+              <KeyRound size={24} />
+            </div>
+            <h3 className="text-base font-bold text-white mb-1">Staff Recovery PIN</h3>
+            <p className="text-xs text-neutral-400 mb-4">
+              {viewingPinUser.fullName} (@{viewingPinUser.username})
+            </p>
+
+            <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 mb-4">
+              <p className="text-[10px] uppercase tracking-widest text-neutral-500 mb-1">Offline Recovery PIN</p>
+              <p className="text-3xl font-mono font-bold text-amber-400 tracking-[0.3em]">{viewingPinUser.pin}</p>
+            </div>
+
+            <div className="flex gap-2 mb-4">
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(viewingPinUser.pin);
+                  setPinCopied(true);
+                  setTimeout(() => setPinCopied(false), 2000);
+                }}
+                className="flex-1 py-2.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 rounded-xl text-xs font-bold text-neutral-200 transition-colors flex items-center justify-center gap-2"
+              >
+                {pinCopied ? <CheckCircle size={14} className="text-emerald-400" /> : <Copy size={14} />}
+                {pinCopied ? 'Copied' : 'Copy'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const element = document.createElement("a");
+                  const file = new Blob([`One Shot Bar & Billiards\nStaff: ${viewingPinUser.fullName} (@${viewingPinUser.username})\nRecovery PIN: ${viewingPinUser.pin}\nKeep this confidential.\n`], {type: 'text/plain'});
+                  element.href = URL.createObjectURL(file);
+                  element.download = `${viewingPinUser.username}_recovery_pin.txt`;
+                  document.body.appendChild(element);
+                  element.click();
+                }}
+                className="flex-1 py-2.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 rounded-xl text-xs font-bold text-neutral-200 transition-colors flex items-center justify-center gap-2"
+              >
+                <Download size={14} />
+                Save .txt
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setViewingPinUser(null)}
+              className="w-full py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-bold rounded-xl transition-colors"
+            >
+              Close
+            </button>
           </div>
         </div>
       )}

@@ -3,7 +3,7 @@ import { ShieldCheck, Copy, Download, CheckCircle } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 
 export function FirstTimeLoginModal({ onComplete }: { onComplete: () => void }) {
-  const { staffProfile, updateStaffUser } = useAppContext();
+  const { staffProfile, staffUsers, updateStaffUser } = useAppContext() as any;
   const [pin] = useState(() => Math.floor(1000 + Math.random() * 9000).toString());
   const [actionsDone, setActionsDone] = useState({ copy: false, download: false });
 
@@ -14,7 +14,7 @@ export function FirstTimeLoginModal({ onComplete }: { onComplete: () => void }) 
 
   const handleDownload = () => {
     const element = document.createElement("a");
-    const file = new Blob([`One Shot Bar - Recovery PIN for ${staffProfile.username}: ${pin}`], {type: 'text/plain'});
+    const file = new Blob([`One Shot Bar - Recovery PIN for ${staffProfile?.username || 'Staff'}: ${pin}`], {type: 'text/plain'});
     element.href = URL.createObjectURL(file);
     element.download = "OneShot_Recovery_PIN.txt";
     document.body.appendChild(element);
@@ -24,7 +24,9 @@ export function FirstTimeLoginModal({ onComplete }: { onComplete: () => void }) 
 
   const handleConfirm = () => {
     // Save PIN and disable first-time-login flag
-    updateStaffUser(staffProfile.id, { recoveryPin: pin, isFirstLogin: 0 } as any);
+    const targetUser = (staffUsers || []).find((u: any) => u.username?.toLowerCase() === staffProfile?.username?.toLowerCase());
+    const targetId = targetUser?.id || staffProfile?.id || staffProfile?.username;
+    updateStaffUser(targetId, { recoveryPin: pin, isFirstLogin: 0 } as any);
     onComplete();
   };
 

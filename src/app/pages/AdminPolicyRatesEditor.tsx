@@ -95,7 +95,6 @@ export default function AdminPolicyRatesEditor() {
             setPolicyBaseline(saved.settings);
             setPolicyLoadError('');
             setPolicyWarning(false);
-            setIsLoading(false);
             return;
           }
         }
@@ -367,7 +366,7 @@ export default function AdminPolicyRatesEditor() {
       {/* 🟢 TOP-RIGHT FLOATING TOAST WITH 5S TIMER & FADE OUT */}
       {toast && (
         <div
-          className="fixed top-6 right-6 z-[9999] pointer-events-none animate-in slide-in-from-top-4 fade-in duration-300"
+          className="fixed top-6 right-6 z-[9999] animate-in slide-in-from-top-4 fade-in duration-300"
           style={{ animation: 'toast-fade-out 5s forwards' }}
         >
           <div className={`relative overflow-hidden flex items-start gap-3 px-5 py-4 rounded-xl border shadow-2xl backdrop-blur-md min-w-[320px] max-w-md ${
@@ -381,7 +380,7 @@ export default function AdminPolicyRatesEditor() {
             <span className="text-sm font-semibold leading-snug whitespace-pre-wrap pr-4">{toast.msg}</span>
             <button
               onClick={() => { setToast(null); if (toastTimeout.current) clearTimeout(toastTimeout.current); }}
-              className="pointer-events-auto absolute top-4 right-4 text-neutral-500 hover:text-white transition-colors"
+              className="absolute top-4 right-4 text-neutral-500 hover:text-white transition-colors"
             >
               <X size={14} />
             </button>

@@ -35,16 +35,10 @@ export function TableCard({ table, held=false, availabilityVerified=true, onAssi
   const getTimerInfo = () => {
     if (!table.session) return null;
     const currentTime=table.status==='occupied'?new Date():now;
-
-    // Guard against missing/invalid stored timing so the card never renders "NaN:NaN".
-    const startTime = new Date(table.session.startTime);
-    if (!Number.isFinite(startTime.getTime())) {
-      return { isOvertime: false, percentLeft: 0, display: '--:--', isOpenTime: false };
-    }
     
     // 🟢 NEW: Intercept Open Time Logic
     if (table.session.isOpenTime || table.session.durationMinutes === null) {
-      const elapsedSecs = Math.max(0, differenceInSeconds(stop?.reached ? new Date(stop.latestEndTime) : currentTime, startTime));
+      const elapsedSecs = Math.max(0, differenceInSeconds(stop?.reached ? new Date(stop.latestEndTime) : currentTime, new Date(table.session.startTime)));
       const hrs = String(Math.floor(elapsedSecs / 3600)).padStart(2, '0');
       const mm = String(Math.floor((elapsedSecs % 3600) / 60)).padStart(2, '0');
       const ss = String(elapsedSecs % 60).padStart(2, '0');
@@ -58,28 +52,24 @@ export function TableCard({ table, held=false, availabilityVerified=true, onAssi
     }
 
     // Standard Countdown Logic
-    const durationMins = Number(table.session.durationMinutes);
-    if (!Number.isFinite(durationMins) || durationMins <= 0) {
-      return { isOvertime: false, percentLeft: 0, display: '--:--', isOpenTime: false };
-    }
-    const endTime = addMinutes(startTime, durationMins);
+    const endTime = addMinutes(new Date(table.session.startTime), table.session.durationMinutes);
     const secsLeft = differenceInSeconds(endTime, currentTime);
-    // Match session-billing.mjs: 2-minute courtesy window before overtime.
-    const OVERTIME_GRACE_SECS = 2 * 60;
-    const isOvertime = secsLeft < -OVERTIME_GRACE_SECS;
+    const isOvertime = secsLeft < 0;
     const absSecs = Math.abs(secsLeft);
+    const isGracePeriod = isOvertime && absSecs <= 120;
+    const chargedSecs = isOvertime ? Math.max(0, absSecs - 120) : absSecs;
     
-    const hrs = Math.floor(absSecs / 3600);
-    const mm = String(Math.floor((absSecs % 3600) / 60)).padStart(2, '0');
-    const ss = String(absSecs % 60).padStart(2, '0');
+    const hrs = Math.floor((isGracePeriod ? absSecs : chargedSecs) / 3600);
+    const mm = String(Math.floor(((isGracePeriod ? absSecs : chargedSecs) % 3600) / 60)).padStart(2, '0');
+    const ss = String((isGracePeriod ? absSecs : chargedSecs) % 60).padStart(2, '0');
     
     const display = hrs > 0 ? `${hrs}:${mm}:${ss}` : `${mm}:${ss}`;
 
     // Calculate progress bar percentage
-    const totalSecs = durationMins * 60;
+    const totalSecs = table.session.durationMinutes * 60;
     const percentLeft = Math.max(0, Math.min(100, (secsLeft / totalSecs) * 100));
 
-    return { display, isOvertime, percentLeft, isOpenTime: false };
+    return { display, isOvertime, isGracePeriod, percentLeft, isOpenTime: false };
   };
 
   const timer = getTimerInfo();
@@ -101,16 +91,17 @@ export function TableCard({ table, held=false, availabilityVerified=true, onAssi
       onClick={handleCardClick}
       className={`relative flex flex-col bg-neutral-900 border border-neutral-800 hover:border-neutral-600 rounded-2xl overflow-hidden transition-all duration-200 shadow-sm
       ${table.status !== 'maintenance'&&!held ? 'cursor-pointer hover:-translate-y-1 hover:shadow-xl hover:shadow-black/50' : 'opacity-80'}
-      ${timer?.isOvertime ? '!border-rose-600 shadow-[0_0_15px_rgba(225,29,72,0.15)] hover:!border-rose-400' : ''}`}
+      ${timer?.isOvertime && !timer?.isGracePeriod ? '!border-rose-600 shadow-[0_0_15px_rgba(225,29,72,0.15)] hover:!border-rose-400' : timer?.isGracePeriod ? '!border-amber-500/80 shadow-[0_0_12px_rgba(245,158,11,0.15)]' : ''}`}
     >
       
       {/* Overtime Pulse Background */}
-      {timer?.isOvertime && <div className="absolute inset-0 bg-rose-500/5 animate-pulse pointer-events-none" />}
+      {timer?.isOvertime && !timer?.isGracePeriod && <div className="absolute inset-0 bg-rose-500/5 animate-pulse pointer-events-none" />}
+      {timer?.isGracePeriod && <div className="absolute inset-0 bg-amber-500/5 animate-pulse pointer-events-none" />}
 
       {/* Header */}
       <div className="px-5 py-4 border-b border-neutral-800/60 flex items-start justify-between bg-neutral-950/30">
         <div className="flex min-w-0 items-start gap-3">
-          <div aria-hidden="true" className="w-10 h-10 shrink-0 rounded-xl bg-neutral-800 border border-neutral-700 flex items-center justify-center font-black text-lg text-white">
+          <div aria-hidden="true" className="w-10 h-10 shrink-0 rounded-xl bg-neutral-800 border border-neutral-700 flex items-center justify-center font-black text-lg text-neutral-900 dark:text-white">
             {table.name.match(/\d+/)?.[0].slice(0,3)||table.name.trim().split(/\s+/).map(word=>word[0]).slice(0,2).join('').toUpperCase()}
           </div>
           <div className="min-w-0">
@@ -121,9 +112,9 @@ export function TableCard({ table, held=false, availabilityVerified=true, onAssi
             {table.status === 'reserved' && <span className="text-sm font-bold text-blue-400 flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-blue-500" /> Reserved</span>}
             {table.status === 'maintenance' && <span className="text-sm font-bold text-orange-400 flex items-center gap-1.5"><Wrench size={12}/> Maintenance</span>}
             {table.status === 'occupied' && (
-              <span className={`text-sm font-bold flex items-center gap-1.5 ${timer?.isOvertime ? 'text-rose-400' : timer?.isOpenTime ? 'text-blue-400' : 'text-amber-400'}`}>
-                <span className={`w-2 h-2 rounded-full ${timer?.isOvertime ? 'bg-rose-500 animate-pulse' : timer?.isOpenTime ? 'bg-blue-500' : 'bg-amber-500'}`} />
-                {stop?.reached ? 'Play stopped' : timer?.isOvertime ? 'Overtime' : timer?.isOpenTime ? 'Open Time' : 'In Use'}
+              <span className={`text-sm font-bold flex items-center gap-1.5 ${timer?.isGracePeriod ? 'text-amber-400' : timer?.isOvertime ? 'text-rose-400' : timer?.isOpenTime ? 'text-blue-400' : 'text-amber-400'}`}>
+                <span className={`w-2 h-2 rounded-full ${timer?.isGracePeriod ? 'bg-amber-400 animate-ping' : timer?.isOvertime ? 'bg-rose-500 animate-pulse' : timer?.isOpenTime ? 'bg-blue-500' : 'bg-amber-500'}`} />
+                {stop?.reached ? 'Play stopped' : timer?.isGracePeriod ? 'Grace (2m)' : timer?.isOvertime ? 'Overtime' : timer?.isOpenTime ? 'Open Time' : 'In Use'}
               </span>
             )}
           </div>
@@ -184,11 +175,12 @@ export function TableCard({ table, held=false, availabilityVerified=true, onAssi
               
               <div className="flex items-center justify-center gap-2 mt-1">
                 {timer.isOpenTime && <InfinityIcon size={24} className="text-blue-400/50" />}
-                <div className={`text-4xl font-black tabular-nums tracking-tight ${timer.isOvertime ? 'text-rose-400' : timer.isOpenTime ? 'text-blue-400' : timer.percentLeft < 15 ? 'text-amber-400' : 'text-white'}`}>
+                <div className={`text-4xl font-black tabular-nums tracking-tight ${timer.isGracePeriod ? 'text-amber-400' : timer.isOvertime ? 'text-rose-400' : timer.isOpenTime ? 'text-blue-400' : timer.percentLeft < 15 ? 'text-amber-400' : 'text-neutral-900 dark:text-white'}`}>
                   {timer.isOvertime && '+'}{timer.display}
                 </div>
               </div>
               
+              {timer.isGracePeriod && <p className="mt-1.5 text-xs text-amber-400 font-semibold animate-pulse">2-min talk grace · No overtime charge</p>}
               {stop && <p className="mt-2 text-xs text-amber-300">{stop.reached ? 'Play limit reached. Checkout remains available; F&B orders can still be added.' : `Play stops at ${new Date(stop.latestEndTime).toLocaleString('en-PH',{timeZone:'Asia/Manila'})} (Manila).`}</p>}
               {timer.isOpenTime && !stop && <p className="mt-2 text-xs text-neutral-500">Legacy open time: no saved stop limit.</p>}
               {/* Progress Bar */}
