@@ -314,10 +314,7 @@ export function AdminEvents() {
     }
 
     if (eventForm.type === 'Tournament') {
-      if (!eventForm.registrationLink || !eventForm.bracketLink) {
-        flash("Registration and Bracket links are strictly mandatory for Tournaments.", "error");
-        return;
-      }
+      // Registration form and bracket links are both optional.
     }
 
     if (eventForm.type === 'Tournament' || eventForm.type === 'League') {
@@ -1605,11 +1602,11 @@ export function AdminEvents() {
                     <div className="p-4 rounded-xl border border-emerald-900/30 bg-emerald-950/10 space-y-3">
                       <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest">Tournament Links</p>
                       <div>
-                        <label className="text-[10px] font-semibold text-neutral-400 block mb-1.5 flex items-center gap-1.5"><Link size={10} /> Registration / Form Link <span className="text-rose-500">*</span></label>
+                        <label className="text-[10px] font-semibold text-neutral-400 block mb-1.5 flex items-center gap-1.5"><Link size={10} /> Registration / Form Link <span className="text-neutral-500 font-normal">(optional)</span></label>
                         <Input value={eventForm.registrationLink} onChange={e => setEventForm({...eventForm, registrationLink: e.target.value})} placeholder="https://forms.google.com/..." className="bg-neutral-950 border-neutral-800 h-8 text-xs" />
                       </div>
                       <div>
-                        <label className="text-[10px] font-semibold text-neutral-400 block mb-1.5 flex items-center gap-1.5"><Network size={10} /> Live Bracket Link <span className="text-rose-500">*</span></label>
+                        <label className="text-[10px] font-semibold text-neutral-400 block mb-1.5 flex items-center gap-1.5"><Network size={10} /> Live Bracket Link <span className="text-neutral-500 font-normal">(optional)</span></label>
                         <Input value={eventForm.bracketLink} onChange={e => setEventForm({...eventForm, bracketLink: e.target.value})} placeholder="https://challonge.com/..." className="bg-neutral-950 border-neutral-800 h-8 text-xs" />
                       </div>
                     </div>
