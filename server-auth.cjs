@@ -27,14 +27,40 @@ async function verifySecret(value, stored, legacyDigest = false) {
   return equal((await scrypt(legacyDigest ? digest(value) : value, parts[1], 64)).toString('hex'), parts[2]);
 }
 
+async function verifyStaffPassword(password, stored) {
+  if (typeof stored !== 'string') return false;
+  if (stored.startsWith('scrypt$')) {
+    return await verifySecret(password, stored, true) || await verifySecret(password, stored);
+  }
+  return verifySecret(password, stored, /^[a-f0-9]{64}$/i.test(stored));
+}
+
 function registerAuthRoutes(app, db, options = {}) {
   const sessions = new Map();
   const now = options.now || Date.now;
   const sessionLifetime = options.sessionLifetime || 8 * 60 * 60 * 1000;
   // Persist failures so reopening the desktop application cannot reset recovery guesses.
   const ready = run(db, 'CREATE TABLE IF NOT EXISTS auth_attempts (key TEXT PRIMARY KEY, attempts INTEGER NOT NULL, expires INTEGER NOT NULL)');
+  const changeInterval = options.credentialChangeInterval || 0;
+  const hasRecoveryPin = user => publicStaff(user)?.recoveryPinSet ||
+    (options.allowLegacyPin && typeof user?.recoveryPin === 'string' && user.recoveryPin !== '0000' && validPin(user.recoveryPin));
+  const readyForCredentials = async () => {
+    await ready;
+    await options.staffSchemaReady;
+  };
+  const changeAllowed = (req, res, password, pin) => {
+    const nextChange = Math.max(
+      password ? (req.staff.settingsPasswordChangedAt || 0) + changeInterval : 0,
+      pin ? (req.staff.settingsPinChangedAt || 0) + changeInterval : 0,
+    );
+    if (!changeInterval || nextChange <= now()) return true;
+    res.setHeader('Retry-After', Math.ceil((nextChange - now()) / 1000));
+    res.status(429).json({ error: `You can change each credential once every 24 hours. Try again after ${new Date(nextChange).toLocaleString('en-PH', { timeZone: 'Asia/Manila' })} (Manila time).` });
+    return false;
+  };
+
   const wrap = handler => async (req, res, next) => {
-    try { await ready; await handler(req, res, next); }
+    try { await readyForCredentials(); await handler(req, res, next); }
     catch (error) {
       if (!res.headersSent) res.status(error.code === 'SQLITE_CONSTRAINT' ? 409 : 503).json({ error: error.code === 'SQLITE_CONSTRAINT' ? 'Account details conflict with an existing record.' : 'Account service unavailable. Retry shortly.' });
     }
@@ -109,14 +135,12 @@ function registerAuthRoutes(app, db, options = {}) {
       if (!await throttle(req, res, 'login', name)) return;
     }
     const user = await findUser(name);
-    const matches = await verifySecret(password, user?.password || '0'.repeat(64), true) ||
-                    await verifySecret(password, user?.password || '0'.repeat(64), false) ||
-                    (user && (user.password === password || user.password === digest(password)));
+    const matches = await verifyStaffPassword(password, user?.password || '0'.repeat(64));
     if (!user || !bool(user.isActive) || !matches) return res.status(401).json({ error: 'Invalid username or password.' });
     if (isSuperAdmin || user.id === 'admin_001') {
       user.isFirstLogin = 0;
       user.isAdmin = 1;
-    } else if (!publicStaff(user).recoveryPinSet) {
+    } else if (!hasRecoveryPin(user)) {
       await run(db, 'UPDATE staff SET isFirstLogin = 1 WHERE id = ?', [user.id]);
       user.isFirstLogin = 1;
     }
@@ -213,16 +237,27 @@ function registerAuthRoutes(app, db, options = {}) {
     establish(res, user);
     res.json(result(user));
   }));
+  const validSettingsPin = value => changeInterval ? typeof value === 'string' && /^\d{4}$/.test(value) : validPin(value);
+  const pinLength = changeInterval ? '4 digits' : '4–12 digits';
   app.post('/api/auth/change-password', requireSession, wrap(async (req, res) => {
     if (req.staff.isFirstLogin) return res.status(403).json({ error: 'Complete first-login setup and recovery PIN backup before continuing.', code: 'PASSWORD_CHANGE_REQUIRED' });
     const { currentPassword, newPassword, recoveryPin } = req.body || {};
-    if (!validPassword(newPassword) || (recoveryPin !== undefined && !validPin(recoveryPin))) return res.status(400).json({ error: 'Use a password of 8–256 characters with letters and numbers, and a 4–12 digit recovery PIN.' });
+    if (!validPassword(newPassword) || (recoveryPin !== undefined && !validSettingsPin(recoveryPin))) return res.status(400).json({ error: `Use a password of 8–256 characters with letters and numbers, and a recovery PIN of ${pinLength}.` });
     if (!await throttle(req, res, 'change', req.staff.username)) return;
     if (!await verifySecret(currentPassword, req.staff.password, true)) return res.status(401).json({ error: 'Current password is incorrect.' });
     if (currentPassword === newPassword) return res.status(400).json({ error: 'Choose a different password.' });
+    if (!changeAllowed(req, res, true, recoveryPin !== undefined)) return;
     const password = await hashSecret(digest(newPassword));
     const pin = recoveryPin === undefined ? req.staff.recoveryPin : await hashSecret(recoveryPin);
-    const changed = await run(db, 'UPDATE staff SET password = ?, recoveryPin = ?, isFirstLogin = 0 WHERE id = ? AND password = ?', [password, pin, req.staff.id, req.staff.password]);
+    const stamp = now();
+    const changed = changeInterval
+      ? await run(db, `UPDATE staff SET password = ?, recoveryPin = CASE WHEN ? THEN ? ELSE recoveryPin END,
+          settingsPasswordChangedAt = ?, settingsPinChangedAt = CASE WHEN ? THEN ? ELSE settingsPinChangedAt END
+          WHERE id = ? AND password = ? AND isActive = 1 AND coalesce(settingsPasswordChangedAt, 0) <= ?
+          AND (? = 0 OR coalesce(settingsPinChangedAt, 0) <= ?)`,
+        [password, Number(recoveryPin !== undefined), pin, stamp, Number(recoveryPin !== undefined), stamp,
+          req.staff.id, req.staff.password, stamp - changeInterval, Number(recoveryPin !== undefined), stamp - changeInterval])
+      : await run(db, 'UPDATE staff SET password = ?, recoveryPin = ?, isFirstLogin = 0 WHERE id = ? AND password = ?', [password, pin, req.staff.id, req.staff.password]);
     if (changed.changes !== 1) return res.status(409).json({ error: 'Account changed. Sign in again.' });
     invalidate(req.staff.id);
     const user = { ...req.staff, password, recoveryPin: pin, isFirstLogin: 0 };
@@ -232,10 +267,18 @@ function registerAuthRoutes(app, db, options = {}) {
   }));
   app.post('/api/auth/change-pin', requireAuth, wrap(async (req, res) => {
     const { currentPassword, recoveryPin } = req.body || {};
-    if (!validPin(recoveryPin)) return res.status(400).json({ error: 'Enter a 4–12 digit recovery PIN.' });
+    if (!validSettingsPin(recoveryPin)) return res.status(400).json({ error: `Enter a recovery PIN of ${pinLength}.` });
     if (!await throttle(req, res, 'change', req.staff.username)) return;
     if (!await verifySecret(currentPassword, req.staff.password, true)) return res.status(401).json({ error: 'Current password is incorrect.' });
-    await run(db, 'UPDATE staff SET recoveryPin = ? WHERE id = ?', [await hashSecret(recoveryPin), req.staff.id]);
+    if (!changeAllowed(req, res, false, true)) return;
+    const pin = await hashSecret(recoveryPin);
+    const stamp = now();
+    const changed = changeInterval
+      ? await run(db, `UPDATE staff SET recoveryPin = ?, settingsPinChangedAt = ?
+          WHERE id = ? AND password = ? AND isActive = 1 AND coalesce(settingsPinChangedAt, 0) <= ?`,
+        [pin, stamp, req.staff.id, req.staff.password, stamp - changeInterval])
+      : await run(db, 'UPDATE staff SET recoveryPin = ? WHERE id = ?', [pin, req.staff.id]);
+    if (changed.changes !== 1) return res.status(409).json({ error: 'Account changed or the PIN was already updated. Reload settings.' });
     await clearAttempts('change', req.staff.username);
     res.json({ success: true });
   }));
@@ -246,7 +289,7 @@ function registerAuthRoutes(app, db, options = {}) {
     if (!await throttle(req, res, 'recover', name)) return;
     const user = await findUser(name);
     const matches = await verifySecret(recoveryPin, user?.recoveryPin || 'invalid');
-    if (!user || !bool(user.isActive) || !publicStaff(user).recoveryPinSet || !matches) return res.status(401).json({ error: 'Recovery details are incorrect.' });
+    if (!user || !bool(user.isActive) || !hasRecoveryPin(user) || !matches) return res.status(401).json({ error: 'Recovery details are incorrect.' });
     const changed = await run(db, 'UPDATE staff SET password = ?, recoveryPin = ?, isFirstLogin = 0 WHERE id = ? AND password = ? AND recoveryPin = ?', [await hashSecret(digest(newPassword)), await hashSecret(recoveryPin), user.id, user.password, user.recoveryPin]);
     if (changed.changes !== 1) return res.status(409).json({ error: 'Account changed. Retry recovery.' });
     // Recovery may target a different account than the browser's current session.
@@ -326,7 +369,7 @@ function registerAuthRoutes(app, db, options = {}) {
     if (!await throttle(req, res, 'verify-order-void', username.trim().toLowerCase())) return;
     const user = await findUser(username.trim());
     if (!user || !bool(user.isActive) || !bool(user.isAdmin) ||
-        !(await verifySecret(password, user.password, true) || await verifySecret(password, user.password))) {
+        !await verifyStaffPassword(password, user.password)) {
       return res.status(403).json({ error: 'Administrator approval failed.' });
     }
     await clearAttempts('verify-order-void', username.trim().toLowerCase());

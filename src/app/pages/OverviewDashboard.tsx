@@ -299,7 +299,7 @@ export function OverviewDashboard() {
             }`}
           >
             <RefreshCw size={14} className={isSyncing ? 'animate-spin' : ''} />
-            <span>{isSyncing ? 'Syncing to Cloud...' : 'Run Cloud Backup'}</span>
+            <span>{isSyncing ? 'Syncing to Cloud...' : 'Save current data'}</span>
           </button>
 
           {staffProfile?.isAdmin && (

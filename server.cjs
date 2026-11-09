@@ -145,6 +145,7 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 const { registerAuthRoutes } = require('./server-auth.cjs');
+const { registerBackupRoutes } = require('./server-backup.cjs');
 const { registerInventoryRoutes } = require('./server-inventory.cjs');
 const { assertVenueAvailability } = require('./server-venue-availability.cjs');
 
@@ -203,15 +204,86 @@ if (!sqlite3) {
   } else {
     console.log('✅ Connected to local SQLite database.');
     db.configure('busyTimeout', 5000);
-    const { verifyOrderVoid } = registerAuthRoutes(app, db);
+    let resolveStaffSchema;
+    let rejectStaffSchema;
+    const staffSchemaReady = new Promise((resolve, reject) => {
+      resolveStaffSchema = resolve;
+      rejectStaffSchema = reject;
+    });
+    const { verifyOrderVoid, requireAdmin } = registerAuthRoutes(app, db, {
+      staffSchemaReady, allowLegacyPin: true, credentialChangeInterval: 24 * 60 * 60 * 1000,
+    });
+    registerBackupRoutes(app, db, { requireAdmin });
+    const policyReady = new Promise((resolve, reject) => {
+      db.run('CREATE TABLE IF NOT EXISTS policy_rate_history (id INTEGER PRIMARY KEY, savedAt INTEGER NOT NULL, actorName TEXT NOT NULL, previousRates TEXT NOT NULL, ratesChanged INTEGER NOT NULL)', error => error ? reject(error) : resolve());
+    });
+    require('./server-policy.cjs').registerPolicyRoutes(app, dbPath, { requireAdmin, cooldownMs: 30_000, ready: policyReady });
     require('./server-orders.cjs').registerOrderRoutes(app, dbPath, { trackStock: false, verifyVoid: verifyOrderVoid });
     registerInventoryRoutes(app, db);
+    app.post('/api/staff/:id/reactivate', ...requireAdmin, async (req, res) => {
+      const reason = req.body?.reason;
+      if (!['Returned to work', 'Temporary suspension ended', 'Access restored after review', 'Archived in error'].includes(reason)) {
+        return res.status(400).json({ error: 'Choose a reactivation reason.' });
+      }
+      let connection, inTransaction = false;
+      const run = (sql, values = []) => new Promise((resolve, reject) => {
+        connection.run(sql, values, error => error ? reject(error) : resolve());
+      });
+      try {
+        connection = await new Promise((resolve, reject) => {
+          const conn = new sqlite3.Database(dbPath, sqlite3.OPEN_READWRITE, error => error ? reject(error) : resolve(conn));
+        });
+        connection.configure('busyTimeout', 5000);
+        await run('BEGIN IMMEDIATE');
+        inTransaction = true;
+        const user = await new Promise((resolve, reject) => {
+          connection.get('SELECT id, username, fullName, role FROM staff WHERE id = ? AND isActive = 0',
+            [req.params.id], (error, row) => error ? reject(error) : resolve(row));
+        });
+        if (!user) return res.status(409).json({ error: 'The staff account is no longer archived or does not exist.' });
+        const activity = {
+          id: require('node:crypto').randomUUID(),
+          type: 'staff_reactivated',
+          description: `Reactivated ${user.fullName} (@${user.username}). Reason: ${reason}.`,
+          timestamp: new Date().toISOString(),
+          metadata: { actorId: req.staff.id, actorName: req.staff.fullName, staffId: user.id,
+            staffUsername: user.username, staffRole: user.role, reason, previousStatus: 'Archived', newStatus: 'Active' },
+        };
+        await run('UPDATE staff SET isActive = 1 WHERE id = ?', [user.id]);
+        await run('INSERT INTO activities (id, type, description, timestamp, metadata) VALUES (?, ?, ?, ?, ?)',
+          [activity.id, activity.type, activity.description, activity.timestamp, JSON.stringify(activity.metadata)]);
+        await run('COMMIT');
+        inTransaction = false;
+        res.json({ activity });
+      } catch {
+        res.status(503).json({ error: 'The account and its activity log could not be saved.' });
+      } finally {
+        if (inTransaction) await run('ROLLBACK').catch(() => {});
+        if (connection) connection.close();
+      }
+    });
     
     db.serialize(() => {
       db.run(`CREATE TABLE IF NOT EXISTS systemSettings (keyName TEXT PRIMARY KEY, settingValue TEXT, updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP)`);
       db.run(`CREATE TABLE IF NOT EXISTS cms (keyName TEXT PRIMARY KEY, settingValue TEXT, updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP)`);
       db.run(`CREATE TABLE IF NOT EXISTS images (id TEXT PRIMARY KEY, mimeType TEXT, data BLOB)`);
       db.run(`CREATE TABLE IF NOT EXISTS staff (id TEXT PRIMARY KEY, username TEXT, password TEXT, fullName TEXT, role TEXT, phone TEXT, joinedDate TEXT, avatarImg TEXT, isActive INTEGER DEFAULT 1, isAdmin INTEGER DEFAULT 0, recoveryPin TEXT)`);
+      db.all('PRAGMA table_info(staff)', async (error, columns) => {
+        if (error) return rejectStaffSchema(error);
+        const definitions = {
+          isFirstLogin: 'INTEGER DEFAULT 0',
+          settingsPasswordChangedAt: 'INTEGER',
+          settingsPinChangedAt: 'INTEGER',
+        };
+        try {
+          for (const [name, definition] of Object.entries(definitions)) {
+            if (!columns.some(column => column.name === name)) {
+              await new Promise((resolve, reject) => db.run(`ALTER TABLE staff ADD COLUMN ${name} ${definition}`, err => err ? reject(err) : resolve()));
+            }
+          }
+          resolveStaffSchema();
+        } catch (error) { rejectStaffSchema(error); }
+      });
       db.run(`CREATE TABLE IF NOT EXISTS tables (id TEXT PRIMARY KEY, name TEXT NOT NULL, status TEXT NOT NULL, isActive INTEGER DEFAULT 1, maintenanceReason TEXT, sessionData TEXT)`);
       db.run(`CREATE TABLE IF NOT EXISTS inventory (id TEXT PRIMARY KEY, name TEXT, category TEXT, price REAL, stock INTEGER DEFAULT 0, isActive INTEGER DEFAULT 1, createdAt DATETIME DEFAULT CURRENT_TIMESTAMP)`);
       db.run(`CREATE TABLE IF NOT EXISTS queue (id TEXT PRIMARY KEY, customerName TEXT, contactNumber TEXT, partySize INTEGER, status TEXT, queueNumber INTEGER, notes TEXT, arrivalTime DATETIME DEFAULT CURRENT_TIMESTAMP)`);
@@ -299,7 +371,7 @@ if (!sqlite3) {
 
       db.run(`INSERT OR IGNORE INTO systemSettings (keyName, settingValue) SELECT key_name, setting_value FROM system_settings`, (err) => {
         if (!err) {
-          db.run(`DELETE FROM systemSettings WHERE keyName LIKE '%_%'`);
+          db.run(`DELETE FROM systemSettings WHERE instr(keyName, '_') > 0`);
           db.run(`DROP TABLE IF EXISTS system_settings`);
         }
       });
@@ -311,10 +383,6 @@ if (!sqlite3) {
       const SUPERADMIN_SHA256 = 'e34f92a20532a873cb3184398070b4b82a8fa29cf48572c203dc5f0fa6158231';
       db.run(
         `INSERT OR IGNORE INTO staff (id, username, password, fullName, role, phone, joinedDate, avatarImg, isActive, isAdmin, recoveryPin) VALUES ('admin_001', 'superadmin', ?, 'System Superadmin', 'manager', '', datetime('now'), '', 1, 1, '8492')`,
-        [SUPERADMIN_SHA256]
-      );
-      db.run(
-        `UPDATE staff SET password = ?, isActive = 1, isAdmin = 1 WHERE lower(username) = 'superadmin' OR id = 'admin_001'`,
         [SUPERADMIN_SHA256]
       );
       // Auto-assign random 4-digit PIN for any staff account missing one or set to '0000'
@@ -331,7 +399,14 @@ if (!sqlite3) {
         ['bookingCutoffMinutes', '60'],
         ['hourlyRate', '150'],
         ['overtimeRate', '300'],
-        ['downPaymentPercent', '20']
+        ['downPaymentPercent', '20'],
+        ['isWeekdayHappyHourActive', 'false'], ['weekdayHappyHourRate', '0'],
+        ['weekdayHappyHourStart', '12:00'], ['weekdayHappyHourEnd', '17:00'], ['weekdayOnlineCapacityLimit', '10'],
+        ['isWeekendHappyHourActive', 'false'], ['weekendHappyHourRate', '0'],
+        ['weekendHappyHourStart', '12:00'], ['weekendHappyHourEnd', '17:00'], ['weekendOnlineCapacityLimit', '10'],
+        ['minHours', '1'], ['maxHours', '8'], ['cancellationHours', '24'], ['advanceBookingHours', '1'],
+        ['cancellationPolicy', ''], ['termsAndConditions', ''],
+        ['weekdayMinPartySize', '1'], ['weekdayMaxPartySize', '8'], ['weekendMinPartySize', '1'], ['weekendMaxPartySize', '8']
       ];
       defaultSettings.forEach(([k, v]) => {
         db.run(`INSERT OR IGNORE INTO systemSettings (keyName, settingValue) VALUES (?, ?)`, [k, v]);
@@ -1434,28 +1509,6 @@ app.delete('/api/reservations/:id', (req, res) => {
   });
 });
 
-const updateSettingsHandler = (req, res) => {
-  const payload = req.body;
-  const keys = Object.keys(payload);
-  if (keys.length === 0) return res.json({ message: "No settings to update" });
-  let index = 0; let errors = [];
-  const processNextKey = () => {
-    if (index >= keys.length) {
-      if (errors.length > 0) return res.status(500).json({ error: "Some settings failed to save.", details: errors });
-      return res.json({ message: "Settings updated successfully." });
-    }
-    const key = keys[index];
-    const value = typeof payload[key] === 'boolean' ? String(payload[key]) : (payload[key] ?? '').toString();
-    db.run(`INSERT INTO systemSettings (keyName, settingValue) VALUES (?, ?) ON CONFLICT(keyName) DO UPDATE SET settingValue = excluded.settingValue, updatedAt = CURRENT_TIMESTAMP`, [key, value], function(err) {
-      if (err) { errors.push({ key, error: err.message }); }
-      index++; processNextKey();
-    });
-  };
-  processNextKey();
-};
-app.put('/api/settings/rates', updateSettingsHandler);
-app.put('/api/settings/terms', updateSettingsHandler);
-
 const isProduction = process.env.NODE_ENV === 'production';
 if (isProduction) {
   let distPath = path.join(__dirname, 'dist');
@@ -1475,7 +1528,7 @@ if (isProduction) {
   }
   app.use(express.static(distPath));
   
-  app.get(/(.*)/, (req, res) => {
+  app.get(/^\/(?!api(?:\/|$)).*/, (req, res) => {
     const indexPath = path.join(distPath, 'index.html');
     if (fs.existsSync(indexPath)) {
       res.sendFile(indexPath);

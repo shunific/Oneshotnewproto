@@ -36,7 +36,7 @@ const COLOR_PALETTES = [
 ];
 
 export function SettingsPage() {
-  const { staffProfile, updateStaffProfile, activities, changeOwnCredentials, verifyPassword, staffUsers, updateStaffUser, theme, updateTheme, primaryColor, updatePrimaryColor } = useAppContext();
+  const { staffProfile, updateStaffProfile, activities, staffUsers, updateStaffUser, theme, updateTheme, primaryColor, updatePrimaryColor } = useAppContext();
   const navigate = useNavigate();
 
   const [activeSection, setActiveSection] = useState<Section>('overview');
@@ -51,7 +51,7 @@ export function SettingsPage() {
 
   const [secEdit, setSecEdit] = useState(false);
   const [secForm, setSecForm] = useState({ username: staffProfile.username, currentPassword: '', newPassword: '', confirmPassword: '', newRecoveryPin: '' });
-  const [showPw, setShowPw] = useState({ current: false, new: false, confirm: false });
+  const [showPw, setShowPw] = useState({ current: false, new: false, confirm: false, pin: false });
   const [secError, setSecError] = useState('');
   const securityInFlight = useRef(false);
   const [isSavingSecurity, setIsSavingSecurity] = useState(false);
@@ -126,7 +126,7 @@ export function SettingsPage() {
     setSecError('');
     if (!secForm.currentPassword) { setSecError('Enter your current password to confirm changes.'); return; }
     
-    if (secForm.newRecoveryPin && !/^\d{4,12}$/.test(secForm.newRecoveryPin)) { setSecError('Recovery PIN must contain 4–12 digits.'); return; }
+    if (secForm.newRecoveryPin && !/^\d{4}$/.test(secForm.newRecoveryPin)) { setSecError('Recovery PIN must contain exactly four digits.'); return; }
     securityInFlight.current = true;
     setIsSavingSecurity(true);
     let passwordSaved = false;
@@ -140,25 +140,26 @@ export function SettingsPage() {
       }
 
       if (secForm.newPassword) {
-        await changeOwnCredentials({ currentPassword: secForm.currentPassword, newPassword: secForm.newPassword, recoveryPin: secForm.newRecoveryPin || undefined });
+        await authRequest('change-password', { currentPassword: secForm.currentPassword, newPassword: secForm.newPassword, recoveryPin: secForm.newRecoveryPin || undefined });
         passwordSaved = true;
         pinSaved = Boolean(secForm.newRecoveryPin);
       } else if (secForm.newRecoveryPin) {
         await authRequest('change-pin', { currentPassword: secForm.currentPassword, recoveryPin: secForm.newRecoveryPin });
         pinSaved = true;
-      } else if (!await verifyPassword(secForm.currentPassword)) { setSecError('Current password is incorrect.'); return; }
+      } else { await authRequest('verify', { password: secForm.currentPassword }); }
       if (secForm.username && secForm.username !== staffProfile.username) {
         const result = await authRequest('change-username', { username: secForm.username, currentPassword: secForm.newPassword || secForm.currentPassword });
         updateStaffProfile(result.user);
       }
       setSecEdit(false);
+      setShowPw({ current: false, new: false, confirm: false, pin: false });
       setSecForm(f => ({ ...f, currentPassword: '', newPassword: '', confirmPassword: '', newRecoveryPin: '' }));
       flash("Security credentials saved!", "success");
-    } catch {
+    } catch (error) {
       if (passwordSaved || pinSaved) {
         setSecForm(f => ({ ...f, currentPassword: passwordSaved ? secForm.newPassword : f.currentPassword, newPassword: passwordSaved ? '' : f.newPassword, confirmPassword: passwordSaved ? '' : f.confirmPassword, newRecoveryPin: pinSaved ? '' : f.newRecoveryPin }));
         setSecError('Your password or PIN was saved, but the username change failed. Review the username and try again.');
-      } else setSecError('Failed to save security credentials. Please try again.');
+      } else setSecError(error instanceof Error ? error.message : 'Failed to save security credentials.');
     } finally {
       securityInFlight.current = false;
       setIsSavingSecurity(false);
@@ -484,15 +485,18 @@ export function SettingsPage() {
                   </div>
                   <div>
                     <label htmlFor="new-recovery-pin" className="block text-xs text-neutral-400 mb-1.5">New Recovery PIN (optional)</label>
-                    <input id="new-recovery-pin" type="password" inputMode="numeric" autoComplete="new-password" maxLength={12} value={secForm.newRecoveryPin} onChange={e => setSecForm(f => ({ ...f, newRecoveryPin: e.target.value.replace(/\D/g, '').slice(0, 12) }))} placeholder="Leave blank to keep your current PIN" className="w-full bg-neutral-800 border border-neutral-700 rounded-xl px-3 py-2 text-sm text-neutral-100" />
-                    <p className="mt-1.5 text-[10px] text-neutral-500">Use 4–12 digits. Keep your PIN private in a secure place; it cannot be retrieved after saving.</p>
+                    <div className="relative">
+                      <input id="new-recovery-pin" type={showPw.pin ? 'text' : 'password'} inputMode="numeric" autoComplete="new-password" value={secForm.newRecoveryPin} onChange={e => setSecForm(f => ({ ...f, newRecoveryPin: e.target.value.replace(/\D/g, '').slice(0, 4) }))} placeholder="Leave blank to keep your current PIN" className="w-full bg-neutral-800 border border-neutral-700 rounded-xl px-3 pr-10 py-2 text-sm text-neutral-100" />
+                      <button type="button" aria-label={showPw.pin ? 'Hide new PIN' : 'Show new PIN'} onClick={() => setShowPw(s => ({ ...s, pin: !s.pin }))} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400">{showPw.pin ? <EyeOff size={13} /> : <Eye size={13} />}</button>
+                    </div>
+                    <p className="mt-1.5 text-[10px] text-neutral-400">Use exactly four digits. You can change your password and PIN once every 24 hours each.</p>
                   </div>
                   {secError && <div className="flex items-center gap-2 bg-rose-950/50 border border-rose-800/40 text-rose-400 text-xs px-3 py-2.5 rounded-xl"><AlertTriangle size={13} className="flex-shrink-0" />{secError}</div>}
                 </div>
               )}
               {secEdit && (
                 <div className="pt-1 flex justify-end">
-                  <button onClick={handleSaveSecurity} disabled={isSavingSecurity || (secForm.newPassword ? !pwStrength.isValid : false) || (!!secForm.newRecoveryPin && !/^\d{4,12}$/.test(secForm.newRecoveryPin))} className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white text-sm rounded-xl font-semibold"><Save size={14} /> {isSavingSecurity ? 'Saving...' : 'Save Credentials'}</button>
+                  <button onClick={handleSaveSecurity} disabled={isSavingSecurity || (secForm.newPassword ? !pwStrength.isValid : false) || (!!secForm.newRecoveryPin && !/^\d{4}$/.test(secForm.newRecoveryPin))} className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white text-sm rounded-xl font-semibold"><Save size={14} /> {isSavingSecurity ? 'Saving...' : 'Save Credentials'}</button>
                 </div>
               )}
             </div>

@@ -6,18 +6,45 @@ import { PesoSign } from '../components/PesoSign';
 import {
   Save, Clock, DollarSign, AlertCircle, ShieldCheck,
   FileText, ToggleLeft, ToggleRight, X,
-  ShieldAlert, AlertTriangle, CheckCircle, Lock, RefreshCw
+  ShieldAlert, AlertTriangle, CheckCircle, Lock, RefreshCw, History
 } from 'lucide-react';
 
 export default function AdminPolicyRatesEditor() {
   const navigate = useNavigate();
-  const { rates, reservationTerms, savePolicySettings, updateRates, updateReservationTerms, staffProfile, theme, isSystemOffline, tables } = useAppContext() as any;
+  const { rates, reservationTerms, savePolicySettings, staffProfile, theme, isSystemOffline, tables } = useAppContext() as any;
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const saveInFlight = useRef(false);
+  const [nextSaveAt, setNextSaveAt] = useState(0);
+  const [clock, setClock] = useState(Date.now);
+  const secondsLeft = Math.max(0, Math.ceil((nextSaveAt - clock) / 1000));
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [history, setHistory] = useState<{ savedAt: number; actorName: string; previousRates: Record<string, unknown> }[] | null>(null);
+  const [historyError, setHistoryError] = useState('');
+
+  useEffect(() => {
+    if (!secondsLeft) return;
+    const timer = window.setInterval(() => setClock(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [Boolean(secondsLeft)]);
+
+  const loadHistory = async () => {
+    setHistoryOpen(true);
+    setHistory(null);
+    setHistoryError('');
+    try {
+      const response = await localFetch('/api/settings/policy/history');
+      const entries = await response.json();
+      if (!response.ok) throw new Error(entries.error || 'Could not load rate history.');
+      setHistory(entries);
+    } catch (error) {
+      setHistoryError(error instanceof Error ? error.message : 'Could not load rate history.');
+    }
+  };
+
   const [policyRevision, setPolicyRevision] = useState<string | null>(null);
   const [policyLoadError, setPolicyLoadError] = useState('');
-  const [policyWarning, setPolicyWarning] = useState(false);
   const [policyBaseline, setPolicyBaseline] = useState<any>(null);
   const savedRates = policyBaseline?.rates || rates;
   const savedTerms = policyBaseline?.terms || reservationTerms;
@@ -50,68 +77,28 @@ export default function AdminPolicyRatesEditor() {
 
   const [gracePeriodMins, setGracePeriodMins] = useState(15);
 
-  const handleReloadSavedSettings = async () => {
+  const reloadSavedSettings = async () => {
     setIsLoading(true);
     try {
-      const response = await localFetch('http://localhost:3001/api/settings/policy');
-      if (response.ok) {
-        const saved = await response.json();
-        if (saved?.settings?.rates) setRatesForm(saved.settings.rates);
-        if (saved?.settings?.terms) setTermsForm(saved.settings.terms);
-        if (saved?.revision) setPolicyRevision(saved.revision);
-        if (saved?.settings) setPolicyBaseline(saved.settings);
-      } else {
-        if (rates) setRatesForm(prev => ({ ...prev, ...rates }));
-        if (reservationTerms) setTermsForm(prev => ({ ...prev, ...reservationTerms }));
-        setPolicyRevision('rev_default');
-      }
+      const response = await localFetch('/api/settings/policy');
+      const saved = await response.json();
+      if (!response.ok) throw new Error(saved.error || 'Could not reload saved settings.');
+      setRatesForm(saved.settings.rates);
+      setTermsForm(saved.settings.terms);
+      setPolicyRevision(saved.revision);
+      setPolicyBaseline(saved.settings);
+      setNextSaveAt(saved.nextSaveAt || 0);
+      setClock(Date.now());
       setPolicyLoadError('');
-      setPolicyWarning(false);
-      flash('Saved policy settings reloaded successfully.', 'success');
-    } catch {
-      if (rates) setRatesForm(prev => ({ ...prev, ...rates }));
-      if (reservationTerms) setTermsForm(prev => ({ ...prev, ...reservationTerms }));
-      setPolicyRevision('rev_default');
-      setPolicyLoadError('');
-      setPolicyWarning(false);
-      flash('Saved policy settings reloaded from cache.', 'success');
+    } catch (error) {
+      setPolicyRevision(null);
+      setPolicyLoadError(error instanceof Error ? error.message : 'Could not reload saved settings.');
     } finally {
       setIsLoading(false);
     }
   };
 
-  useEffect(() => {
-    let active = true;
-    setIsLoading(true);
-    void (async () => {
-      try {
-        const response = await localFetch('http://localhost:3001/api/settings/policy');
-        if (response.ok) {
-          const saved = await response.json();
-          if (active && saved?.settings?.rates && saved?.settings?.terms) {
-            setRatesForm(saved.settings.rates);
-            setTermsForm(saved.settings.terms);
-            setPolicyRevision(saved.revision || 'rev_default');
-            setPolicyBaseline(saved.settings);
-            setPolicyLoadError('');
-            setPolicyWarning(false);
-            return;
-          }
-        }
-      } catch (err) {
-        console.warn('Initial policy fetch notice:', err);
-      }
-      if (active) {
-        if (rates) setRatesForm(prev => ({ ...prev, ...rates }));
-        if (reservationTerms) setTermsForm(prev => ({ ...prev, ...reservationTerms }));
-        setPolicyRevision('rev_default');
-        setPolicyLoadError('');
-        setPolicyWarning(false);
-        setIsLoading(false);
-      }
-    })();
-    return () => { active = false; };
-  }, [rates, reservationTerms]);
+  useEffect(() => { void reloadSavedSettings(); }, [staffProfile.id]);
 
   const parseToMins = (t: string) => {
     if (!t || !t.includes(':')) return 0;
@@ -201,6 +188,7 @@ export default function AdminPolicyRatesEditor() {
   };
 
   const handleReviewChanges = () => {
+    if (!policyRevision || secondsLeft || isSaving) return;
     const hr = Number(ratesForm.hourlyRate);
     if (!Number.isFinite(hr) || hr <= 0) { flash('Standard Hourly Rate must be greater than ₱0.', 'error'); return; }
     if (hr > 5000) { flash('Standard Hourly Rate cannot exceed ₱5,000/hr.', 'error'); return; }
@@ -238,7 +226,7 @@ export default function AdminPolicyRatesEditor() {
     const maxWkDay = Number(termsForm.weekdayMaxPartySize) || 8;
     const minWkEnd = Number(termsForm.weekendMinPartySize) || 1;
     const maxWkEnd = Number(termsForm.weekendMaxPartySize) || 8;
-    const cancelHrs = Number(termsForm.cancellationHours) || 24;
+    const cancelHrs = Number(termsForm.cancellationHours ?? 24);
 
     if (minWkDay <= 0 || maxWkDay <= 0) { flash('Weekday party sizes must be at least 1 person.', 'error'); return; }
     if (minWkDay > maxWkDay) { flash(`Weekday Min party size (${minWkDay}) cannot exceed Max (${maxWkDay}).`, 'error'); return; }
@@ -251,35 +239,37 @@ export default function AdminPolicyRatesEditor() {
   };
 
   const executeSave = async () => {
+    if (!policyRevision || secondsLeft || saveInFlight.current) return;
+    saveInFlight.current = true;
     setShowSummaryModal(false);
     setIsSaving(true);
     try {
       const ratesPayload = {
         hourlyRate: Number(ratesForm.hourlyRate) || 0,
-        bookingCutoffMinutes: Number(ratesForm.bookingCutoffMinutes) || 60,
+        bookingCutoffMinutes: Number(ratesForm.bookingCutoffMinutes ?? 60),
         overtimeRate: Number(ratesForm.overtimeRate) || Number(ratesForm.hourlyRate) || 0,
-        downPaymentPercent: Number(ratesForm.downPaymentPercent) || 50,
+        downPaymentPercent: Number(ratesForm.downPaymentPercent ?? 50),
         weekdayStartTime: ratesForm.weekdayStartTime || '12:00',
         weekdayEndTime: ratesForm.weekdayEndTime || '00:00',
         isWeekdayHappyHourActive: Boolean(ratesForm.isWeekdayHappyHourActive),
         weekdayHappyHourRate: Number(ratesForm.weekdayHappyHourRate) || Number(ratesForm.hourlyRate) || 0,
         weekdayHappyHourStart: ratesForm.weekdayHappyHourStart || '12:00',
         weekdayHappyHourEnd: ratesForm.weekdayHappyHourEnd || '17:00',
-        weekdayOnlineCapacityLimit: Number(ratesForm.weekdayOnlineCapacityLimit) || 10,
+        weekdayOnlineCapacityLimit: Number(ratesForm.weekdayOnlineCapacityLimit ?? 10),
         weekendStartTime: ratesForm.weekendStartTime || '12:00',
         weekendEndTime: ratesForm.weekendEndTime || '02:00',
         isWeekendHappyHourActive: Boolean(ratesForm.isWeekendHappyHourActive),
         weekendHappyHourRate: Number(ratesForm.weekendHappyHourRate) || Number(ratesForm.hourlyRate) || 0,
         weekendHappyHourStart: ratesForm.weekendHappyHourStart || '12:00',
         weekendHappyHourEnd: ratesForm.weekendHappyHourEnd || '17:00',
-        weekendOnlineCapacityLimit: Number(ratesForm.weekendOnlineCapacityLimit) || 10,
+        weekendOnlineCapacityLimit: Number(ratesForm.weekendOnlineCapacityLimit ?? 10),
       };
 
       const termsPayload = {
         minHours: Number(termsForm.minHours) || 1,
         maxHours: Number(termsForm.maxHours) || 6,
         advanceBookingHours: Number(termsForm.advanceBookingHours) || 1,
-        cancellationHours: Number(termsForm.cancellationHours) || 24,
+        cancellationHours: Number(termsForm.cancellationHours ?? 24),
         cancellationPolicy: termsForm.cancellationPolicy || '',
         termsAndConditions: termsForm.termsAndConditions || '',
         weekdayMinPartySize: Number(termsForm.weekdayMinPartySize) || 1,
@@ -288,22 +278,21 @@ export default function AdminPolicyRatesEditor() {
         weekendMaxPartySize: Number(termsForm.weekendMaxPartySize) || 8,
       };
 
-      const rev = policyRevision || 'rev_active';
-      if (typeof savePolicySettings === 'function') {
-        const saved = await savePolicySettings(ratesPayload, termsPayload, rev);
-        if (saved?.revision) setPolicyRevision(saved.revision);
-        if (saved?.settings) setPolicyBaseline(saved.settings);
-      } else {
-        if (typeof updateRates === 'function') await updateRates(ratesPayload);
-        if (typeof updateReservationTerms === 'function') await updateReservationTerms(termsPayload);
-      }
-      setPolicyWarning(false);
+      const saved = await savePolicySettings(ratesPayload, termsPayload, policyRevision);
+      setPolicyRevision(saved.revision);
+      setPolicyBaseline(saved.settings);
+      setRatesForm(saved.settings.rates);
+      setTermsForm(saved.settings.terms);
+      setNextSaveAt(saved.nextSaveAt || 0);
+      setClock(Date.now());
       setPolicyLoadError('');
 
-      flash("Policies & Rates saved and synchronized successfully.", "success");
+      flash("Policies and rates saved.", "success");
     } catch (e: any) {
+      if (e.nextSaveAt) { setNextSaveAt(e.nextSaveAt); setClock(Date.now()); }
       flash(e.message || 'Failed to save policies. Please try again.', 'error');
     } finally {
+      saveInFlight.current = false;
       setIsSaving(false);
     }
   };
@@ -409,7 +398,7 @@ export default function AdminPolicyRatesEditor() {
           <p className="text-sm text-neutral-400 mt-1">Manage operational pricing, business hours, and strictly enforced rules.</p>
         </div>
         <div className="flex items-center gap-3">
-          <button type="button" onClick={handleReviewChanges} className="bg-emerald-600 hover:bg-emerald-500 text-neutral-100 px-6 py-3 rounded-lg font-bold flex items-center gap-2 transition-colors shadow-lg shadow-emerald-950/40">
+          <button type="button" onClick={handleReviewChanges} disabled={!policyRevision || isSaving || isLoading || secondsLeft > 0} className="bg-emerald-600 hover:bg-emerald-500 text-neutral-100 px-6 py-3 rounded-lg font-bold flex items-center gap-2 transition-colors shadow-lg shadow-emerald-950/40">
             <Save size={18} /> Save Changes
           </button>
         </div>
@@ -599,17 +588,47 @@ export default function AdminPolicyRatesEditor() {
       </div>
 
       {/* ── Bottom Action Bar ── */}
-      <div className="flex flex-wrap items-center justify-between gap-4 pt-6 border-t border-neutral-800">
+      <div className="flex flex-wrap items-center gap-3 pt-6 border-t border-neutral-800">
         <button
           type="button"
-          onClick={handleReloadSavedSettings}
+          onClick={reloadSavedSettings}
           disabled={isLoading || isSaving}
           className="flex items-center gap-2 px-5 py-3 bg-neutral-900 hover:bg-neutral-800 border border-neutral-700/70 text-neutral-300 text-xs font-bold rounded-xl transition-all cursor-pointer disabled:opacity-50 shadow-sm"
         >
           <RefreshCw size={15} className={isLoading ? 'animate-spin text-amber-400' : 'text-neutral-400'} />
           <span>{isLoading ? 'Reloading...' : 'Reload Saved Settings'}</span>
         </button>
+        <button type="button" onClick={loadHistory} className="flex items-center gap-2 rounded-xl border border-neutral-700 bg-neutral-900 px-5 py-3 text-xs font-bold text-neutral-200 hover:bg-neutral-800">
+          <History size={15} /> Rate History
+        </button>
+        {secondsLeft > 0 && <p className="text-xs text-amber-300">Save again in {secondsLeft}s</p>}
       </div>
+      {policyLoadError && <p role="alert" className="text-sm text-rose-400">{policyLoadError}</p>}
+      {historyOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
+          <section role="dialog" aria-modal="true" aria-labelledby="rate-history-title" className="max-h-[85vh] w-full max-w-xl overflow-y-auto rounded-2xl border border-neutral-800 bg-neutral-950 p-5 text-neutral-200">
+            <div className="flex items-center justify-between">
+              <h2 id="rate-history-title" className="font-bold">Rate History</h2>
+              <button type="button" aria-label="Close rate history" onClick={() => setHistoryOpen(false)}><X size={18} /></button>
+            </div>
+            {historyError ? <p role="alert" className="mt-4 text-sm text-rose-400">{historyError}</p> :
+              !history ? <p className="mt-4 text-sm">Loading rates…</p> :
+              !history.length ? <p className="mt-4 text-sm text-neutral-400">Past rates appear here after the first rate change.</p> :
+              history.map((entry, index) => (
+                <details key={`${entry.savedAt}-${index}`} className="mt-3 rounded-lg border border-neutral-800 p-3">
+                  <summary className="cursor-pointer text-sm">
+                    Rates before {new Date(entry.savedAt).toLocaleString('en-PH', { timeZone: 'Asia/Manila' })} · {entry.actorName}
+                  </summary>
+                  <dl className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+                    {Object.entries(entry.previousRates).map(([key, value]) => (
+                      <div key={key}><dt className="capitalize text-neutral-400">{key.replace(/([A-Z])/g, ' $1')}</dt><dd>{value === null ? '—' : typeof value === 'boolean' ? (value ? 'On' : 'Off') : String(value)}</dd></div>
+                    ))}
+                  </dl>
+                </details>
+              ))}
+          </section>
+        </div>
+      )}
       {showSummaryModal && (
         <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
@@ -663,7 +682,7 @@ export default function AdminPolicyRatesEditor() {
                 <button type="button" onClick={() => setShowSummaryModal(false)} className="flex-1 px-4 py-3 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 rounded-xl text-sm font-semibold transition-colors border border-neutral-800">
                   Cancel
                 </button>
-                <button type="button" onClick={executeSave} disabled={isSaving} className="flex-1 px-4 py-3 bg-emerald-600 hover:bg-emerald-500 text-neutral-100 rounded-xl text-sm font-semibold transition-colors flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/30">
+                <button type="button" onClick={executeSave} disabled={isSaving || secondsLeft > 0} className="flex-1 px-4 py-3 bg-emerald-600 hover:bg-emerald-500 text-neutral-100 rounded-xl text-sm font-semibold transition-colors flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/30">
                   <Save size={16} /> Confirm & Save
                 </button>
               </div>

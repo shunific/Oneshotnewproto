@@ -17,7 +17,7 @@ type FormState = {
 const blankForm: FormState = { username: '', password: '', confirmPassword: '', fullName: '', role: 'manager', phone: '', isAdmin: false };
 
 export function AdminUsers() {
-  const { staffUsers, activities, addStaffUser, updateStaffUser, resetStaffUserPassword, hashPassword, staffProfile } = useAppContext() as any;
+  const { staffUsers, activities, addStaffUser, updateStaffUser, reactivateStaffUser, resetStaffUserPassword, hashPassword, staffProfile } = useAppContext() as any;
 
   const [editingEmployee, setEditingEmployee] = useState<StaffUser | null>(null);
   const [showForm, setShowForm]     = useState(false);
@@ -167,14 +167,22 @@ export function AdminUsers() {
     }
   };
 
-  const handleRestore = async (id: string) => {
+  const [reactivation, setReactivation] = useState<{ id: string; name: string } | null>(null);
+  const [reactivationReason, setReactivationReason] = useState('');
+  const [reactivationError, setReactivationError] = useState('');
+
+  const handleRestore = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!reactivation || !reactivationReason || isLoading) return;
     setLoadingMsg('REACTIVATING USER...');
     setIsLoading(true);
+    setReactivationError('');
     try {
-      await updateStaffUser(id, { isActive: true });
-      flash("User reactivated successfully.", "success");
-    } catch {
-      flash('Staff changes were not saved. Please try again.', 'error');
+      await reactivateStaffUser(reactivation.id, reactivationReason);
+      setReactivation(null);
+      flash('User reactivated successfully.', 'success');
+    } catch (error) {
+      setReactivationError(error instanceof Error ? error.message : 'Could not reactivate the user.');
     } finally {
       setIsLoading(false);
     }
@@ -442,7 +450,7 @@ export function AdminUsers() {
                       </div>
                     </>
                   ) : (
-                    <button onClick={() => handleRestore(u.id)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-emerald-400 bg-emerald-950/30 border border-emerald-900/50 hover:bg-emerald-900/50 transition-colors">
+                    <button onClick={() => { setReactivation({ id: u.id, name: u.fullName }); setReactivationReason(''); setReactivationError(''); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-emerald-400 bg-emerald-950/30 border border-emerald-900/50 hover:bg-emerald-900/50 transition-colors">
                       <RefreshCw size={12} /> Reactivate
                     </button>
                   )}
@@ -725,6 +733,25 @@ export function AdminUsers() {
               Close
             </button>
           </div>
+        </div>
+      )}
+      {reactivation && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
+          <form onSubmit={handleRestore} role="dialog" aria-modal="true" aria-labelledby="reactivation-title" className="w-full max-w-md space-y-4 rounded-xl border border-neutral-800 bg-neutral-950 p-5">
+            <h2 id="reactivation-title" className="font-bold text-neutral-100">Reactivate {reactivation.name}</h2>
+            <label className="block text-sm text-neutral-300">
+              Reason for reactivation
+              <select required value={reactivationReason} onChange={event => setReactivationReason(event.target.value)} className="mt-2 w-full rounded-lg border border-neutral-700 bg-neutral-900 p-2 text-neutral-100">
+                <option value="">Choose a reason</option>
+                {['Returned to work', 'Temporary suspension ended', 'Access restored after review', 'Archived in error'].map(reason => <option key={reason}>{reason}</option>)}
+              </select>
+            </label>
+            {reactivationError && <p role="alert" className="text-sm text-rose-400">{reactivationError}</p>}
+            <div className="flex justify-end gap-3">
+              <button type="button" disabled={isLoading} onClick={() => setReactivation(null)} className="rounded-lg bg-neutral-800 px-4 py-2 text-sm text-neutral-100">Cancel</button>
+              <button type="submit" disabled={isLoading || !reactivationReason} className="rounded-lg bg-emerald-700 px-4 py-2 text-sm text-white disabled:opacity-50">Reactivate</button>
+            </div>
+          </form>
         </div>
       )}
     </div>

@@ -1,3 +1,4 @@
+import { authRequest, localFetch } from '../utils/localApi';
 import { getPendingOrder, saveOrderOperation } from '../utils/orderPersistence.js';
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef, useMemo } from 'react';
 import { toast } from 'sonner';
@@ -86,7 +87,7 @@ export type ActivityType =
   | 'queue_added' | 'queue_removed' | 'queue_called'
   | 'reservation_created' | 'reservation_updated' | 'payment_received' | 'reservation_cancelled'
   | 'feedback_received' | 'promo_created'
-  | 'admin_action' | 'tako_action' | 'pos_order';
+  | 'admin_action' | 'tako_action' | 'pos_order' | 'staff_reactivated';
 
 export type Activity = {
   id: string; type: ActivityType; description: string; timestamp: Date; metadata?: Record<string, any>;
@@ -171,6 +172,8 @@ export type AppContextType = {
   addFeedback: (i: Omit<Feedback, 'id'|'date'>) => void; resolveFeedback: (id: string, notes: string) => void; addActivity: (t: ActivityType, d: string, m?: Record<string, any>) => void;  
   addPromoCode: (i: Omit<PromoCode, 'id'|'createdAt'|'usageCount'>) => string; updatePromoCode: (id: string, u: Partial<Omit<PromoCode, 'id'|'createdAt'|'usageCount'>>) => void; togglePromoCode: (id: string) => void; deletePromoCode: (id: string) => void; applyPromoCode: (c: string) => PromoCode | null;
   events: Event[]; addEvent: (e: Omit<Event, 'id'>) => void; updateEvent: (id: string, updates: Partial<Omit<Event, 'id'>>) => void; deleteEvent: (id: string) => void;
+  reactivateStaffUser: (id: string, reason: string) => Promise<void>;
+  savePolicySettings: (rates: RatesConfig, terms: ReservationTerms, revision: string) => Promise<any>;
   addStaffUser: (u: Omit<StaffUser, 'id'|'createdAt'>) => void; updateStaffUser: (id: string, u: Partial<StaffUser>) => void; resetStaffUserPassword: (id: string) => Promise<void>; toggleStaffUserActive: (id: string) => void;
   updateRates: (r: Partial<RatesConfig>) => Promise<void>; updateReservationTerms: (t: Partial<ReservationTerms>) => Promise<void>; addAnnouncement: (a: Omit<Announcement, 'id'|'createdAt'>) => void; updateAnnouncement: (id: string, u: Partial<Announcement>) => void; deleteAnnouncement: (id: string) => void; toggleAnnouncement: (id: string) => void; addClosedDate: (c: Omit<ClosedDate, 'id'>) => void; removeClosedDate: (id: string) => void; updateClosedDate: (id: string, u: Partial<ClosedDate>) => void;
   siteConfig: any; updateSiteConfig: (config: any) => void; refreshLiveMonitor: () => void;
@@ -258,6 +261,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (typeof pin === 'string' && pin && pin !== '0000' && !pin.startsWith('scrypt') && pin.length >= 4 && pin.length <= 12) {
       return pin;
     }
+    if (typeof pin === 'string' && pin.startsWith('scrypt$')) return '';
     const freshPin = Math.floor(1000 + Math.random() * 9000).toString();
     if (user && user.id) {
       setTimeout(() => {
@@ -292,6 +296,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
   });
 
   useEffect(() => {
+    let active = true;
+    const clearSession = () => {
+      if (!active) return;
+      for (const key of ['staff_auth', 'admin_auth', 'auth_expiry', 'is_locked', 'staff_profile']) {
+        sessionStorage.removeItem(`oneshot_${key}`);
+      }
+      setStaffLoggedIn(false);
+      setAdminLoggedIn(false);
+      setStaffProfile({ username: '', fullName: '', password: '', role: '', phone: '', joinedDate: '', isAdmin: false });
+    };
+    window.addEventListener('oneshot-session-ended', clearSession);
+    if (sessionStorage.getItem('oneshot_staff_auth') === 'true' || sessionStorage.getItem('oneshot_admin_auth') === 'true') {
+      void authRequest('me').catch(error => { if (error.status === 401) clearSession(); });
+    }
+    return () => {
+      active = false;
+      window.removeEventListener('oneshot-session-ended', clearSession);
+    };
+  }, []);
+
+  useEffect(() => {
     if ((staffLoggedIn || adminLoggedIn) && staffProfile?.username) {
       const isSuper = staffProfile.username.toLowerCase() === 'superadmin' || staffProfile.role === 'Super Admin' || staffProfile.isAdmin;
       if (isSuper) {
@@ -299,13 +324,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return;
       }
       const isBackedUp = localStorage.getItem(`oneshot_pin_backed_up_${staffProfile.username}`);
-      if (!isBackedUp) {
-        setShowRecoveryModal(true);
-      }
+      const account = staffUsers.find(user => user.id === staffProfile.id);
+      setShowRecoveryModal(Boolean(!isBackedUp && account?.recoveryPin && !account.recoveryPin.startsWith('scrypt$')));
     } else {
       setShowRecoveryModal(false);
     }
-  }, [staffLoggedIn, adminLoggedIn, staffProfile]);
+  }, [staffLoggedIn, adminLoggedIn, staffProfile, staffUsers]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -736,7 +760,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       type, 
       description: detailedDescription, 
       timestamp: new Date(), 
-      metadata: { ...metadata, actorId } 
+      metadata: { ...metadata, actorId, actorName: actor }
     };
     setActivities(prev => [newActivity, ...prev]);
     syncToDB('/api/activities', 'POST', newActivity, "Activity logged").then(runCloudBackup).catch(()=>{});
@@ -1023,49 +1047,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
   };
 
-  const staffLogin = async (u: string, p: string) => { 
-    const hashedP = await hashPassword(p); 
-    const cleanU = (u || '').trim().toLowerCase();
-    const isSuperPw = cleanU === 'superadmin' && (p === 'superadmin123' || hashedP === 'e34f92a20532a873cb3184398070b4b82a8fa29cf48572c203dc5f0fa6158231');
-    const valid = staffUsers.find(su => (su.username || '').toLowerCase() === cleanU && (su.password === hashedP || su.password === p || isSuperPw) && su.isActive); 
-    if (valid || isSuperPw) { 
-      const activeUser = valid || { id: 'admin_001', fullName: 'System Superadmin', username: 'superadmin', role: 'manager', isAdmin: true, phone: '', avatarImg: '' };
-      setStaffLoggedIn(true); 
-      sessionStorage.setItem('oneshot_staff_auth', 'true');
-      if (activeUser.isAdmin || cleanU === 'superadmin') {
-        setAdminLoggedIn(true);
-        sessionStorage.setItem('oneshot_admin_auth', 'true');
+  const signIn = async (username: string, password: string, adminOnly: boolean) => {
+    try {
+      const { user } = await authRequest('login', { username, password });
+      if (adminOnly && !user.isAdmin) {
+        await authRequest('logout', {});
+        return false;
       }
-      const expiryTime = new Date().getTime() + (12 * 60 * 60 * 1000);
-      sessionStorage.setItem('oneshot_auth_expiry', expiryTime.toString());
-      sessionStorage.removeItem('oneshot_is_locked'); 
-      updateStaffProfile({ id: activeUser.id, fullName: activeUser.fullName, username: activeUser.username, role: activeUser.role, isAdmin: activeUser.isAdmin || cleanU === 'superadmin', phone: activeUser.phone || '', avatarImg: activeUser.avatarImg || '' });
-      await forceFullSync();
-      return true; 
-    }
-    return false; 
-  };
-
-  const adminLogin = async (u: string, p: string) => { 
-    const hashedP = await hashPassword(p); 
-    const cleanU = (u || '').trim().toLowerCase();
-    const isSuperPw = cleanU === 'superadmin' && (p === 'superadmin123' || hashedP === 'e34f92a20532a873cb3184398070b4b82a8fa29cf48572c203dc5f0fa6158231');
-    const valid = staffUsers.find(su => (su.username || '').toLowerCase() === cleanU && (su.password === hashedP || su.password === p || isSuperPw) && su.isActive && (su.isAdmin || cleanU === 'superadmin'));
-    if (valid || isSuperPw) {
-      const activeUser = valid || { id: 'admin_001', fullName: 'System Superadmin', username: 'superadmin', role: 'manager', isAdmin: true, phone: '', avatarImg: '' };
-      setAdminLoggedIn(true);
+      const profile = { ...user, password: '', joinedDate: user.joinedDate || '' };
+      setStaffProfile(profile);
       setStaffLoggedIn(true);
-      sessionStorage.setItem('oneshot_admin_auth', 'true');
+      setAdminLoggedIn(Boolean(user.isAdmin));
+      sessionStorage.setItem('oneshot_staff_profile', JSON.stringify(profile));
       sessionStorage.setItem('oneshot_staff_auth', 'true');
-      const expiryTime = new Date().getTime() + (12 * 60 * 60 * 1000);
-      sessionStorage.setItem('oneshot_auth_expiry', expiryTime.toString());
+      sessionStorage.setItem('oneshot_admin_auth', String(Boolean(user.isAdmin)));
+      sessionStorage.setItem('oneshot_auth_expiry', String(Date.now() + 8 * 60 * 60 * 1000));
       sessionStorage.removeItem('oneshot_is_locked');
-      updateStaffProfile({ id: activeUser.id, fullName: activeUser.fullName, username: activeUser.username, role: activeUser.role, isAdmin: true, phone: activeUser.phone || '', avatarImg: activeUser.avatarImg || '' });
       await forceFullSync();
       return true;
+    } catch {
+      return false;
     }
-    return false; 
   };
+
+  const staffLogin = (username: string, password: string) => signIn(username, password, false);
+  const adminLogin = (username: string, password: string) => signIn(username, password, true);
 
   const staffLogout = async () => {
     setIsLoggingOut(true);
@@ -1080,6 +1086,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await new Promise(r => setTimeout(r, 800));
     }
 
+    await authRequest('logout', {}).catch(() => {});
     setStaffLoggedIn(false);
     setAdminLoggedIn(false);
     sessionStorage.removeItem('oneshot_staff_auth');
@@ -1104,6 +1111,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
 
     setAdminLoggedIn(false);
+    await authRequest('logout', {}).catch(() => {});
     setStaffLoggedIn(false);
     sessionStorage.removeItem('oneshot_admin_auth');
     sessionStorage.removeItem('oneshot_staff_auth');
@@ -1125,13 +1133,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const resetPasswordWithPin = async (username: string, pin: string, newPassword: string) => {
-    const targetUser = staffUsers.find(u => u.username.toLowerCase() === username.toLowerCase() && u.isActive);
-    if (!targetUser) return { success: false, message: 'User not found or inactive.' };
-    if (targetUser.recoveryPin !== pin) return { success: false, message: 'Invalid Username or Recovery PIN.' };
-    const hashedNew = await hashPassword(newPassword); 
-    updateStaffUser(targetUser.id, { password: hashedNew });
-    addActivity('admin_action', `Password reset via Recovery PIN for user: ${username}`);
-    return { success: true, message: 'Password reset successfully!' };
+    try {
+      await authRequest('recover', { username, recoveryPin: pin, newPassword });
+      return { success: true, message: 'Password reset successfully.' };
+    } catch (error) {
+      return { success: false, message: error instanceof Error ? error.message : 'Recovery failed.' };
+    }
   };
 
   const updateStaffProfile = (p: Partial<StaffProfile>) => {
@@ -1440,62 +1447,41 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   };
   
-  const updateRates = async (r: Partial<RatesConfig>) => {
-    const sanitized = { ...r } as Partial<RatesConfig>;
-    setRates(prev => ({ ...prev, ...sanitized }));
-    if (sanitized.hourlyRate !== undefined) sanitized.hourlyRate = Number(sanitized.hourlyRate) || 0;
-    if (sanitized.overtimeRate !== undefined) sanitized.overtimeRate = Number(sanitized.overtimeRate) || 0;
-    if (sanitized.weekdayHappyHourRate !== undefined) sanitized.weekdayHappyHourRate = Number(sanitized.weekdayHappyHourRate) || 0;
-    if (sanitized.weekendHappyHourRate !== undefined) sanitized.weekendHappyHourRate = Number(sanitized.weekendHappyHourRate) || 0;
-    if (sanitized.downPaymentPercent !== undefined && sanitized.downPaymentPercent !== null) {
-      let dp = Number(sanitized.downPaymentPercent) || 0;
-      dp = Math.max(0, Math.min(100, dp));
-      sanitized.downPaymentPercent = dp;
-    }
-    setRates(prev => ({ ...prev, ...sanitized }));
-
-    // 1. Direct Supabase sync so live website receives changes immediately
-    try {
-      const rows = Object.entries(sanitized).map(([k, v]) => ({
-        key_name: k,
-        setting_value: String(v ?? '')
-      }));
-      await supabase.from('system_settings').upsert(rows, { onConflict: 'key_name' });
-    } catch (e) {
-      console.warn("Direct Supabase rates sync note:", e);
-    }
-
-    // 2. Local SQLite DB sync
-    try {
-      const res = await syncToDB('/api/settings/rates', 'PUT', sanitized, `Updated System Rates`).catch(() => null);
-      addActivity('admin_action', 'System rates updated');
-      runCloudBackup(); 
-      return res;
-    } catch (e) { throw e; }
+  const reactivateStaffUser = async (id: string, reason: string) => {
+    const response = await localFetch(`/api/staff/${encodeURIComponent(id)}/reactivate`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Staff account could not be reactivated.');
+    setStaffUsers(prev => prev.map(user => user.id === id ? { ...user, isActive: true } : user));
+    setActivities(prev => [{ ...result.activity, timestamp: new Date(result.activity.timestamp) }, ...prev]);
+    runCloudBackup();
   };
 
-  const updateReservationTerms = async (t: Partial<ReservationTerms>) => {
-    setReservationTerms(prev => ({ ...prev, ...t }));
-
-    // 1. Direct Supabase sync so live website receives changes immediately
-    try {
-      const rows = Object.entries(t).map(([k, v]) => ({
-        key_name: k,
-        setting_value: String(v ?? '')
-      }));
-      await supabase.from('system_settings').upsert(rows, { onConflict: 'key_name' });
-    } catch (e) {
-      console.warn("Direct Supabase terms sync note:", e);
+  const persistPolicy = async (rates: Partial<RatesConfig>, terms: Partial<ReservationTerms>, revision?: string) => {
+    const endpoint = '/api/settings/policy';
+    if (!revision) {
+      const response = await localFetch(endpoint);
+      const saved = await response.json();
+      if (!response.ok) throw new Error(saved.error || 'Could not load the saved settings.');
+      revision = saved.revision;
     }
-
-    // 2. Local SQLite DB sync
-    try {
-      const res = await syncToDB('/api/settings/terms', 'PUT', t, `Updated Reservation Terms`).catch(() => null); 
-      addActivity('admin_action', 'Reservation terms updated');
-      runCloudBackup(); 
-      return res;
-    } catch (e) { throw e; }
+    const response = await localFetch(endpoint, {
+      method: Object.keys(rates).length && Object.keys(terms).length ? 'PUT' : 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expectedActorId: staffProfile.id, expectedRevision: revision, rates, terms }),
+    });
+    const saved = await response.json();
+    if (!response.ok) throw Object.assign(new Error(saved.error || 'Settings could not be saved.'), { nextSaveAt: saved.nextSaveAt });
+    setRates(saved.settings.rates);
+    setReservationTerms(saved.settings.terms);
+    if (saved.activity) setActivities(prev => [{ ...saved.activity, timestamp: new Date(saved.activity.timestamp) }, ...prev]);
+    runCloudBackup();
+    return saved;
   };
+  const savePolicySettings = (rates: RatesConfig, terms: ReservationTerms, revision: string) => persistPolicy(rates, terms, revision);
+  const updateRates = (rates: Partial<RatesConfig>) => persistPolicy(rates, {});
+  const updateReservationTerms = (terms: Partial<ReservationTerms>) => persistPolicy({}, terms);
 
  const addAnnouncement = (a: Omit<Announcement, 'id'|'createdAt'>) => {
     const newAnn = { ...a, id: `a${Date.now()}`, createdAt: new Date() };
@@ -1619,8 +1605,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addReservation, updateReservationStatus, updateReservation, cancelReservation, updateDownPayment, updateBalance,
       addFeedback, resolveFeedback, addActivity, addPromoCode, updatePromoCode, togglePromoCode, deletePromoCode, applyPromoCode,
       events, addEvent, updateEvent, deleteEvent,
-      addStaffUser, updateStaffUser, resetStaffUserPassword, toggleStaffUserActive,
-      updateRates, updateReservationTerms, addAnnouncement, updateAnnouncement, deleteAnnouncement, toggleAnnouncement, addClosedDate, removeClosedDate, updateClosedDate, siteConfig, updateSiteConfig, refreshLiveMonitor,
+      addStaffUser, updateStaffUser, resetStaffUserPassword, toggleStaffUserActive, reactivateStaffUser,
+      updateRates, updateReservationTerms, savePolicySettings, addAnnouncement, updateAnnouncement, deleteAnnouncement, toggleAnnouncement, addClosedDate, removeClosedDate, updateClosedDate, siteConfig, updateSiteConfig, refreshLiveMonitor,
       lostItems, addLostItem, updateLostItem, deleteLostItem,
       watchlist, addWatchlistItem, updateWatchlistItem, deleteWatchlistItem, sessionHistory, addSessionHistory, resetPasswordWithPin, isSystemOffline,
       hashPassword,

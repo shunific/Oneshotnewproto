@@ -208,7 +208,7 @@ export function AdminSiteSettings() {
         weekendStartTime: hoursForm.weekendStartTime,
         weekendEndTime: hoursForm.weekendEndTime,
       });
-      flash("Operating hours saved and synchronized to Cloud & Local!", "success");
+      flash("Operating hours saved.", "success");
     } catch (err: any) {
       flash(err.message || "Failed to update operating hours.", "error");
     } finally {
@@ -244,7 +244,7 @@ export function AdminSiteSettings() {
         advanceBookingHours: advHours,
         cancellationHours: cancelHours,
       });
-      flash("Occupancy limits & notices saved and synchronized to Cloud & Local!", "success");
+      flash("Occupancy limits and notices saved.", "success");
     } catch (err: any) {
       flash(err.message || "Failed to update occupancy limits.", "error");
     } finally {

@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from 'react';
+import { Fragment, useState, useMemo, useRef } from 'react';
 import { useAppContext, Activity, ActivityType } from '../context/AppContext';
 import { 
   PlusCircle, XCircle, RefreshCw, Info, FileText, 
@@ -11,6 +11,7 @@ export function ActivityLog() {
   // 🟢 FIXED: Grabbed the theme from context for dynamic calendar/clock icons
   const { activities, theme } = useAppContext();
   
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [dateFilter, setDateFilter] = useState<string>('ALL');
   const [moduleFilter, setModuleFilter] = useState<string>('ALL');
   const [actorFilter, setActorFilter] = useState<string>('ALL');
@@ -24,7 +25,7 @@ export function ActivityLog() {
     'Point of Sale': ['pos_order', 'payment_received'],
     'Reservations': ['reservation_created', 'reservation_updated', 'reservation_cancelled'],
     'Queue System': ['queue_added', 'queue_removed', 'queue_called'],
-    'System Actions': ['admin_action', 'tako_action', 'promo_created'],
+    'System Actions': ['staff_reactivated', 'admin_action', 'tako_action', 'promo_created'],
   };
 
   const getActor = (activity: Activity) => {
@@ -301,14 +302,13 @@ export function ActivityLog() {
               <th className="px-5 py-3.5 font-medium min-w-[180px]">Module</th>
               <th className="px-5 py-3.5 font-medium min-w-[140px]">Employee</th>
               <th className="px-5 py-3.5 font-medium min-w-[200px]">Event</th>
-              <th className="px-5 py-3.5 font-medium w-full">Additional Details</th>
             </tr>
           </thead>
           
           <tbody className="divide-y divide-neutral-800/50">
             {filteredActivities.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-5 py-12 text-center text-neutral-500">
+                <td colSpan={4} className="px-5 py-12 text-center text-neutral-500">
                   <p className="font-semibold">No activity found for this period.</p>
                 </td>
               </tr>
@@ -320,8 +320,17 @@ export function ActivityLog() {
                 const eventUI = getEventUI(act.type);
                 const cleanDesc = cleanDescription(act.description);
 
+                const expanded = expandedId === act.id;
+                const toggle = () => setExpandedId(expanded ? null : act.id);
+                const detailFields = [
+                  ['Account', act.metadata?.staffUsername], ['Staff ID', act.metadata?.staffId], ['Role', act.metadata?.staffRole],
+                  ['Reason', act.metadata?.reason], ['Previous status', act.metadata?.previousStatus], ['New status', act.metadata?.newStatus],
+                  ['Reservation ID', act.metadata?.reservationId], ['Table', act.metadata?.tableName || act.metadata?.tableId],
+                  ['Order ID', act.metadata?.orderId], ['Actor ID', act.metadata?.actorId],
+                ].filter(([, value]) => typeof value === 'string' && value.trim());
                 return (
-                  <tr key={act.id} className="hover:bg-neutral-900 transition-colors group">
+                  <Fragment key={act.id}>
+                  <tr onClick={toggle} className="cursor-pointer hover:bg-neutral-900 transition-colors group">
                     <td className="px-5 py-3.5 text-neutral-300">{formattedDate}</td>
                     <td className="px-5 py-3.5 text-neutral-400">
                       <div className="flex items-center gap-2">
@@ -333,13 +342,35 @@ export function ActivityLog() {
                     </td>
                     <td className="px-5 py-3.5 text-neutral-300">{getActor(act)}</td>
                     <td className="px-5 py-3.5">
-                      <div className="flex items-center gap-2 text-neutral-300 font-medium">
+                      <button type="button" aria-expanded={expanded} onClick={event => { event.stopPropagation(); toggle(); }} className="flex items-center gap-2 text-neutral-300 font-medium underline-offset-4 hover:underline">
                         {eventUI.icon}
                         {eventUI.text}
-                      </div>
+                      </button>
                     </td>
-                    <td className="px-5 py-3.5 text-neutral-400 whitespace-normal min-w-[300px]">{cleanDesc}</td>
                   </tr>
+                  {expanded && (
+                    <tr className="bg-neutral-900/60">
+                      <td colSpan={4} className="px-5 py-4 text-neutral-300 whitespace-normal">
+                        <p>{cleanDesc}</p>
+                        <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-3">
+                          {detailFields.map(([label, value]) => (
+                            <div key={label}><dt className="text-xs text-neutral-400">{label}</dt><dd className="break-words">{value}</dd></div>
+                          ))}
+                        </dl>
+                        {Array.isArray(act.metadata?.settingChanges) && (
+                          <ul className="mt-3 space-y-1">
+                            {act.metadata.settingChanges.map((change: { field: string; before?: unknown; after?: unknown }) => (
+                              <li key={change.field} className="text-sm">
+                                <span className="capitalize">{change.field.replace(/([A-Z])/g, ' $1')}</span>
+                                {change.after === undefined ? ' updated' : ` changed from ${change.before ?? 'unset'} to ${change.after}`}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 );
               })
             )}
