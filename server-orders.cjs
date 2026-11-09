@@ -78,7 +78,7 @@ async function transaction(dbPath, tableId, operationKey, expectedSessionStartTi
   } finally { await close(db); }
 }
 
-function registerOrderRoutes(app, dbPath) {
+function registerOrderRoutes(app, dbPath, { trackStock = true, verifyVoid } = {}) {
   const requestKey = (req, kind) => {
     if (typeof req.body?.expectedSessionStartTime !== 'string' || !/^\d{4}-\d{2}-\d{2}T/.test(req.body.expectedSessionStartTime) || !Number.isFinite(Date.parse(req.body.expectedSessionStartTime))) throw failure(400, 'Expected session start time is required.');
     if (typeof req.body?.requestId !== 'string' || !/^[a-zA-Z0-9_-]{8,128}$/.test(req.body.requestId)) throw failure(400, 'A unique request ID is required.');
@@ -107,7 +107,7 @@ function registerOrderRoutes(app, dbPath) {
       for (const [id, qty] of quantities) {
         const item = await get(db, 'SELECT * FROM inventory WHERE id = ?', [id]);
         if (!item) throw failure(404, 'Inventory item was not found.');
-        if (item.isActive !== 1 || !Number.isSafeInteger(item.stock) || item.stock < qty) throw failure(409, 'Inventory item is inactive or has insufficient stock.');
+        if (item.isActive !== 1 || !Number.isSafeInteger(item.stock) || item.stock < (trackStock ? qty : 1)) throw failure(409, 'Inventory item is inactive or has insufficient stock.');
         const priceCents = cents(item.price);
         if (!Number.isSafeInteger(priceCents * qty)) throw failure(400, 'Order amount is too large.');
         const existing = session.orders.find(order => order.id === id && cents(order.price) === priceCents);
@@ -115,13 +115,13 @@ function registerOrderRoutes(app, dbPath) {
           if (!quantity(existing.qty + qty) || !Number.isSafeInteger(priceCents * (existing.qty + qty))) throw failure(409, 'Order amount is too large.');
           existing.qty += qty;
         } else session.orders.push({ id, name: item.name, price: priceCents / 100, qty });
-        await run(db, 'UPDATE inventory SET stock = stock - ? WHERE id = ?', [qty, id]);
-        updated.push({ ...item, stock: item.stock - qty, isActive: true });
+        if (trackStock) await run(db, 'UPDATE inventory SET stock = stock - ? WHERE id = ?', [qty, id]);
+        updated.push({ ...item, stock: trackStock ? item.stock - qty : item.stock, isActive: true });
       }
       return updated;
     });
   }));
-  app.post('/api/tables/:id/orders/:orderIndex/void', respond(async req => {
+  app.post('/api/tables/:id/orders/:orderIndex/void', ...(verifyVoid ? [verifyVoid] : []), respond(async req => {
     const key = requestKey(req, 'void');
     if (!/^(0|[1-9]\d*)$/.test(req.params.orderIndex)) throw failure(400, 'Invalid order index.');
     const index = Number(req.params.orderIndex);
@@ -133,10 +133,10 @@ function registerOrderRoutes(app, dbPath) {
       if (!order || order.id !== expected.id || order.qty !== expected.qty || order.price !== expected.price) throw failure(409, 'Order changed. Refresh before voiding.');
       const item = await get(db, 'SELECT * FROM inventory WHERE id = ?', [order.id]);
       if (!item) throw failure(404, 'Inventory item was not found.');
-      if (!Number.isSafeInteger(item.stock) || item.stock < 0 || !Number.isSafeInteger(item.stock + order.qty)) throw failure(409, 'Inventory stock is invalid.');
-      await run(db, 'UPDATE inventory SET stock = stock + ? WHERE id = ?', [order.qty, order.id]);
+      if (!Number.isSafeInteger(item.stock) || item.stock < 0 || (trackStock && !Number.isSafeInteger(item.stock + order.qty))) throw failure(409, 'Inventory stock is invalid.');
+      if (trackStock) await run(db, 'UPDATE inventory SET stock = stock + ? WHERE id = ?', [order.qty, order.id]);
       session.orders.splice(index, 1);
-      return [{ ...item, stock: item.stock + order.qty, isActive: item.isActive === 1 }];
+      return [{ ...item, stock: trackStock ? item.stock + order.qty : item.stock, isActive: item.isActive === 1 }];
     });
   }));
 }

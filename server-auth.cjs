@@ -317,6 +317,22 @@ function registerAuthRoutes(app, db, options = {}) {
     if (keys.some(key => ['isActive','isAdmin','role','username'].includes(key))) invalidate(req.params.id);
     res.json({ id: req.params.id, user: publicStaff(await get(db, 'SELECT * FROM staff WHERE id = ?', [req.params.id])) });
   }));
+  const verifyOrderVoid = wrap(async (req, res, next) => {
+    const { username, password } = req.body?.approval || {};
+    if (typeof username !== 'string' || !username.trim() || username.length > 100 ||
+        typeof password !== 'string' || !password || password.length > 256) {
+      return res.status(400).json({ error: 'Enter the administrator password.' });
+    }
+    if (!await throttle(req, res, 'verify-order-void', username.trim().toLowerCase())) return;
+    const user = await findUser(username.trim());
+    if (!user || !bool(user.isActive) || !bool(user.isAdmin) ||
+        !(await verifySecret(password, user.password, true) || await verifySecret(password, user.password))) {
+      return res.status(403).json({ error: 'Administrator approval failed.' });
+    }
+    await clearAttempts('verify-order-void', username.trim().toLowerCase());
+    next();
+  });
+
   const resolveSessionActor = async token => {
     const session = sessions.get(token);
     if (!session || session.expires <= now()) { endSession(token); return null; }
@@ -331,6 +347,6 @@ function registerAuthRoutes(app, db, options = {}) {
     const session = sessions.get(token);
     return Boolean(session && session.id === localStaffId && session.expires > now());
   };
-  return { isSessionActive, resolveSessionActor, isSessionCurrent, ready, requireSession, requireAuth, requireAdmin, publicStaff, invalidate, close: () => { for (const token of [...sessions.keys()]) endSession(token); } };
+  return { verifyOrderVoid, isSessionActive, resolveSessionActor, isSessionCurrent, ready, requireSession, requireAuth, requireAdmin, publicStaff, invalidate, close: () => { for (const token of [...sessions.keys()]) endSession(token); } };
 }
 module.exports = { registerAuthRoutes, publicStaff, hashSecret, verifySecret };

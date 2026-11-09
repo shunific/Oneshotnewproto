@@ -145,6 +145,8 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 const { registerAuthRoutes } = require('./server-auth.cjs');
+const { registerInventoryRoutes } = require('./server-inventory.cjs');
+const { assertVenueAvailability } = require('./server-venue-availability.cjs');
 
 // ====================================================================
 // 🟢 SQLITE DATABASE INITIALIZATION & AUTO-MIGRATIONS
@@ -201,7 +203,9 @@ if (!sqlite3) {
   } else {
     console.log('✅ Connected to local SQLite database.');
     db.configure('busyTimeout', 5000);
-    registerAuthRoutes(app, db);
+    const { verifyOrderVoid } = registerAuthRoutes(app, db);
+    require('./server-orders.cjs').registerOrderRoutes(app, dbPath, { trackStock: false, verifyVoid: verifyOrderVoid });
+    registerInventoryRoutes(app, db);
     
     db.serialize(() => {
       db.run(`CREATE TABLE IF NOT EXISTS systemSettings (keyName TEXT PRIMARY KEY, settingValue TEXT, updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP)`);
@@ -242,6 +246,8 @@ if (!sqlite3) {
         'closureId TEXT',
         'originalReservationId TEXT',
         'rescheduleCount INTEGER DEFAULT 0',
+        'requestedRescheduleDate TEXT',
+        'requestedRescheduleTime TEXT',
         'lastNotificationId TEXT'
       ];
       resCols.forEach(col => {
@@ -722,11 +728,11 @@ app.post('/api/cache-reservations', (req, res) => {
   db.serialize(() => {
     db.run('BEGIN TRANSACTION');
     const stmt = db.prepare(`
-      INSERT OR REPLACE INTO reservations (id, customerName, contactNumber, email, date, timeSlot, durationHours, partySize, tableId, status, totalAmount, downPaymentAmount, downPaymentPaid, balancePaid, paymentRef, receiptImg, cancellationReason, refundStatus, refundMethod, refundNotes, createdAt, promoCode, discountAmount) 
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT OR REPLACE INTO reservations (id, customerName, contactNumber, email, date, timeSlot, durationHours, partySize, tableId, status, totalAmount, downPaymentAmount, downPaymentPaid, balancePaid, paymentRef, receiptImg, cancellationReason, refundStatus, refundMethod, refundNotes, createdAt, promoCode, discountAmount, requestedRescheduleDate, requestedRescheduleTime)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     reservations.forEach(r => {
-      stmt.run([r.id, r.customerName, r.contactNumber, r.email||null, typeof r.date === 'string' ? r.date : new Date(r.date).toISOString(), r.timeSlot, r.durationHours, r.partySize, r.tableId||null, r.status, r.totalAmount, r.downPaymentAmount, r.downPaymentPaid?1:0, r.balancePaid?1:0, r.paymentRef||null, r.receiptImg||null, r.cancellationReason||null, r.refundStatus||null, r.refundMethod||null, r.refundNotes||null, typeof r.createdAt === 'string' ? r.createdAt : new Date(r.createdAt).toISOString(), r.promoCode||null, r.discountAmount||0]);
+      stmt.run([r.id, r.customerName, r.contactNumber, r.email||null, typeof r.date === 'string' ? r.date : new Date(r.date).toISOString(), r.timeSlot, r.durationHours, r.partySize, r.tableId||null, r.status, r.totalAmount, r.downPaymentAmount, r.downPaymentPaid?1:0, r.balancePaid?1:0, r.paymentRef||null, r.receiptImg||null, r.cancellationReason||null, r.refundStatus||null, r.refundMethod||null, r.refundNotes||null, typeof r.createdAt === 'string' ? r.createdAt : new Date(r.createdAt).toISOString(), r.promoCode||null, r.discountAmount||0, r.requestedRescheduleDate || null, r.requestedRescheduleTime || null]);
     });
     stmt.finalize();
     db.run('COMMIT', (err) => {
@@ -948,6 +954,78 @@ app.post('/api/tables', (req, res) => {
       res.status(201).json({ message: 'Table created successfully', id: id });
     }
   );
+});
+
+app.post('/api/tables/:id/extend', async (req, res) => {
+  const { minutes, amount, payment, latestEndTime, expectedSession } = req.body || {};
+  const cents = typeof amount === 'number' ? Math.round(amount * 100) : NaN;
+  if ((minutes !== 'open' && (!Number.isInteger(minutes) || minutes < 60 || minutes % 60 !== 0)) ||
+      typeof amount !== 'number' || !Number.isSafeInteger(cents) || cents < 0 || Math.abs(amount * 100 - cents) > 0.000001 ||
+      !['cash', 'gcash'].includes(payment?.method) ||
+      (payment.method === 'gcash' && (typeof payment.reference !== 'string' || !/^\d{13}$/.test(payment.reference)))) {
+    return res.status(400).json({ error: 'Review the duration, amount and 13-digit GCash reference.' });
+  }
+  if (!sqlite3) return res.status(503).json({ error: 'Local database is unavailable.' });
+
+  let connection;
+  let inTransaction = false;
+  const run = (sql, params = []) => new Promise((resolve, reject) => {
+    connection.run(sql, params, error => error ? reject(error) : resolve());
+  });
+  const conflict = message => Object.assign(new Error(message), { status: 409 });
+  try {
+    connection = await new Promise((resolve, reject) => {
+      const database = new sqlite3.Database(dbPath, sqlite3.OPEN_READWRITE, error => error ? reject(error) : resolve(database));
+    });
+    connection.configure('busyTimeout', 5000);
+    await run('BEGIN IMMEDIATE');
+    inTransaction = true;
+    const row = await new Promise((resolve, reject) => {
+      connection.get('SELECT sessionData FROM tables WHERE id = ? AND status = ? AND isActive = 1',
+        [req.params.id, 'occupied'], (error, result) => error ? reject(error) : resolve(result));
+    });
+    const session = safeParseJSON(row?.sessionData);
+    if (!session || JSON.stringify(session) !== JSON.stringify(expectedSession) ||
+        session.isOpenTime || session.pricingVersion === 2 || !Number.isSafeInteger(session.durationMinutes) ||
+        session.durationMinutes <= 0 || !Number.isFinite(session.amountPaid) ||
+        !Number.isFinite(session.hourlyRate) || session.hourlyRate <= 0) {
+      throw conflict('Session changed or cannot be extended. Refresh the table.');
+    }
+
+    const open = minutes === 'open';
+    const charge = open ? 0 : Math.round(session.hourlyRate * minutes / 60 * 100);
+    const paidCents = Math.round(session.amountPaid * 100) + cents;
+    if (!Number.isSafeInteger(paidCents) || cents > charge) {
+      throw Object.assign(new Error('Payment exceeds the extension charge.'), { status: 400 });
+    }
+    const updated = {
+      ...session,
+      durationMinutes: open ? null : session.durationMinutes + minutes,
+      isOpenTime: open,
+      amountPaid: paidCents / 100,
+      ...(cents > 0 && payment.method === 'gcash' && {
+        extensionPayments: [...(Array.isArray(session.extensionPayments) ? session.extensionPayments : []),
+          { amount, method: 'gcash', reference: payment.reference }],
+      }),
+    };
+    const venue = await assertVenueAvailability(connection, {
+      tableId: req.params.id, session: updated, now: Date.now(), operation: 'extend',
+      excludeReservationId: session.reservationId, ignoreUnassignedReservations: true,
+    });
+    if (open) {
+      if (latestEndTime !== venue.latestEndTime) throw conflict('The play limit changed. Reopen the extension.');
+      updated.latestEndTime = venue.latestEndTime;
+    }
+    await run('UPDATE tables SET sessionData = ? WHERE id = ?', [JSON.stringify(updated), req.params.id]);
+    await run('COMMIT');
+    inTransaction = false;
+    res.json({ session: updated });
+  } catch (error) {
+    res.status(error.status || 503).json({ error: error.status ? error.message : 'Extension could not be saved.' });
+  } finally {
+    if (inTransaction) await run('ROLLBACK').catch(() => {});
+    if (connection) connection.close();
+  }
 });
 
 app.put('/api/tables/:id', (req, res) => {
@@ -1353,14 +1431,6 @@ app.delete('/api/reservations/:id', (req, res) => {
   db.run(`DELETE FROM reservations WHERE id = ?`, [req.params.id], function (err) {
     if (err) return res.status(500).json({ error: err.message });
     res.json({ message: "Reservation deleted." });
-  });
-});
-
-app.post('/api/inventory', (req, res) => {
-  const { id, name, category, price, stock, isActive } = req.body;
-  db.run(`INSERT INTO inventory (id, name, category, price, stock, isActive) VALUES (?, ?, ?, ?, ?, ?)`, [id, name, category, price, stock, isActive ? 1 : 0], function(err) {
-    if (err) return res.status(500).json({ error: err.message });
-    res.status(201).json({ message: "Inventory item saved to DB." });
   });
 });
 

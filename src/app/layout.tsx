@@ -6,7 +6,7 @@ import {
   Tag,
   Menu, X, Bell, ChevronRight,
   LogOut, Settings, Search,
-  Monitor, ShieldCheck, Lock, ShieldAlert, Package, History,
+  Monitor, ShieldCheck, Lock, Package, History,
   AlertTriangle, Sparkles, MessageSquare
 } from 'lucide-react';
 import { addMinutes, differenceInSeconds, format } from 'date-fns';
@@ -23,8 +23,7 @@ const navItems = [
   { to: '/staff/queue',               icon: UserPlus,      label: 'Queue' },
   { to: '/staff/promo-codes',         icon: Tag,           label: 'Promo Codes' },
   { to: '/staff/history',             icon: History,       label: 'Session History' }, 
-  { to: '/staff/lost-found',          icon: Package,       label: 'Lost & Found' },
-  { to: '/staff/watchlist',           icon: ShieldAlert,   label: 'Security Watchlist' },
+  { to: '/staff/lost-found',          icon: Package,       label: 'Incident & Lost Items' },
   { to: '/staff/feedback',            icon: MessageSquare, label: 'Feedback' },
   { to: '/staff/settings',            icon: Settings,      label: 'Settings' },
 ];
@@ -34,8 +33,8 @@ const pageTitles: Record<string, string> = {
   '/staff/tables': 'Table Monitor',
   '/staff/reservations': 'Reservations',
   '/staff/queue': 'Queue Management',
-  '/staff/lost-found': 'Lost & Found',       
-  '/staff/watchlist': 'Security Watchlist',
+  '/staff/lost-found': 'Incident & Lost Items',
+  '/staff/watchlist': 'Incident & Lost Items',
   '/staff/promo-codes': 'Promo Codes',
   '/staff/history': 'Session History',
   '/staff/feedback': 'Customer Feedback',

@@ -6,9 +6,13 @@ import {
 } from 'lucide-react';
 import { formatDistanceToNow, isToday, isYesterday, isThisWeek, isThisMonth, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
 
-type FeedbackType = 'suggestion' | 'complaint' | 'lost_item' | 'compliment' | 'other';
+const getFeedbackType = (feedback: { tags: string[]; feedbackType?: string }) =>
+  feedback.tags?.includes('Priority Resolution') ? 'report' : feedback.feedbackType;
+
+type FeedbackType = 'report' | 'suggestion' | 'complaint' | 'lost_item' | 'compliment' | 'other';
 
 const TYPE_CONFIG: Record<FeedbackType, { label: string; color: string; bg: string; border: string; icon: React.ElementType }> = {
+  report: { label: 'Reports', color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/20', icon: AlertTriangle },
   compliment: { label: 'Compliment',        color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', icon: ThumbsUp },
   suggestion: { label: 'Suggestion',        color: 'text-blue-400',    bg: 'bg-blue-500/10',    border: 'border-blue-500/20',    icon: Lightbulb },
   complaint:  { label: 'Concern/Complaint', color: 'text-amber-400',   bg: 'bg-amber-500/10',   border: 'border-amber-500/20',   icon: AlertTriangle },
@@ -17,7 +21,7 @@ const TYPE_CONFIG: Record<FeedbackType, { label: string; color: string; bg: stri
 };
 
 export function FeedbackPage() {
-  const { feedback, resolveFeedback, adminLoggedIn, staffProfile } = useAppContext();
+  const { feedback, resolveFeedback, adminLoggedIn, staffProfile, forceFullSync } = useAppContext();
   const actorId = adminLoggedIn && staffProfile?.isAdmin ? staffProfile.id : null;
   const resolutionOwner = useRef({ id: actorId, generation: 0 });
   if (resolutionOwner.current.id !== actorId) resolutionOwner.current = { id: actorId, generation: resolutionOwner.current.generation + 1 };
@@ -42,7 +46,7 @@ export function FeedbackPage() {
 
   // ── Filtering Logic ──
   const filtered = feedback.filter(f => {
-    const matchType = filterType === 'all' || f.feedbackType === filterType;
+    const matchType = filterType === 'all' || getFeedbackType(f) === filterType;
     const matchSearch = !searchQuery ||
       f.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       f.comment.toLowerCase().includes(searchQuery.toLowerCase());
@@ -197,11 +201,11 @@ export function FeedbackPage() {
         )}
 
         <div className="flex gap-1.5 flex-wrap">
-          {(['all', 'compliment', 'suggestion', 'complaint', 'lost_item', 'other'] as const).map(t => {
+          {(['all', 'compliment', 'suggestion', 'complaint', 'lost_item', 'other', 'report'] as const).map(t => {
             const cfg = t !== 'all' ? TYPE_CONFIG[t] : null;
             const isActive = filterType === t;
             return (
-              <button key={t} onClick={() => setFilterType(t)}
+              <button key={t} onClick={() => { setFilterType(t); if (t === 'report') void forceFullSync(); }}
                 className={`px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all ${
                   isActive
                     ? cfg ? `${cfg.bg} ${cfg.border} ${cfg.color}` : 'bg-neutral-800 text-neutral-200 border-neutral-700'
@@ -241,7 +245,8 @@ export function FeedbackPage() {
             <p className="text-neutral-500 text-xs mt-1">Try adjusting your search or filters.</p>
           </div>
         ) : filtered.map(fb => {
-          const type = (fb.feedbackType || 'other') as FeedbackType;
+          const rawType = getFeedbackType(fb) as FeedbackType;
+          const type = TYPE_CONFIG[rawType] ? rawType : 'other';
           const cfg = TYPE_CONFIG[type];
           const Icon = cfg.icon;
           return (

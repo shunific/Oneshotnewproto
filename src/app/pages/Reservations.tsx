@@ -17,6 +17,7 @@ const formatPHP = (amount?: number | string | null) => {
 };
 
 const statusConfig: Record<string, { label: string; color: string; dot: string }> = {
+  'pending-reschedule': { label: 'Pending Reschedule', color: 'bg-violet-500/10 text-violet-400 border-violet-500/20', dot: 'bg-violet-400' },
   pending: { label: 'Pending', color: 'bg-amber-500/10 text-amber-400 border-amber-500/20', dot: 'bg-amber-400' },
   confirmed: { label: 'Confirmed', color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20', dot: 'bg-emerald-400' },
   'checked-in': { label: 'Checked In', color: 'bg-blue-500/10 text-blue-400 border-blue-500/20', dot: 'bg-blue-400' },
@@ -24,9 +25,13 @@ const statusConfig: Record<string, { label: string; color: string; dot: string }
   cancelled: { label: 'Cancelled', color: 'bg-rose-500/10 text-rose-400 border-rose-500/20', dot: 'bg-rose-400' },
 };
 
+const hasRescheduleRequest = (reservation: Reservation) =>
+  reservation.status === 'pending-reschedule' ||
+  Boolean(reservation.requestedRescheduleDate && ['pending', 'confirmed'].includes(reservation.status));
+
 const formatDateTime = (dateVal: string | Date, timeStr: string) => {
   try {
-    const d = new Date(dateVal);
+    const d = new Date(typeof dateVal === 'string' && dateVal.length === 10 ? dateVal + 'T00:00:00' : dateVal);
     const [h, m] = (timeStr || '00:00').split(':').map(Number);
     d.setHours(h, m, 0, 0);
     if (isToday(d)) return `Today, ${format(d, 'h:mm a')}`;
@@ -155,6 +160,7 @@ export function Reservations() {
   const [dayViewDate, setDayViewDate] = useState<Date | null>(null);
 
   // Toolbar & Search States
+  const [showReschedules, setShowReschedules] = useState(false);
   const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'tomorrow' | 'this_week'>('all');
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -444,9 +450,9 @@ export function Reservations() {
     setFile(file);
   };
 
-  const validateTimeSlot = (time: string, duration: number) => {
-    if (!time || !selectedDate) return 'invalid';
-    if (!selectedTableId) return 'no_table';
+  const validateTimeSlot = (time: string, duration: number, day = selectedDate, tableId = selectedTableId, excludedId?: string) => {
+    if (!time || !day) return 'invalid';
+    if (!tableId) return 'no_table';
 
     const parseToMins = (t: string) => {
       const [hh = '0', mm = '0'] = (t || '').split(':');
@@ -454,9 +460,10 @@ export function Reservations() {
     };
 
     const slotMins = parseToMins(time);
-    const requestedStart = new Date(selectedDate);
+    const requestedStart = new Date(day);
     const [h, m] = time.split(':').map(Number);
     requestedStart.setHours(h, m, 0, 0);
+    if (requestedStart <= new Date()) return 'past';
     const requestedEnd = addMinutes(requestedStart, duration * 60);
 
     if (isToday(requestedStart)) {
@@ -466,9 +473,8 @@ export function Reservations() {
 
     let tableOverlapCount = 0;
     const sameTableRes = reservations.filter((r: any) => 
-      r.tableId === selectedTableId && 
-      r.status !== 'cancelled' && 
-      r.status !== 'completed' && 
+      r.id !== excludedId && r.tableId === tableId &&
+      !['cancelled', 'completed', 'pending-refund'].includes(r.status) &&
       isSameDay(new Date(r.date), requestedStart)
     );
 
@@ -483,7 +489,7 @@ export function Reservations() {
     if (tableOverlapCount > 0) return 'table_conflict';
 
     if (isToday(requestedStart)) {
-      const targetTable = tables.find((t: any) => t.id === selectedTableId);
+      const targetTable = tables.find((t: any) => t.id === tableId);
       if (targetTable?.status === 'occupied' && targetTable.session?.startTime && targetTable.session?.durationMinutes) {
          const sessionEnd = addMinutes(new Date(targetTable.session.startTime), targetTable.session.durationMinutes);
          if (requestedStart < sessionEnd) return 'active_conflict';
@@ -694,18 +700,28 @@ export function Reservations() {
            setIsActionSubmitting(false);
            return;
          }
-         const rDate = new Date(rescheduleData.newDate);
-         const [h,m] = rescheduleData.newTimeSlot.split(':').map(Number);
-         rDate.setHours(h, m, 0, 0);
-
-         updateReservation(actionModal.reservation.id, { 
-           status: 'confirmed', 
-           date: rDate,
-           timeSlot: rescheduleData.newTimeSlot,
-           durationHours: rescheduleData.newDuration,
-           tableId: rescheduleData.newTableId,
-           cancellationReason: `Rescheduled: ${callSummary}` 
-         });
+         const { newDate, newTimeSlot, newDuration, newTableId } = rescheduleData;
+         const booking = actionModal.reservation;
+         if (validateTimeSlot(newTimeSlot, newDuration, newDate, newTableId, booking.id) !== 'valid') {
+           flash('Choose an available future time.', 'error');
+           return;
+         }
+         const date = format(newDate, 'yyyy-MM-dd');
+         const requested = hasRescheduleRequest(booking);
+         const changes = {
+           status: booking.status === 'pending' ? 'pending' : 'confirmed',
+           date,
+           timeSlot: newTimeSlot,
+           durationHours: newDuration,
+           tableId: newTableId,
+           cancellationreason: `Rescheduled: ${callSummary}`,
+           ...(requested && booking.requestedRescheduleDate ? { requested_reschedule_date: null, requested_reschedule_time: null } : {}),
+         };
+         let save = supabase.from('reservations').update(changes).eq('id', booking.id).eq('status', booking.status);
+         if (booking.requestedRescheduleDate) save = save.eq('requested_reschedule_date', booking.requestedRescheduleDate);
+         const { data, error } = await save.select('id').maybeSingle();
+         if (error || !data) throw new Error('Reservation changed before the reschedule was saved.');
+         await forceFullSync();
          flash("Marked as contacted and reservation rescheduled successfully.", "success");
       }
       
@@ -723,7 +739,8 @@ export function Reservations() {
   const filtered = reservations
     .filter((r: any) => {
       const matchSearch = !search || r.customerName.toLowerCase().includes(search.toLowerCase()) || r.contactNumber.includes(search) || r.id.toLowerCase().includes(search.toLowerCase());
-      const matchStatus = filterStatus === 'all' || r.status === filterStatus;
+      if (showReschedules) return matchSearch && hasRescheduleRequest(r);
+      const matchStatus = filterStatus === 'all' || (filterStatus === 'pending-reschedule' ? hasRescheduleRequest(r) : r.status === filterStatus);
       
       let matchDate = true;
       const rDate = new Date(r.date);
@@ -739,6 +756,9 @@ export function Reservations() {
 
   const todayCount = reservations.filter((r: any) => isToday(new Date(r.date))).length;
   const pendingCount = reservations.filter((r: any) => r.status === 'pending').length;
+  const reservedDates = reservations
+    .filter(r => !['cancelled', 'completed', 'pending-refund'].includes(r.status))
+    .map(r => new Date(r.date));
   
   const totalRevenue = reservations.filter((r: any) => r.status === 'completed').reduce((s: number, r: any) => s + (Number(r.totalAmount) || 0), 0);
   const pendingPayment = reservations.filter((r: any) => r.status !== 'cancelled').reduce((s: number, r: any) => {
@@ -908,10 +928,11 @@ export function Reservations() {
 
         {/* Date Filters */}
         <div className="flex bg-neutral-900 border border-neutral-800 rounded-lg p-1 flex-shrink-0 hide-scrollbar overflow-x-auto">
-          <button onClick={() => setDateFilter('all')} className={`whitespace-nowrap px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${dateFilter === 'all' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-500 hover:text-neutral-300'}`}>All</button>
-          <button onClick={() => setDateFilter('today')} className={`whitespace-nowrap px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${dateFilter === 'today' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-500 hover:text-neutral-300'}`}>Today</button>
-          <button onClick={() => setDateFilter('tomorrow')} className={`whitespace-nowrap px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${dateFilter === 'tomorrow' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-500 hover:text-neutral-300'}`}>Tomorrow</button>
-          <button onClick={() => setDateFilter('this_week')} className={`whitespace-nowrap px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${dateFilter === 'this_week' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-500 hover:text-neutral-300'}`}>This Week</button>
+          <button type="button" aria-pressed={showReschedules} onClick={() => { setShowReschedules(value => !value); if (!showReschedules) void forceFullSync(); }} className={`whitespace-nowrap px-3 py-1.5 rounded-md text-xs font-semibold ${showReschedules ? 'bg-violet-500/20 text-violet-300' : 'text-neutral-400 hover:text-neutral-200'}`}>Reschedules</button>
+          <button onClick={() => { setShowReschedules(false); setDateFilter('all'); }} className={`whitespace-nowrap px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${!showReschedules && dateFilter === 'all' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-500 hover:text-neutral-300'}`}>All</button>
+          <button onClick={() => { setShowReschedules(false); setDateFilter('today'); }} className={`whitespace-nowrap px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${!showReschedules && dateFilter === 'today' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-500 hover:text-neutral-300'}`}>Today</button>
+          <button onClick={() => { setShowReschedules(false); setDateFilter('tomorrow'); }} className={`whitespace-nowrap px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${!showReschedules && dateFilter === 'tomorrow' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-500 hover:text-neutral-300'}`}>Tomorrow</button>
+          <button onClick={() => { setShowReschedules(false); setDateFilter('this_week'); }} className={`whitespace-nowrap px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${!showReschedules && dateFilter === 'this_week' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-500 hover:text-neutral-300'}`}>This Week</button>
         </div>
         
         <div className="flex-1" />
@@ -948,7 +969,7 @@ export function Reservations() {
             <Download size={14} /> Export CSV
           </button>
 
-          <button onClick={() => setShowForm(true)} className="h-10 px-4 flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded-lg font-bold transition-all shadow-lg shadow-emerald-900/30 whitespace-nowrap">
+          <button onClick={() => { setShowForm(true); void forceFullSync(); }} className="h-10 px-4 flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded-lg font-bold transition-all shadow-lg shadow-emerald-900/30 whitespace-nowrap">
             <Plus size={15} /> New Reservation
           </button>
         </div>
@@ -994,7 +1015,12 @@ export function Reservations() {
                         <p className="text-sm font-semibold text-neutral-200 flex items-center gap-2">{r.customerName}<span className="text-[9px] font-mono text-neutral-500 bg-neutral-800 px-1.5 py-0.5 rounded tracking-widest">{r.id}</span></p>
                         <p className="text-xs text-neutral-500">{r.contactNumber}</p>
                       </td>
-                      <td className="px-4 py-3"><p className="text-sm text-neutral-300 font-medium">{formatDateTime(r.date, r.timeSlot)}</p></td>
+                      <td className="px-4 py-3">
+                        <p className="text-sm text-neutral-300 font-medium">{formatDateTime(r.date, r.timeSlot)}</p>
+                        {showReschedules && r.requestedRescheduleDate && r.requestedRescheduleTime && (
+                          <p className="mt-1 text-xs text-violet-300">Requested {formatDateTime(r.requestedRescheduleDate, r.requestedRescheduleTime)}</p>
+                        )}
+                      </td>
                       <td className="px-4 py-3"><span className="text-sm text-neutral-400">{r.durationHours}h</span></td>
                       <td className="px-4 py-3"><span className="text-sm text-neutral-400">{r.partySize} pax</span></td>
                       <td className="px-4 py-3"><span className="text-sm text-neutral-400">{getTableName(r.tableId)}</span></td>
@@ -1029,7 +1055,7 @@ export function Reservations() {
                                   <motion.div initial={{ opacity: 0, y: 5, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 5, scale: 0.95 }} className="absolute right-4 top-10 mt-1 w-44 bg-neutral-900 border border-neutral-700 rounded-xl shadow-2xl overflow-hidden z-[60] flex flex-col py-1">
                                     {r.status === 'pending' && <button onClick={(e) => { e.stopPropagation(); setActionModal({ type: 'receipt', reservation: r }); setOpenActionRowId(null); setSelectedId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-emerald-400 hover:bg-neutral-800 transition-colors">Verify Booking</button>}
                                     {r.status === 'pending-refund' && <button onClick={(e) => { e.stopPropagation(); setActionModal({ type: 'refund', reservation: r }); setOpenActionRowId(null); setSelectedId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-rose-400 hover:bg-neutral-800 transition-colors">Process Refund</button>}
-                                    {r.status === 'pending-reschedule' && <button onClick={(e) => { e.stopPropagation(); setRescheduleData({ newDate: new Date(r.date), newTimeSlot: r.timeSlot, newDuration: r.durationHours, newTableId: r.tableId, staffConfirmed: false }); setActionModal({ type: 'reschedule', reservation: r }); setOpenActionRowId(null); setSelectedId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-violet-400 hover:bg-neutral-800 transition-colors">Process Reschedule</button>}
+                                    {hasRescheduleRequest(r) && <button onClick={(e) => { e.stopPropagation(); setRescheduleData({ newDate: r.requestedRescheduleDate ? new Date(r.requestedRescheduleDate + 'T00:00:00') : new Date(r.date), newTimeSlot: r.requestedRescheduleTime || r.timeSlot, newDuration: r.durationHours, newTableId: r.tableId, staffConfirmed: false }); setActionModal({ type: 'reschedule', reservation: r }); setOpenActionRowId(null); setSelectedId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-violet-400 hover:bg-neutral-800 transition-colors">Process Reschedule</button>}
                                     {r.status === 'confirmed' && (
                                       <>
                                         <button onClick={(e) => { e.stopPropagation(); handleCheckIn(r); setOpenActionRowId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-blue-400 hover:bg-neutral-800 transition-colors border-b border-neutral-800/50">Check In</button>
@@ -1052,7 +1078,7 @@ export function Reservations() {
                                         Mark Complete
                                       </button>
                                     )}
-                                    {r.status === 'confirmed' && (
+                                    {r.status === 'confirmed' && !hasRescheduleRequest(r) && (
                                       <button onClick={(e) => { e.stopPropagation(); setRescheduleData({ newDate: new Date(r.date), newTimeSlot: r.timeSlot, newDuration: r.durationHours, newTableId: r.tableId, staffConfirmed: false }); setActionModal({ type: 'reschedule', reservation: r }); setOpenActionRowId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-amber-400 hover:bg-neutral-800 transition-colors border-t border-neutral-800/50">Reschedule Booking</button>
                                     )}
                                     {r.status !== 'cancelled' && r.status !== 'completed' && r.tableId && (
@@ -1291,7 +1317,7 @@ export function Reservations() {
                       <motion.div initial={{ opacity: 0, y: -10, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -10, scale: 0.95 }} className="absolute bottom-full left-0 mb-2 w-full bg-neutral-900 border border-neutral-700 rounded-xl shadow-2xl overflow-hidden z-[60] flex flex-col py-1">
                         {selected.status === 'pending' && <button onClick={(e) => { e.stopPropagation(); setActionModal({ type: 'receipt', reservation: selected }); setOpenActionRowId(null); setSelectedId(null); }} className="px-5 py-3 text-left text-sm font-bold text-emerald-400 hover:bg-neutral-800 transition-colors">Verify Booking</button>}
                         {selected.status === 'pending-refund' && <button onClick={(e) => { e.stopPropagation(); setActionModal({ type: 'refund', reservation: selected }); setOpenActionRowId(null); setSelectedId(null); }} className="px-5 py-3 text-left text-sm font-bold text-rose-400 hover:bg-neutral-800 transition-colors">Process Refund</button>}
-                        {selected.status === 'pending-reschedule' && <button onClick={(e) => { e.stopPropagation(); setRescheduleData({ newDate: new Date(selected.date), newTimeSlot: selected.timeSlot, newDuration: selected.durationHours, newTableId: selected.tableId, staffConfirmed: false }); setActionModal({ type: 'reschedule', reservation: selected }); setOpenActionRowId(null); setSelectedId(null); }} className="px-5 py-3 text-left text-sm font-bold text-violet-400 hover:bg-neutral-800 transition-colors">Process Reschedule</button>}
+                        {hasRescheduleRequest(selected) && <button onClick={(e) => { e.stopPropagation(); setRescheduleData({ newDate: selected.requestedRescheduleDate ? new Date(selected.requestedRescheduleDate + 'T00:00:00') : new Date(selected.date), newTimeSlot: selected.requestedRescheduleTime || selected.timeSlot, newDuration: selected.durationHours, newTableId: selected.tableId, staffConfirmed: false }); setActionModal({ type: 'reschedule', reservation: selected }); setOpenActionRowId(null); setSelectedId(null); }} className="px-5 py-3 text-left text-sm font-bold text-violet-400 hover:bg-neutral-800 transition-colors">Process Reschedule</button>}
                         {selected.status === 'confirmed' && (
                           <>
                             <button onClick={(e) => { e.stopPropagation(); handleCheckIn(selected); setOpenActionRowId(null); }} className="px-5 py-3 text-left text-sm font-bold text-blue-400 hover:bg-neutral-800 transition-colors border-b border-neutral-800/50">Check In Customer</button>
@@ -1314,7 +1340,7 @@ export function Reservations() {
                             Mark Complete
                           </button>
                         )}
-                        {selected.status === 'confirmed' && (
+                        {selected.status === 'confirmed' && !hasRescheduleRequest(selected) && (
                           <button onClick={(e) => { e.stopPropagation(); setRescheduleData({ newDate: new Date(selected.date), newTimeSlot: selected.timeSlot, newDuration: selected.durationHours, newTableId: selected.tableId, staffConfirmed: false }); setActionModal({ type: 'reschedule', reservation: selected }); setOpenActionRowId(null); }} className="px-5 py-3 text-left text-sm font-bold text-amber-400 hover:bg-neutral-800 transition-colors border-t border-neutral-800/50">Reschedule Booking</button>
                         )}
                         {selected.status !== 'cancelled' && selected.status !== 'completed' && selected.tableId && (
@@ -1412,7 +1438,8 @@ export function Reservations() {
                     {actionModal.type === 'refund' ? (
                        <p>Please contact the customer to manually settle the GCash refund of <strong>{formatPHP(actionModal.reservation.downPaymentAmount)}</strong>.</p>
                     ) : (
-                       <p>Please contact the customer to manually reschedule their booking from <strong>{format(new Date(actionModal.reservation.date), 'MMM d, yyyy')}</strong> at <strong>{actionModal.reservation.timeSlot}</strong>.</p>
+                       <><p>Please contact the customer to manually reschedule their booking from <strong>{format(new Date(actionModal.reservation.date), 'MMM d, yyyy')}</strong> at <strong>{actionModal.reservation.timeSlot}</strong>.</p>
+                       {actionModal.reservation.requestedRescheduleDate && <p className="mt-1 text-violet-300">Requested: {formatDateTime(actionModal.reservation.requestedRescheduleDate, actionModal.reservation.requestedRescheduleTime)}</p>}</>
                     )}
                   </div>
                   
@@ -1558,7 +1585,7 @@ export function Reservations() {
                         <MiniCalendar
                           selectedDate={selectedDate}
                           onSelect={(d) => { setSelectedDate(d); setSelectedTableId(null); setIsCalendarExpanded(false); }}
-                          reservedDates={[]} closedDates={closedDates}
+                          reservedDates={reservedDates} closedDates={closedDates}
                         />
                       </div>
                     </motion.div>
@@ -1587,16 +1614,28 @@ export function Reservations() {
                           const isSel = selectedTableId === table.id;
                           const isOcc = table.status === 'occupied';
                           const isMaint = table.status === 'maintenance';
+                          const isEvent = table.status === 'event' || (events || []).some((event: any) => {
+                            if (event.isCancelled) return false;
+                            const dates = [...(Array.isArray(event.dates) ? event.dates : []), event.date].filter(Boolean);
+                            const tableIds = event.selectedTableIds || event.eventTableIds || event.tableIds || [];
+                            return dates.some(date => isSameDay(new Date(date), selectedDate)) &&
+                              (tableIds.length ? tableIds.includes(table.id) : event.allowReservations === false);
+                          }) || reservations.some(r => r.tableId === table.id && isSameDay(new Date(r.date), selectedDate)
+                            && r.status !== 'cancelled' && (r.id.startsWith('EVT-') || r.paymentRef === 'EVENT'));
+                          const hasBookings = reservations.some(r => r.tableId === table.id && isSameDay(new Date(r.date), selectedDate)
+                            && !['cancelled', 'completed', 'pending-refund'].includes(r.status));
                           
                           return (
                             <button
                               key={table.id}
                               type="button"
-                              disabled={isMaint}
+                              disabled={isMaint || isEvent}
                               onClick={() => setSelectedTableId(table.id)}
                               className={`relative p-3 rounded-xl border text-left flex flex-col justify-between transition-all ${
                                 isMaint 
                                   ? 'bg-neutral-900/30 border-neutral-800/40 opacity-40 cursor-not-allowed'
+                                  : isEvent
+                                  ? 'bg-purple-950/40 border-purple-500/70'
                                   : isSel 
                                   ? 'bg-emerald-950/40 border-emerald-500 shadow-lg shadow-emerald-900/30 scale-[1.02]' 
                                   : 'bg-neutral-900/80 border-neutral-800 hover:border-neutral-600'
@@ -1604,10 +1643,10 @@ export function Reservations() {
                             >
                               <div className="flex justify-between items-center mb-1">
                                 <span className={`text-xs font-bold ${isSel ? 'text-emerald-400' : 'text-neutral-200'}`}>{table.name}</span>
-                                <span className={`w-2 h-2 rounded-full ${isMaint ? 'bg-rose-500' : isOcc && isToday(selectedDate) ? 'bg-amber-400 animate-pulse' : 'bg-emerald-500'}`} />
+                                <span className={`w-2 h-2 rounded-full ${isMaint ? 'bg-rose-500' : isEvent ? 'bg-purple-400' : isOcc && isToday(selectedDate) ? 'bg-amber-400 animate-pulse' : hasBookings ? 'bg-amber-400' : 'bg-emerald-500'}`} />
                               </div>
                               <p className="text-[10px] text-neutral-400 truncate">
-                                {isMaint ? 'Unavailable' : isOcc && isToday(selectedDate) ? 'Playing Now' : 'Available Slot'}
+                                {isMaint ? 'Unavailable' : isEvent ? 'EVENT' : isOcc && isToday(selectedDate) ? 'Playing Now' : hasBookings ? 'Has Reservations' : 'Available Slot'}
                               </p>
                             </button>
                           );
@@ -1631,8 +1670,7 @@ export function Reservations() {
                             const tableRes = reservations.filter((r: any) => 
                               r.tableId === selectedTableId && 
                               isSameDay(new Date(r.date), selectedDate) && 
-                              r.status !== 'cancelled' && 
-                              r.status !== 'completed'
+                              !['cancelled', 'completed', 'pending-refund'].includes(r.status)
                             ).sort((a: any, b: any) => {
                               const timeA = a.timeSlot.split(':').map(Number);
                               const timeB = b.timeSlot.split(':').map(Number);

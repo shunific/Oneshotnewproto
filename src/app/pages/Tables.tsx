@@ -62,7 +62,7 @@ const reviewExtensionPayment = (minutes: number | 'open', status: PaymentStatus,
   if (status === 'partial' && amount >= charge) throw new Error('Partial payment must be less than the extension charge. Choose Paid Now for the full amount.');
   if (status === 'paid' && method === 'cash' && money(cashInput) < charge) throw new Error('Cash tendered must cover the extension charge.');
   const paymentReference = typeof reference === 'string' ? reference.trim() : '';
-  if (method === 'gcash' && (paymentReference.length < 3 || paymentReference.length > 120 || !/^[a-zA-Z0-9 -]+$/.test(paymentReference) || (paymentReference.match(/[a-zA-Z0-9]/g) || []).length < 3)) throw new Error('Enter a GCash reference of 3–120 letters, numbers, spaces or hyphens, with at least three letters or numbers.');
+  if (method === 'gcash' && !/^\d{13}$/.test(paymentReference)) throw new Error('Enter a 13-digit GCash reference.');
   return {amount,payment:{method,...(method === 'gcash' ? {reference:paymentReference} : {})}};
 };
 
@@ -193,7 +193,6 @@ export function Tables() {
   const isAdmin = staffProfile?.isAdmin || staffProfile?.role?.toLowerCase() === 'manager' || staffProfile?.role?.toLowerCase() === 'super admin';
   const [isEditingMenu, setIsEditingMenu] = useState(false);
   const [editingItem, setEditingItem] = useState<any | null>(null);
-  const [editingStock, setEditingStock] = useState<number | undefined>(undefined);
   const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', price: 0, stock: 0 });
 
   // Assign form state
@@ -333,32 +332,39 @@ export function Tables() {
 
   const posInfo = getPosSessionInfo();
 
-  const getNextClosingTime = () => {
-    const now = new Date();
-    const isWeekend = now.getDay() === 5 || now.getDay() === 6;
-    const closeTimeStr = isWeekend ? rates?.weekendEndTime : rates?.weekdayEndTime;
-    if (!closeTimeStr) return null;
-    
-    const [hr, min] = closeTimeStr.split(':').map(Number);
-    const closeDate = new Date(now);
-    closeDate.setHours(hr, min, 0, 0);
-    
-    if (closeDate <= now) {
-      closeDate.setDate(closeDate.getDate() + 1);
-    }
-    return closeDate;
+  const getNextClosingTime = (at = new Date(), includeNextWindow = false) => {
+    const hours = (day: Date) => {
+      const weekend = [0, 5, 6].includes(day.getDay());
+      const start = (weekend ? rates?.weekendStartTime : rates?.weekdayStartTime) || '12:00';
+      const end = (weekend ? rates?.weekendEndTime : rates?.weekdayEndTime) || '02:00';
+      const [sh, sm] = start.split(':').map(Number);
+      const [eh, em] = end.split(':').map(Number);
+      const opens = new Date(day);
+      const closes = new Date(day);
+      opens.setHours(sh, sm, 0, 0);
+      closes.setHours(eh, em, 0, 0);
+      if (closes <= opens) closes.setDate(closes.getDate() + 1);
+      return { opens, closes };
+    };
+    const yesterday = new Date(at);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const previous = hours(yesterday);
+    if (at >= previous.opens && at < previous.closes) return previous.closes;
+    const current = hours(at);
+    if (at >= current.opens && at < current.closes) return current.closes;
+    return includeNextWindow && at < current.opens ? current.closes : null;
   };
 
   const getNextReservation = (tableId: string) => {
     const now = new Date();
     const upcoming = reservations
       .filter((r: any) => {
-        if (r.tableId !== tableId || (r.status !== 'pending' && r.status !== 'confirmed')) return false;
+        if (r.tableId !== tableId || !['pending', 'confirmed', 'pending-reschedule'].includes(r.status)) return false;
         // 🟢 FIX: Reconstruct exact date and time to bypass Javascript Midnight mapping
         const rDate = new Date(r.date);
         const [h, m] = (r.timeSlot || '00:00').split(':').map(Number);
         rDate.setHours(h, m, 0, 0);
-        return rDate > now && isSameDay(rDate, now); // Only match future reservations today
+        return rDate > now;
       })
       .sort((a: any, b: any) => {
         const aDate = new Date(a.date);
@@ -432,7 +438,7 @@ export function Tables() {
     let conflictWarning = null;
     let isBlocked = false;
 
-    const closeDate = getNextClosingTime();
+    const closeDate = getNextClosingTime(new Date(), true);
     if (closeDate) {
       const minsLeft = Math.floor(differenceInSeconds(closeDate, now) / 60);
       if (minsLeft > 0) maxMins = Math.min(maxMins, minsLeft);
@@ -492,8 +498,9 @@ export function Tables() {
     const table = tables.find((t: any) => t.id === tableId);
     if (openTimeStop(table?.session)?.reached) { flash('The play limit has been reached. End this session at checkout.', 'error'); return; }
     if (table?.session?.pricingVersion === 2) { flash('Reservation extensions need venue approval.', 'error'); return; }
-    setExtendingTableId(tableId);
     const extLimits = getExtensionLimits(tableId);
+    if (!extLimits.opts.length) { flash(extLimits.conflictWarning || 'No extra time is available.', 'error'); return; }
+    setExtendingTableId(tableId);
     // 🟢 Auto-select the smallest available extension, or default to 60 if fully blocked
     setExtendMinutes((extLimits?.opts && extLimits.opts.length > 0) ? extLimits.opts[0] : 60); 
     setExtendPayStatus('paid'); setExtendPayMethod('cash'); setExtendPartialAmount(''); setExtendCashTendered(''); setExtendGcashRef('');
@@ -515,33 +522,23 @@ export function Tables() {
 
   const getExtensionLimits = (tableId: string) => {
     const now = new Date();
-    let maxMins = (reservationTerms?.maxHours || 8) * 60;
-    let blocksOpenTime = false;
-    let conflictWarning = "";
-
-    const closeDate = getNextClosingTime();
-    if (closeDate) {
-      const minsLeft = Math.floor(differenceInSeconds(closeDate, now) / 60);
-      if (minsLeft > 0) maxMins = Math.min(maxMins, minsLeft);
-    }
-
+    const session = safeTables.find(table => table.id === tableId)?.session;
+    const start = session ? new Date(session.startTime) : null;
+    const closeDate = start && getNextClosingTime(start);
+    const currentEnd = start && session?.durationMinutes ? addMinutes(start, session.durationMinutes) : null;
+    const base = currentEnd && Math.max(now.getTime(), currentEnd.getTime());
+    let maxMins = closeDate && base ? Math.max(0, Math.min(
+      (reservationTerms?.maxHours || 8) * 60, Math.floor((closeDate.getTime() - base) / 60_000)
+    )) : 0;
+    let conflictWarning = maxMins < 60 ? 'There is no extra hour available before closing.' : '';
     const nextRes = getNextReservation(tableId);
-    if (nextRes) {
-      const minsUntilRes = Math.floor(differenceInSeconds(nextRes.date, now) / 60);
-      if (minsUntilRes > 0) {
-        maxMins = Math.min(maxMins, minsUntilRes);
-        blocksOpenTime = true;
-        conflictWarning = `Upcoming reservation for ${nextRes.customerName} at ${nextRes.timeSlot}.`;
-      } else {
-        maxMins = 0;
-        blocksOpenTime = true;
-        conflictWarning = `Table is reserved for ${nextRes.customerName} NOW. Extension blocked.`;
-      }
+    if (nextRes && base) {
+      maxMins = Math.max(0, Math.min(maxMins, Math.floor((nextRes.date.getTime() - base) / 60_000)));
+      conflictWarning = `Upcoming reservation for ${nextRes.customerName} at ${nextRes.timeSlot}.`;
     }
-
     const opts = [];
     for (let m = 60; m <= maxMins; m += 60) opts.push(m);
-    return { opts, maxMins, blocksOpenTime, conflictWarning };
+    return { opts, maxMins, conflictWarning, closeDate };
   };
 
 
@@ -724,8 +721,11 @@ export function Tables() {
     if (!extendingTableId || !extendingTable?.session || sessionInFlight.current) return;
     sessionInFlight.current = true; setIsSavingSession(true);
     try {
+    const limits = getExtensionLimits(extendingTableId);
+    const stop = extendMinutes === 'open' ? currentOpenLimit() : undefined;
+    if (!limits.opts.length || (extendMinutes === 'open' ? !stop || !limits.closeDate || new Date(stop) > limits.closeDate : !limits.opts.includes(extendMinutes))) throw new Error('The extension no longer fits before closing or the next reservation.');
     const reviewedPayment = reviewExtensionPayment(extendMinutes,extendPayStatus,extendPayMethod,extendCharge,extendPartialAmount,extendCashTendered,extendGcashRef);
-    await extendSession(extendingTableId, extendMinutes, reviewedPayment.amount, extendMinutes === 'open' ? currentOpenLimit() : undefined, reviewedPayment.payment);
+    await extendSession(extendingTableId, extendMinutes, reviewedPayment.amount, stop, reviewedPayment.payment);
 
     setExtendingTableId(null);
     flash("Table session extended successfully.", "success");
@@ -735,8 +735,7 @@ export function Tables() {
 
   const handleAddToCart = (item: any) => {
     if (orderRequestInFlight.current || hasPendingOrder) return;
-    const inCartQty = posCart.find(c => c.id === item.id)?.qty || 0;
-    if (item.stock - inCartQty <= 0) return; 
+    if (!item.isActive || item.stock <= 0) return;
     setPosCart(prev => {
       const existing = prev.find(p => p.id === item.id);
       if (existing) return prev.map(p => p.id === item.id ? { ...p, qty: p.qty + 1 } : p);
@@ -748,9 +747,9 @@ export function Tables() {
     if (orderRequestInFlight.current || hasPendingOrder) return;
     setPosCart(prev => prev.map(p => {
       if (p.id === id) {
-        const itemStock = inventory.find((i: any) => i.id === id)?.stock || 0;
+        const item = inventory.find((i: any) => i.id === id);
         const newQty = p.qty + delta;
-        if ((delta > 0 && newQty > itemStock) || newQty < 0) return p;
+        if ((delta > 0 && (!item?.isActive || item.stock <= 0)) || newQty < 0) return p;
         return { ...p, qty: newQty };
       }
       return p;
@@ -785,28 +784,31 @@ export function Tables() {
         setVoidPassword('');
         return;
       }
-      await voidTableOrder(posTableId, voidItem.index, voidItem.order, posSessionStartTime);
+      await voidTableOrder(posTableId, voidItem.index, voidItem.order, posSessionStartTime, voidPassword);
       setVoidItem(null);
       setVoidPassword('');
-      flash('Order void saved and stock restored.', 'success');
-    } catch {
+      flash('Item voided and bill updated.', 'success');
+    } catch (error) {
       setHasPendingOrder(hasUnconfirmedOrderForTable(posTableId));
-      flash('Void was not confirmed. Check the pending save before changing this bill.', 'error');
+      flash(error instanceof Error ? error.message : 'Void could not be confirmed.', 'error');
     } finally {
       orderRequestInFlight.current = false;
       setIsSavingOrders(false);
     }
   };
 
+  const pendingVoidNeedsApproval = hasPendingOrder && !posCart.length;
+
   const handleRetryPendingOrder = async () => {
     if (!posTableId || orderRequestInFlight.current) return;
     orderRequestInFlight.current = true;
     setIsSavingOrders(true);
     try {
-      await retryPendingOrder(posTableId, posSessionStartTime);
+      await retryPendingOrder(posTableId, posSessionStartTime, voidPassword);
       setHasPendingOrder(false);
       setPosCart([]);
       setVoidItem(null);
+      setVoidPassword('');
       flash('Previous order save confirmed.', 'success');
     } catch {
       setHasPendingOrder(hasUnconfirmedOrderForTable(posTableId));
@@ -818,7 +820,7 @@ export function Tables() {
     e.preventDefault();
     if (!newItemForm.name || newItemForm.price <= 0) return;
     try {
-      if (editingItem) await updateInventoryItem(editingItem.id, newItemForm, editingStock);
+      if (editingItem) await updateInventoryItem(editingItem.id, newItemForm);
       else await addInventoryItem({ ...newItemForm, isActive: true });
       setEditingItem(null);
       setNewItemForm({ name: '', category: 'Drinks', price: 0, stock: 0 });
@@ -831,7 +833,6 @@ export function Tables() {
 
   const startEditItem = (item: any) => {
     setEditingItem(item);
-    setEditingStock(item.stock);
     setNewItemForm({ name: item.name, category: item.category, price: item.price, stock: item.stock });
     setIsEditingMenu(true);
   };
@@ -973,6 +974,7 @@ export function Tables() {
               key={table.id} table={table} held={heldTableIds.has(table.id)}
               availabilityVerified={availableTables.some((availableTable:any)=>availableTable.id===table.id)}
               onAssign={() => openAssign(table.id)}
+              extensionUnavailable={table.status === 'occupied' && getExtensionLimits(table.id).opts.length === 0}
               onExtend={() => openExtend(table.id)}
               onEnd={() => openEnd(table.id)}
               onOrder={() => {
@@ -1063,9 +1065,11 @@ export function Tables() {
                         <form onSubmit={handleVoidSubmit} className="bg-rose-950/20 px-3 py-2 border-t border-rose-900/30 flex gap-2">
                           <div className="relative flex-1">
                             <Lock size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-rose-500/50" />
-                            <p className="py-1 text-xs text-rose-300">{staffProfile?.isAdmin ? 'Confirm this administrator action.' : 'Sign in as an administrator to void orders.'}</p>
+                            {staffProfile?.isAdmin ? (
+                              <input type="password" aria-label="Administrator password" required autoComplete="current-password" placeholder="Administrator password" value={voidPassword} onChange={event => setVoidPassword(event.target.value)} className="w-full rounded-md border border-rose-900 bg-neutral-950 py-1 pl-7 pr-2 text-xs text-neutral-100" />
+                            ) : <p className="py-1 pl-7 text-xs text-rose-300">Sign in as an administrator to void orders.</p>}
                           </div>
-                          <button type="submit" disabled={isSavingOrders || !staffProfile?.isAdmin} className="text-[10px] font-bold bg-rose-600 hover:bg-rose-500 text-white px-3 rounded-md transition-colors">Confirm</button>
+                          <button type="submit" disabled={isSavingOrders || !staffProfile?.isAdmin || !voidPassword} className="text-[10px] font-bold bg-rose-600 hover:bg-rose-500 text-white px-3 rounded-md transition-colors">Confirm</button>
                           <button type="button" onClick={() => { setVoidItem(null); setVoidPassword(''); }} className="text-[10px] text-neutral-400 hover:text-white px-2">Cancel</button>
                         </form>
                       )}
@@ -1132,8 +1136,10 @@ export function Tables() {
                         <input type="number" value={newItemForm.price || ''} onChange={e => setNewItemForm(f => ({ ...f, price: parseFloat(e.target.value) || 0 }))} placeholder="Price ₱" required min="1" className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-amber-500" />
                       </div>
                       <div>
-                        <label className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold block mb-1">Add Stock</label>
-                        <input type="number" value={newItemForm.stock === 0 ? '' : newItemForm.stock} onChange={e => setNewItemForm(f => ({ ...f, stock: parseInt(e.target.value) || 0 }))} placeholder="Current Stock" min="0" className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-amber-500" />
+                        <label className="flex items-center gap-2 text-xs text-neutral-200">
+                          <input type="checkbox" role="switch" checked={newItemForm.stock > 0} onChange={e => setNewItemForm(f => ({ ...f, stock: e.target.checked ? 1 : 0 }))} />
+                          Available
+                        </label>
                       </div>
                       <div className="flex gap-2 pt-2">
                         {editingItem && <button type="button" onClick={() => { setEditingItem(null); setNewItemForm({ name: '', category: 'Drinks', price: 0, stock: 0 }); }} className="flex-1 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs rounded-lg transition-colors">Cancel</button>}
@@ -1149,7 +1155,7 @@ export function Tables() {
                       <div key={item.id} className={`w-full flex items-center justify-between p-3 rounded-xl border ${showArchivedMenu ? 'bg-neutral-950 border-neutral-800/50 opacity-70' : 'bg-neutral-900 border-neutral-800'}`}>
                         <div className="min-w-0 pr-2">
                           <p className={`text-sm font-semibold truncate ${showArchivedMenu ? 'text-neutral-400 line-through' : 'text-neutral-200'}`} title={item.name}>{item.name}</p>
-                          <p className="text-[10px] text-neutral-500">{item.category} · Stock: {item.stock}</p>
+                          <p className="text-[10px] text-neutral-500">{item.category} · {item.stock > 0 ? 'Available' : 'Unavailable'}</p>
                         </div>
                         <div className="flex items-center gap-2">
                           <p className={`text-sm font-black mr-2 ${showArchivedMenu ? 'text-neutral-600' : 'text-amber-400'}`}>{formatPHP(item.price)}</p>
@@ -1201,20 +1207,18 @@ export function Tables() {
               ) : (
                 <div className="space-y-2">
                   {inventory.filter((i: any) => i.isActive).map((item: any) => {
-                    const inCartQty = posCart.find(c => c.id === item.id)?.qty || 0;
-                    const stockRemaining = item.stock - inCartQty;
-                    const outOfStock = stockRemaining <= 0;
+                    const outOfStock = item.stock <= 0;
                     
                     return (
                       <button key={item.id} disabled={outOfStock || !posTable.session} onClick={() => handleAddToCart(item)}
                         className={`w-full flex items-center justify-between p-3 rounded-xl border text-left transition-all ${outOfStock ? 'bg-neutral-900/50 border-neutral-800/50 opacity-60 cursor-not-allowed' : 'bg-neutral-900 border-neutral-800 hover:border-emerald-600/40'}`}>
                         <div>
                           <p className={`text-sm font-semibold ${outOfStock ? 'text-neutral-500' : 'text-neutral-200'}`}>{item.name}</p>
-                          <p className="text-[10px] text-neutral-500">{item.category} · Available: {stockRemaining}</p>
+                          <p className="text-[10px] text-neutral-500">{item.category}</p>
                         </div>
                         <div className="text-right">
                           <p className={`text-sm font-black ${outOfStock ? 'text-neutral-500' : 'text-emerald-400'}`}>{formatPHP(item.price)}</p>
-                          {outOfStock && <p className="text-[9px] text-rose-500 font-bold uppercase">Out of stock</p>}
+                          <p className={`text-[9px] font-bold uppercase ${outOfStock ? 'text-rose-400' : 'text-emerald-400'}`}>{outOfStock ? 'Unavailable' : 'Available'}</p>
                         </div>
                       </button>
                     );
@@ -1227,7 +1231,8 @@ export function Tables() {
           <div className="p-4 border-t border-neutral-800 bg-neutral-900/50 flex-none space-y-3">
             {hasPendingOrder && <div role="alert" className="p-3 rounded-xl border border-amber-700 text-amber-300 text-xs">
               <p>The previous order save needs confirmation. Cart changes are paused to prevent duplicate charges.</p>
-              <button disabled={isSavingOrders} onClick={handleRetryPendingOrder} className="mt-2 font-bold underline">Retry Pending Save</button>
+              {pendingVoidNeedsApproval && !voidItem && <input type="password" aria-label="Administrator password" value={voidPassword} onChange={event => setVoidPassword(event.target.value)} className="mt-2 block w-full rounded border border-neutral-700 bg-neutral-950 p-2" placeholder="Administrator password" />}
+              <button disabled={isSavingOrders || (pendingVoidNeedsApproval && !voidPassword)} onClick={handleRetryPendingOrder} className="mt-2 font-bold underline">Retry Pending Save</button>
             </div>}
             <div className="flex justify-between items-center">
               <span className="text-sm font-bold text-neutral-400">Add to Bill:</span>
@@ -1851,7 +1856,7 @@ export function Tables() {
                     <PayMethodBtn value="gcash" current={extendPayMethod} icon={CreditCard} label="GCash" onChange={setExtendPayMethod} />
                   </div>
                   {extendPayMethod === 'gcash' ? (
-                    <input type="text" value={extendGcashRef} onChange={e => setExtendGcashRef(e.target.value)} maxLength={120} placeholder="GCash reference (3–120 characters)" className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:ring-blue-500/40 font-mono" />
+                    <input type="text" value={extendGcashRef} onChange={e => setExtendGcashRef(e.target.value.replace(/\D/g, '').slice(0, 13))} aria-label="GCash reference number" inputMode="numeric" placeholder="13-digit GCash reference" className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:ring-blue-500/40 font-mono" />
                   ) : extendPayStatus === 'paid' ? (
                     <div>
                       <input type="number" min="0.01" step="0.01" max="999999" value={extendCashTendered} onChange={e => { if (e.target.value.length <= 7) setExtendCashTendered(e.target.value); }} placeholder="Amount Tendered" className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:ring-emerald-500/40" />
@@ -1882,7 +1887,7 @@ export function Tables() {
 
                 // 🟢 NEW: Hard stop. Prevent extension if mathematically blocked by an upcoming reservation
                 if (extendMinutes === 'open') {
-                  if (!openLimit || extendingTable.session?.isOpenTime) canExtend = false;
+                  if (!extLimits.opts.length || !openLimit || !extLimits.closeDate || new Date(openLimit) > extLimits.closeDate || extendingTable.session?.isOpenTime) canExtend = false;
                 } else {
                   if (extLimits.maxMins === 0 || (extendMinutes as number) > extLimits.maxMins) canExtend = false;
                 }

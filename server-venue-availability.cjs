@@ -12,7 +12,7 @@ const bool=v=>[true,1,'1'].includes(v)?true:[false,0,'0'].includes(v)?false:null
 const active=r=>!['cancelled','completed','pending-refund'].includes(r.status)&&![true,1,'1'].includes(r.isCancelled)&&!r.cancelled_at;
 const all=(db,sql)=>new Promise((resolve,reject)=>db.all(sql,(e,r)=>e?reject(e):resolve(r)));
 function ids(raw){if(raw===null||raw===undefined||raw==='')return [];let v=raw;if(typeof v==='string'){try{v=JSON.parse(v);}catch{throw config();}}if(!Array.isArray(v)||v.some(x=>typeof x!=='string'||!x.trim())||new Set(v).size!==v.length)throw config();return v;}
-function evaluateVenueAvailability({settings,closures=[],events=[],reservations=[]},{tableId,session,now,operation='start',excludeReservationId}={}){
+function evaluateVenueAvailability({settings,closures=[],events=[],reservations=[]},{tableId,session,now,operation='start',excludeReservationId,ignoreUnassignedReservations=false}={}){
  if(typeof tableId!=='string'||!tableId||!session||typeof session.isOpenTime!=='boolean'||!Number.isFinite(now)||!['start','extend','move','preview'].includes(operation))throw config();
  const start=Date.parse(session.startTime);if(!Number.isFinite(start)||start>now)throw config();
  const begins=operation==='start'?start:now;
@@ -21,7 +21,7 @@ function evaluateVenueAvailability({settings,closures=[],events=[],reservations=
  if(!window||begins>=window.closing)throw conflict();let limit=window.closing,reason='closing';
  const restrict=(at,why)=>{if(at<=begins)throw conflict();if(at<limit){limit=at;reason=why;}};
  if(session.isOpenTime&&operation!=='move') {const raw=settings.bookingCutoffMinutes,n=typeof raw==='number'?raw:typeof raw==='string'&&/^\d+$/.test(raw)?Number(raw):NaN;if(!Number.isSafeInteger(n)||n<0||n>1440)throw config();if(window.closing-begins<=n*60000)throw fail('VENUE_OPEN_START_CUTOFF','The last-start cutoff for open-time play has been reached.');}
- for(const r of reservations){if(!active(r)||r.id===excludeReservationId)continue;if(r.tableId!==tableId&&r.tableId!==null&&r.tableId!==undefined)continue;const d=typeof r.date==='string'?r.date.slice(0,10):null;if(!date(d)||!time(r.timeSlot)||!Number.isSafeInteger(r.durationHours)||r.durationHours<1||r.durationHours>24||!r.tableId)throw config();const from=Date.parse(d+'T'+r.timeSlot+':00+08:00'),to=from+r.durationHours*3600000;if(to<=begins)continue;if(from<=begins)throw conflict();restrict(from,'reservation');}
+ for(const r of reservations){if(!active(r)||r.id===excludeReservationId||(ignoreUnassignedReservations&&!r.tableId))continue;if(r.tableId!==tableId&&r.tableId!==null&&r.tableId!==undefined)continue;const d=typeof r.date==='string'?r.date.slice(0,10):null;if(!date(d)||!time(r.timeSlot)||!Number.isSafeInteger(r.durationHours)||r.durationHours<1||r.durationHours>24||!r.tableId)throw config();const from=Date.parse(d+'T'+r.timeSlot+':00+08:00'),to=from+r.durationHours*3600000;if(to<=begins)continue;if(from<=begins)throw conflict();restrict(from,'reservation');}
  // Partial hours override the originating operating-date window as one span.
  // Full-day closures independently cover every calendar date actually touched.
  for(const c of closures){

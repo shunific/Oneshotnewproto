@@ -75,41 +75,39 @@ test('inventory UI waits for persistence and retains forms on failure', async ()
   const vm = require('node:vm');
   const esbuild = require('esbuild');
   const source = fs.readFileSync(require('node:path').join(__dirname, '../src/app/pages/AdminInventory.tsx'), 'utf8');
-  for (const operation of ['create', 'edit', 'restock', 'archive', 'restore', 'delete']) {
+  for (const operation of ['create', 'edit', 'availability', 'archive', 'restore', 'delete']) {
     for (const fails of [false, true]) {
       let release;
       const writes = [], closes = [], errors = [], busy = [];
       const mutation = (...args) => { writes.push(args); return new Promise((resolve, reject) => { release = () => fails ? reject(new Error('HTTP 500')) : resolve(); }); };
       const env = {
-        isSaving: false, form: { name: ' Water ', category: 'Drinks', price: '0', stock: '0' },
-        editingId: operation === 'edit' ? 'item-1' : null, editingStock: 10,
-        inventory: [{ id: 'item-1', isActive: false, stock: 8 }], restockAmount: '3',
+        isSaving: false, form: { name: ' Water ', category: 'Drinks', price: '0', available: false },
+        editingId: operation === 'edit' ? 'item-1' : null,
+        inventory: [{ id: 'item-1', isActive: false, stock: 8 }],
         updateInventoryItem: mutation, addInventoryItem: mutation, deleteInventoryItem: mutation,
         setError: value => errors.push(value), setIsSaving: value => busy.push(value),
         setShowModal: value => closes.push(['modal', value]),
-        setRestockId: value => closes.push(['restock', value]),
-        setRestockAmount: value => closes.push(['amount', value]),
       };
-      const name = ['create', 'edit'].includes(operation) ? 'handleSave' : operation === 'restock' ? 'handleRestock' : 'handleItemAction';
+      const name = ['create', 'edit'].includes(operation) ? 'handleSave' : operation === 'availability' ? 'toggleAvailability' : 'handleItemAction';
       const start = source.indexOf(`  const ${name} =`);
-      const next = name === 'handleSave' ? source.indexOf('  const handleRestock', start) : name === 'handleRestock' ? source.indexOf('  const handleItemAction', start) : source.indexOf('\n  return (', start);
+      const next = name === 'handleSave' ? source.indexOf('  const toggleAvailability', start) : name === 'toggleAvailability' ? source.indexOf('  const handleItemAction', start) : source.indexOf('\n  return (', start);
       const script = esbuild.transformSync(source.slice(start, next), { loader: 'tsx' }).code;
       const handler = vm.runInNewContext(`${script}; ${name}`, env);
-      const pending = name === 'handleSave' ? handler({ preventDefault() {} }) : name === 'handleRestock' ? handler({ preventDefault() {} }, 'item-1', 2) : handler('item-1', operation === 'archive' ? false : operation === 'restore' ? true : undefined);
+      const pending = name === 'handleSave' ? handler({ preventDefault() {} }) : name === 'toggleAvailability' ? handler({ id: 'item-1', stock: 2 }) : handler('item-1', operation === 'archive' ? false : operation === 'restore' ? true : undefined);
       assert.equal(writes.length, 1, operation);
       assert.equal(closes.length, 0, `${operation}: no premature form close`);
       if (operation === 'edit') {
         assert.equal(writes[0][1].isActive, false, 'Editing preserves archived state');
-        assert.equal(writes[0][2], 10, 'Edit uses opening stock snapshot rather than refreshed inventory');
+        assert.equal(writes[0][1].stock, 0, 'Unavailable persists as zero');
       }
-      if (operation === 'restock') assert.equal(writes[0][2], 2, 'Restock uses the same stock baseline as its calculation');
+      if (operation === 'availability') assert.equal(writes[0][1].stock, 0, 'Toggling a previously available item marks it unavailable');
       release();
       await pending;
       assert.equal(busy.at(-1), false);
       if (fails) {
         assert.equal(closes.length, 0, `${operation}: preserve form on rejection`);
         assert.ok(errors.at(-1).includes('Unable'), operation);
-      } else if (['create', 'edit', 'restock'].includes(operation)) assert.ok(closes.length > 0);
+      } else if (['create', 'edit'].includes(operation)) assert.ok(closes.length > 0);
     }
   }
 });

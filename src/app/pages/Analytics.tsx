@@ -587,7 +587,7 @@ export function Analytics() {
                     <Cell key={`pie-cell-${i}`} fill={COLORS[i % COLORS.length]} />
                   ))}
                 </Pie>
-                <Tooltip contentStyle={{ backgroundColor: '#171717', border: '1px solid #404040', borderRadius: '8px', fontSize: '12px' }} />
+                <Tooltip contentStyle={{ backgroundColor: '#171717', border: '1px solid #404040', borderRadius: '8px', fontSize: '12px' }} itemStyle={{ color: '#f5f5f5' }} />
               </PieChart>
             </ResponsiveContainer>
             <div className="space-y-1.5 mt-2">

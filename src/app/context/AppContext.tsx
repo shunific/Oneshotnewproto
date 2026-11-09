@@ -1,3 +1,4 @@
+import { getPendingOrder, saveOrderOperation } from '../utils/orderPersistence.js';
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef, useMemo } from 'react';
 import { toast } from 'sonner';
 import { supabase } from '../utils/supabase';
@@ -54,14 +55,26 @@ export type QueueItem = {
   id: string; customerName: string; contactNumber: string; partySize: number; arrivalTime: Date; notes?: string; status: 'waiting' | 'called' | 'seated'; queueNumber: number; prioritySource?: 'reservation';
 };
 
-export type ReservationStatus = 'pending' | 'confirmed' | 'checked-in' | 'completed' | 'cancelled';
+export type ReservationStatus = 'pending' | 'confirmed' | 'checked-in' | 'completed' | 'cancelled' | 'pending-reschedule' | 'pending-refund';
 
 export type Reservation = {
   id: string; customerName: string; contactNumber: string; email?: string; date: Date; timeSlot: string; durationHours: number; partySize: number; tableId?: string; status: ReservationStatus; totalAmount: number; downPaymentAmount: number; downPaymentPaid: boolean; balancePaid: boolean; createdAt: Date; cancellationReason?: string; promoCode?: string; discountAmount?: number; paymentRef?: string; receiptImg?: string;
   refundStatus?: 'pending' | 'processing' | 'sent' | 'in_person' | 'remediated' | 'acknowledged' | 'expired';
   refundMethod?: 'gcash' | 'cash' | 'session_credit';
   refundNotes?: string;
+  requestedRescheduleDate?: string;
+  requestedRescheduleTime?: string;
 };
+
+function safeFeedbackTags(raw: string): string[] {
+  try {
+    const tags = JSON.parse(raw);
+    if (Array.isArray(tags)) return tags;
+  } catch {
+    return raw ? [raw] : [];
+  }
+  return [];
+}
 
 export type Feedback = {
   id: string; customerName: string; contactInfo?: string; rating: number; feedbackType?: 'suggestion' | 'complaint' | 'lost_item' | 'compliment' | 'other'; comment: string; date: Date; reservationId?: string; tags: string[];
@@ -150,9 +163,9 @@ export type AppContextType = {
   activeAnnouncement: string; updateActiveAnnouncement: (msg: string) => void;
   staffLoggedIn: boolean; adminLoggedIn: boolean; staffProfile: StaffProfile;
   staffLogin: (u: string, p: string) => Promise<boolean>; staffLogout: () => void; adminLogin: (u: string, p: string) => Promise<boolean>; adminLogout: () => void; updateStaffProfile: (profile: Partial<StaffProfile>) => void;
-  assignTable: (id: string, s: Session) => void; freeTable: (id: string) => void; reserveTable: (id: string) => void; extendSession: (id: string, mins: number, pay: number) => void; migrateSession: (fromTableId: string, toTableId: string) => void; setTableMaintenance: (id: string, reason: string) => void; setTableEvent: (id: string, eventName: string) => void; addTable: (n: string) => void; updateTable: (id: string, n: string) => void; toggleTableActive: (id: string) => void; deleteTable: (id: string) => void;
-  checkoutTable: (id: string, payload: any) => Promise<any>; seatQueueCustomer: (queueId: string, tableId: string, session: any) => Promise<any>; retryPendingOrder: (tableId: string, expectedSessionStartTime: string) => Promise<void>;
-  addInventoryItem: (i: Omit<InventoryItem, 'id'>) => void; updateInventoryItem: (id: string, i: Partial<InventoryItem>) => void; deleteInventoryItem: (id: string) => void; submitTableOrders: (tableId: string, cart: SessionOrder[]) => void; voidTableOrder: (tableId: string, orderIndex: number, order: SessionOrder) => void;
+  assignTable: (id: string, s: Session) => void; freeTable: (id: string) => void; reserveTable: (id: string) => void; extendSession: (id: string, mins: number | 'open', pay: number, limit?: string, payment?: { method: string; reference?: string }) => Promise<void>; migrateSession: (fromTableId: string, toTableId: string) => void; setTableMaintenance: (id: string, reason: string) => void; setTableEvent: (id: string, eventName: string) => void; addTable: (n: string) => void; updateTable: (id: string, n: string) => void; toggleTableActive: (id: string) => void; deleteTable: (id: string) => void;
+  checkoutTable: (id: string, payload: any) => Promise<any>; seatQueueCustomer: (queueId: string, tableId: string, session: any) => Promise<any>; retryPendingOrder: (tableId: string, expectedSessionStartTime: string, password?: string) => Promise<void>;
+  addInventoryItem: (i: Omit<InventoryItem, 'id'>) => Promise<void>; updateInventoryItem: (id: string, i: Partial<InventoryItem>) => Promise<void>; deleteInventoryItem: (id: string) => Promise<void>; submitTableOrders: (tableId: string, cart: SessionOrder[], start: string) => Promise<void>; voidTableOrder: (tableId: string, orderIndex: number, order: SessionOrder, start: string, password: string) => Promise<void>;
   addToQueue: (i: Omit<QueueItem, 'id'|'arrivalTime'|'status'|'queueNumber'>) => void; removeFromQueue: (id: string) => void; callQueueItem: (id: string) => void;
   addReservation: (i: Omit<Reservation, 'id'|'createdAt'>) => string; updateReservationStatus: (id: string, s: ReservationStatus) => void; updateReservation: (id: string, u: Partial<Reservation>) => void; cancelReservation: (id: string, r: string) => void; updateDownPayment: (id: string, p: boolean) => void; updateBalance: (id: string, p: boolean) => void;
   addFeedback: (i: Omit<Feedback, 'id'|'date'>) => void; resolveFeedback: (id: string, notes: string) => void; addActivity: (t: ActivityType, d: string, m?: Record<string, any>) => void;  
@@ -497,7 +510,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           }
         } catch {}
       }
-      if (feedData) setFeedback((feedData as any[]).map(f => ({ ...f, tags: typeof f.tags === 'string' ? JSON.parse(f.tags || '[]') : (f.tags || []) })) as Feedback[]);
+      if (feedData) setFeedback((feedData as any[]).map(f => ({ ...f, customerName: f.customerName || f.customername || 'Guest', feedbackType: f.feedbackType || f.feedbacktype, reservationId: f.reservationId || f.reservationid, tags: typeof f.tags === 'string' ? safeFeedbackTags(f.tags) : (f.tags || []) })) as Feedback[]);
       if (promoData) {
         const countFromRes = (code: string) => {
           if (!resData || !code) return 0;
@@ -591,7 +604,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       if (resData && (resData as any[]).length > 0) {
         const mappedRes = (resData as any[]).map(r => ({
-          id: r.id, customerName: r.customerName || r.customer_name, contactNumber: r.contactNumber || r.contact_number, email: r.email, date: new Date(r.date), timeSlot: r.timeSlot || r.time_slot, durationHours: r.durationHours || r.duration_hours, partySize: r.partySize || r.party_size, tableId: r.tableId || r.table_id, status: r.status, totalAmount: r.totalAmount || r.total_amount, downPaymentAmount: r.downPaymentAmount || r.down_payment_amount, downPaymentPaid: !!r.downPaymentPaid || !!r.down_payment_paid, balancePaid: !!r.balancePaid || !!r.balance_paid, createdAt: new Date(r.createdAt || r.created_at), cancellationReason: r.cancellationReason || r.cancellation_reason, refundStatus: r.refundStatus || r.refund_status, refundMethod: r.refundMethod || r.refund_method, refundNotes: r.refundNotes || r.refund_notes, paymentRef: r.paymentRef || r.payment_ref, receiptImg: r.receiptImg || r.receipt_img_url, promoCode: r.promoCode || r.promocode || r.promo_code || null, discountAmount: r.discountAmount || r.discountamount || r.discount_amount || 0
+          id: r.id, customerName: r.customerName || r.customer_name, contactNumber: r.contactNumber || r.contact_number, email: r.email, date: new Date(r.date), timeSlot: r.timeSlot || r.time_slot, durationHours: r.durationHours || r.duration_hours, partySize: r.partySize || r.party_size, tableId: r.tableId || r.table_id, status: r.status, totalAmount: r.totalAmount || r.total_amount, downPaymentAmount: r.downPaymentAmount || r.down_payment_amount, downPaymentPaid: !!r.downPaymentPaid || !!r.down_payment_paid, balancePaid: !!r.balancePaid || !!r.balance_paid, createdAt: new Date(r.createdAt || r.created_at), cancellationReason: r.cancellationReason || r.cancellation_reason, refundStatus: r.refundStatus || r.refund_status, refundMethod: r.refundMethod || r.refund_method, refundNotes: r.refundNotes || r.refund_notes, paymentRef: r.paymentRef || r.payment_ref, receiptImg: r.receiptImg || r.receipt_img_url, promoCode: r.promoCode || r.promocode || r.promo_code || null, discountAmount: r.discountAmount || r.discountamount || r.discount_amount || 0, requestedRescheduleDate: r.requested_reschedule_date, requestedRescheduleTime: r.requested_reschedule_time
         }));
         setReservations(mappedRes);
 
@@ -760,8 +773,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return { replayed: false };
   };
 
-  // This build no longer keeps a local pending-order ledger, so there is nothing to replay.
-  const retryPendingOrder = async (_tableId: string, _expectedSessionStartTime: string) => { /* no-op */ };
 
   const checkoutTable = async (tableId: string, payload: any) => {
     const table = tables.find(t => t.id === tableId);
@@ -842,17 +853,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   };
 
-  const extendSession = (tableId: string, mins: number, pay: number) => {
-    setTables(prev => prev.map(t => {
-      if (t.id === tableId && t.session) {
-        const updatedSession = { ...t.session, durationMinutes: (t.session.durationMinutes||0) + mins, amountPaid: t.session.amountPaid + pay };
-        syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'occupied', session: updatedSession }, `Table extended`).then(runCloudBackup).catch(()=>{});
-        supabase.from('tables').update({ status: 'occupied', sessionData: JSON.stringify(updatedSession), isActive: 1 }).eq('id', tableId).then();
-        return { ...t, session: updatedSession };
-      }
-      return t;
-    }));
-    addActivity('session_extended', `Extended session at ${tables.find(t=>t.id===tableId)?.name} by ${mins} minutes`);
+  const extendSession: AppContextType['extendSession'] = async (tableId, mins, pay, limit, payment) => {
+    const session = tables.find(table => table.id === tableId)?.session;
+    if (!session || session.isOpenTime || !session.durationMinutes) throw new Error('Refresh the table before extending.');
+    const { session: updatedSession } = await syncToDB(
+      `/api/tables/${tableId}/extend`, 'POST',
+      { minutes: mins, amount: pay, payment, latestEndTime: limit, expectedSession: session },
+      'Table extended',
+    );
+    setTables(prev => prev.map(table => table.id === tableId ? { ...table, session: updatedSession } : table));
+    runCloudBackup();
+    addActivity('session_extended', `Extended session at ${tables.find(table => table.id === tableId)?.name}`);
   };
 
   const migrateSession = (fromTableId: string, toTableId: string) => {
@@ -904,63 +915,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
     supabase.from('tables').update({ status: 'event', maintenanceReason: eventName, isActive: 1 }).eq('id', tableId).then();
   };
 
-  const submitTableOrders = (tableId: string, cart: SessionOrder[]) => {
-    let updatedTableSession: Session | undefined;
-    setInventory(prev => prev.map(inv => {
-      const cartItem = cart.find(c => c.id === inv.id);
-      if (cartItem) {
-        const newStock = inv.stock - cartItem.qty;
-        syncToDB(`/api/inventory/${inv.id}`, 'PUT', { stock: newStock }, `Stock updated`).then(runCloudBackup).catch(()=>{});
-        supabase.from('inventory').update({ stock: newStock }).eq('id', inv.id).then();
-        return { ...inv, stock: newStock };
-      }
-      return inv;
-    }));
-    setTables(prev => prev.map(t => {
-      if (t.id === tableId && t.session) {
-        const newOrders = [...(t.session.orders || [])];
-        cart.forEach(cartItem => {
-          const existing = newOrders.find(o => o.id === cartItem.id);
-          if (existing) existing.qty += cartItem.qty;
-          else newOrders.push({ ...cartItem });
+  const saveTableOrder = async (tableId: string, operation: string, payload: object, password?: string) => {
+    const saved = await saveOrderOperation({
+      storage: localStorage, tableId, operation, payload,
+      request: async (endpoint: string, body: object) => {
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...body, ...(password ? { approval: { username: staffProfile.username, password } } : {}) }),
         });
-        updatedTableSession = { ...t.session, orders: newOrders };
-        return { ...t, session: updatedTableSession };
-      }
-      return t;
-    }));
-    if (updatedTableSession) {
-      syncToDB(`/api/tables/${tableId}`, 'PUT', { session: updatedTableSession }, `Orders updated`).then(runCloudBackup).catch(()=>{});
-      supabase.from('tables').update({ sessionData: JSON.stringify(updatedTableSession) }).eq('id', tableId).then();
-    }
-    addActivity('pos_order', `Confirmed ${cart.length} new items for ${tables.find(t=>t.id===tableId)?.name}`);
+        const result = await response.json();
+        if (!response.ok) throw Object.assign(new Error(result.error || 'Order could not be saved.'), { status: response.status });
+        return result;
+      },
+    });
+    setTables(prev => prev.map(table => table.id === tableId ? { ...table, session: saved.session } : table));
+    setInventory(prev => prev.map(item => saved.inventory.find((updated: InventoryItem) => updated.id === item.id) ?? item));
+    runCloudBackup();
   };
 
-  const voidTableOrder = (tableId: string, orderIndex: number, order: SessionOrder) => {
-    let updatedTableSession: Session | undefined;
-    setInventory(prev => prev.map(inv => {
-      if (inv.id === order.id) {
-        const newStock = inv.stock + order.qty;
-        syncToDB(`/api/inventory/${inv.id}`, 'PUT', { stock: newStock }, `Stock restored`).then(runCloudBackup).catch(()=>{});
-        supabase.from('inventory').update({ stock: newStock }).eq('id', inv.id).then();
-        return { ...inv, stock: newStock };
-      }
-      return inv;
-    }));
-    setTables(prev => prev.map(t => {
-      if (t.id === tableId && t.session) {
-        const newOrders = [...(t.session.orders || [])];
-        newOrders.splice(orderIndex, 1);
-        updatedTableSession = { ...t.session, orders: newOrders };
-        return { ...t, session: updatedTableSession };
-      }
-      return t;
-    }));
-    if (updatedTableSession) {
-      syncToDB(`/api/tables/${tableId}`, 'PUT', { session: updatedTableSession }, `Order voided`).then(runCloudBackup).catch(()=>{});
-      supabase.from('tables').update({ sessionData: JSON.stringify(updatedTableSession) }).eq('id', tableId).then();
-    }
-    addActivity('admin_action', `Voided ${order.name} (x${order.qty}) from ${tables.find(t=>t.id===tableId)?.name}`);
+  const submitTableOrders: AppContextType['submitTableOrders'] = (tableId, cart, expectedSessionStartTime) =>
+    saveTableOrder(tableId, 'orders', { cart, expectedSessionStartTime });
+
+  const voidTableOrder: AppContextType['voidTableOrder'] = (tableId, index, expectedOrder, expectedSessionStartTime, password) =>
+    saveTableOrder(tableId, `orders/${index}/void`, { expectedOrder, expectedSessionStartTime }, password);
+
+  const retryPendingOrder: AppContextType['retryPendingOrder'] = async (tableId, start, password) => {
+    const pending = getPendingOrder(localStorage, tableId, start);
+    if (pending) await saveTableOrder(tableId, pending.operation, pending.payload, password);
   };
 
   const addToQueue = (i: Omit<QueueItem, 'id'|'arrivalTime'|'status'|'queueNumber'>) => {
@@ -1057,7 +1039,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const expiryTime = new Date().getTime() + (12 * 60 * 60 * 1000);
       sessionStorage.setItem('oneshot_auth_expiry', expiryTime.toString());
       sessionStorage.removeItem('oneshot_is_locked'); 
-      updateStaffProfile({ id: activeUser.id, fullName: activeUser.fullName, username: activeUser.username, role: activeUser.role, isAdmin: true, phone: activeUser.phone || '', avatarImg: activeUser.avatarImg || '' });
+      updateStaffProfile({ id: activeUser.id, fullName: activeUser.fullName, username: activeUser.username, role: activeUser.role, isAdmin: activeUser.isAdmin || cleanU === 'superadmin', phone: activeUser.phone || '', avatarImg: activeUser.avatarImg || '' });
       await forceFullSync();
       return true; 
     }
@@ -1209,22 +1191,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
     addActivity('admin_action', `Deleted table ID: ${id}`);
   };
 
-  const addInventoryItem = (i: Omit<InventoryItem, 'id'>) => {
+  const addInventoryItem = async (i: Omit<InventoryItem, 'id'>) => {
     const newItem = { ...i, id: `inv${Date.now()}` };
+    await syncToDB('/api/inventory', 'POST', newItem, `Added ${i.name} to inventory`);
     setInventory(prev => [...prev, newItem]);
-    syncToDB('/api/inventory', 'POST', newItem, `Added ${i.name} to inventory`).then(runCloudBackup).catch(()=>{});
+    runCloudBackup();
     addActivity('admin_action', `Added new menu item: ${i.name}`); 
   };
 
-  const updateInventoryItem = (id: string, u: Partial<InventoryItem>) => {
-    setInventory(prev => prev.map(i => i.id === id ? { ...i, ...u } : i));
-    syncToDB(`/api/inventory/${id}`, 'PUT', u, `Updated item ${id}`).then(runCloudBackup).catch(()=>{});
+  const updateInventoryItem = async (id: string, u: Partial<InventoryItem>) => {
+    const expectedStock = inventory.find(item => item.id === id)?.stock;
+    const saved = await syncToDB(`/api/inventory/${id}`, 'PUT',
+      { ...u, ...('stock' in u ? { expectedStock } : {}) }, `Updated item ${id}`);
+    setInventory(prev => prev.map(i => i.id === id ? saved : i));
+    runCloudBackup();
     addActivity('admin_action', `Updated details for menu item ID: ${id}`);
   };
 
-  const deleteInventoryItem = (id: string) => {
+  const deleteInventoryItem = async (id: string) => {
+    await syncToDB(`/api/inventory/${id}`, 'DELETE', {}, 'Inventory item deleted');
     setInventory(prev => prev.filter(i => i.id !== id));
-    syncToDB(`/api/inventory/${id}`, 'DELETE', {}, `Inventory item deleted`).then(runCloudBackup).catch(()=>{});
+    runCloudBackup();
     addActivity('admin_action', `Deleted menu item ID: ${id}`);
   };
 

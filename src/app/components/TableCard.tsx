@@ -9,13 +9,14 @@ interface TableCardProps {
   held?: boolean;
   availabilityVerified?: boolean;
   onAssign: () => void;
+  extensionUnavailable?: boolean;
   onExtend: () => void;
   onEnd: () => void;
   onOrder: () => void;
   nextReservation: { date: Date; customerName: string; timeSlot: string } | null;
 }
 
-export function TableCard({ table, held=false, availabilityVerified=true, onAssign, onExtend, onEnd, onOrder, nextReservation }: TableCardProps) {
+export function TableCard({ table, held=false, availabilityVerified=true, onAssign, extensionUnavailable, onExtend, onEnd, onOrder, nextReservation }: TableCardProps) {
   const [now, setNow] = useState(new Date());
   const isEvent = table.status === 'event';
   const stop = openTimeStop(table.session, Date.now());
@@ -218,9 +219,10 @@ export function TableCard({ table, held=false, availabilityVerified=true, onAssi
               </button>
               
               <button 
+                title={extensionUnavailable ? 'No extra hour before closing or the next booking' : undefined}
                 onClick={(e) => { e.stopPropagation(); onExtend(); }} 
-                disabled={held||timer.isOpenTime||stop?.reached} // Cannot extend an open-ended session
-                className={`flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-semibold transition-colors ${timer.isOpenTime ? 'bg-neutral-900 text-neutral-600 opacity-50 cursor-not-allowed' : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-300'}`}
+                disabled={held || timer.isOpenTime || stop?.reached || extensionUnavailable} // Cannot extend an open-ended session
+                className={`flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-semibold transition-colors ${timer.isOpenTime || extensionUnavailable ? 'bg-neutral-900 text-neutral-600 opacity-50 cursor-not-allowed' : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-300'}`}
               >
                 <Clock size={13} /> Extend
               </button>

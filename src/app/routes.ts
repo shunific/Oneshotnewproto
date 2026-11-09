@@ -14,8 +14,7 @@ import { ActivityLog } from './pages/ActivityLog';
 import { PromoCodesPage } from './pages/PromoCodes';
 import { SettingsPage } from './pages/Settings';
 import { SessionHistory } from './pages/SessionHistory';
-import { LostAndFound } from './pages/LostAndFound';
-import { Watchlist } from './pages/Watchlist';
+import { IncidentAndLostItems } from './pages/IncidentAndLostItems';
 // Admin pages
 import { AdminDashboard } from './pages/AdminDashboard';
 import { AdminUsers } from './pages/AdminUsers';
@@ -53,8 +52,8 @@ export const router = createBrowserRouter([
           { path: 'activity', Component: ActivityLog },
           { path: 'promo-codes', Component: PromoCodesPage },
           { path: 'history', Component: SessionHistory },
-          { path: 'lost-found', Component: LostAndFound },
-          { path: 'watchlist', Component: Watchlist },
+          { path: 'lost-found', Component: IncidentAndLostItems },
+          { path: 'watchlist', Component: IncidentAndLostItems },
           { path: 'feedback', Component: FeedbackPage }, // 🟢 NEW: Added Feedback to Staff Routes
           { path: 'settings', Component: SettingsPage },
         ],
