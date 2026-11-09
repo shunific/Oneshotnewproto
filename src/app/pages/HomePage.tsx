@@ -127,9 +127,9 @@ function MiniCalendar({ selectedDate, onSelect, reservedDates, closedDates, onCl
 export function HomePage() {
   const navigate = useNavigate();
   const { 
-    siteConfig, announcements, tables, reservations, events, 
+    siteConfig, announcements, tables, reservations, events, forceFullSync,
     closedDates, reservationTerms, rates, addReservation, cancelReservation, 
-    updateReservation, updateReservationStatus, addFeedback, applyPromoCode,
+    updateReservation, addFeedback, applyPromoCode,
     sessionHistory, queue
   } = useAppContext() as any;
 
@@ -272,6 +272,8 @@ export function HomePage() {
   const [feedbackForm, setFeedbackForm] = useState({ name: '', contact: '', type: '', customType: '', message: '', reservationId: '' });
   const [feedbackSent, setFeedbackSent] = useState(false);
 
+  const [bookingAvailability, setBookingAvailability] = useState<{ id: string; date: string; tableId: string; timeSlot: string; durationHours: number; status: string }[] | null>(null);
+  const [rescheduleContact, setRescheduleContact] = useState('');
   const [rescheduleData, setRescheduleData] = useState<{ show: boolean, reservation: any, newDate: Date | null, timeSlot: string } | null>(null);
 
   const [reportModalResId, setReportModalResId] = useState<string | null>(null);
@@ -391,6 +393,22 @@ export function HomePage() {
       localStorage.setItem('oneshot_visited', 'true');
     }
   }, []);
+
+  useEffect(() => {
+    if (activeSection !== 'reservations') return;
+    let active = true;
+    const refresh = async () => {
+      const { data, error } = await publicSupabase.from('reservations')
+        .select('id,date,tableId,timeSlot,durationHours,status')
+        .gte('date', format(new Date(), 'yyyy-MM-dd'))
+        .lte('date', format(addMinutes(new Date(), 30 * 24 * 60), 'yyyy-MM-dd'))
+        .in('status', ['pending', 'confirmed', 'pending-reschedule', 'checked-in']);
+      if (active && !error && data) setBookingAvailability(data);
+    };
+    void refresh();
+    const timer = window.setInterval(refresh, 15_000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [activeSection]);
 
   const activeAnnouncements = announcements?.filter((a: any) => a.isActive && (!a.expiresAt || new Date(a.expiresAt) > new Date())) || [];
   const userReservations = currentUser 
@@ -763,9 +781,10 @@ export function HomePage() {
     return `${h}:${m}`;
   }, [selectedDate, reservationTerms]);
 
-  const validateTimeSlotHelper = (time: string, duration: number, dateObj: Date | null, tableId: string | null): string => {
+  const validateTimeSlotHelper = (time: string, duration: number, dateObj: Date | null, tableId: string | null, excludeId?: string): string => {
     if (!time || !dateObj) return 'invalid';
     if (!tableId) return 'no_table';
+    if (!bookingAvailability) return 'availability_unverified';
     const parseToMins = (t: string) => {
       const [hh = '0', mm = '0'] = (t || '').split(':');
       return Number(hh) * 60 + Number(mm || 0);
@@ -776,6 +795,7 @@ export function HomePage() {
     requestedStart.setHours(h, m, 0, 0);
     const requestedEnd = addMinutes(requestedStart, duration * 60);
 
+    if (requestedStart <= new Date()) return 'past';
     if (isToday(requestedStart)) {
       const nowMins = new Date().getHours() * 60 + new Date().getMinutes();
       const advanceNoticeMins = (Number(reservationTerms?.advanceBookingHours) || 1) * 60;
@@ -792,15 +812,15 @@ export function HomePage() {
     if (slotMins < startReserveMins) normalizedSlot += 24 * 60;
     if (normalizedSlot < startReserveMins || normalizedSlot + duration * 60 > endReserveMins) return 'closed';
 
-    const sameTableRes = reservations.filter((r: any) => 
-      r.tableId === tableId && 
+    const sameTableRes = bookingAvailability.filter(r =>
+      r.id !== excludeId && r.tableId === tableId &&
       r.status !== 'cancelled' && 
       r.status !== 'completed' && 
-      isSameDay(new Date(r.date), requestedStart)
+      isSameDay(new Date(r.date + 'T00:00:00'), requestedStart)
     );
 
     for (const r of sameTableRes) {
-      const rStart = new Date(r.date);
+      const rStart = new Date(r.date + 'T00:00:00');
       const [rH, rM] = r.timeSlot.split(':').map(Number);
       rStart.setHours(rH, rM, 0, 0);
       const rEnd = addMinutes(rStart, r.durationHours * 60);
@@ -940,74 +960,51 @@ export function HomePage() {
     }
 
     try {
-      // 1. Sync to local backend database
-      await fetch(`/api/reservations/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'pending-refund', cancellationReason: 'Customer requested cancellation & refund' })
-      }).catch(() => {});
-
-      // 2. Sync to Supabase
-      await supabase.from('reservations').update({ 
+      const { data, error } = await supabase.from('reservations').update({
         status: 'pending-refund',
         cancellation_reason: 'Customer requested cancellation & refund',
-        cancellationreason: 'Customer requested cancellation & refund'
-      }).eq('id', id).catch(() => {});
-
-      // 3. Update local states
-      setTrackedReservations(prev => prev ? prev.map(r => r.id === id ? { ...r, status: 'pending-refund' } : r) : null);
-      if (typeof updateReservationStatus === 'function') {
-        updateReservationStatus(id, 'pending-refund' as any);
-      }
-
-      setToastMsg({ title: "Booking Cancelled", desc: "Marked as Pending Refund. Please contact staff to verify GCash details.", type: 'success' });
-    } catch (err: any) {
-      setToastMsg({ title: "Request Submitted", desc: "Cancellation request received and pending staff review.", type: 'info' });
+      }).eq('id', id).in('status', ['pending', 'confirmed', 'pending-reschedule']).select('id').maybeSingle();
+      if (error || !data) throw new Error('Cancellation was not saved.');
+      setTrackedReservations(prev => prev?.map(r => r.id === id ? { ...r, status: 'pending-refund' } : r) ?? null);
+      await forceFullSync();
+      setToastMsg({ title: 'Refund requested', desc: 'Staff will review your cancellation and refund request.', type: 'success' });
+    } catch {
+      setToastMsg({ title: 'Request not saved', desc: 'Please try again or contact staff with your reservation ID.', type: 'error' });
     }
   };
 
-  const handleRequestReschedule = async (id: string, r: any) => {
-    if (r.rescheduleCount >= 1) {
-      setToastMsg({ title: "Limit Reached", desc: "Only 1 reschedule allowed per booking.", type: "error" });
-      return;
-    }
-    setRescheduleData({ show: true, reservation: r, newDate: null, timeSlot: r.timeSlot });
+  const handleRequestReschedule = (reservation: any) => {
+    setRescheduleContact('');
+    setRescheduleData({ show: true, reservation, newDate: null, timeSlot: reservation.timeSlot });
   };
 
   const executeReschedule = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!rescheduleData?.newDate || !rescheduleData?.timeSlot || !rescheduleData.reservation) return;
-
-    const validation = validateTimeSlotHelper(rescheduleData.timeSlot, rescheduleData.reservation.durationHours, rescheduleData.newDate, rescheduleData.reservation.tableId);
-    if (validation !== 'valid') {
-      setToastMsg({ title: "Invalid Schedule", desc: "Please pick a valid available time slot.", type: "error" });
+    if (!rescheduleData?.newDate || !rescheduleData.timeSlot || isReporting) return;
+    const { reservation, newDate, timeSlot } = rescheduleData;
+    const tableIds = reservation.tableId ? [reservation.tableId] : tables
+      .filter((table: any) => table.isActive && !['maintenance', 'event'].includes(table.status))
+      .map((table: any) => table.id);
+    if (!tableIds.some((tableId: string) => validateTimeSlotHelper(timeSlot, reservation.durationHours, newDate, tableId, reservation.id) === 'valid')) {
+      setToastMsg({ title: 'Invalid Schedule', desc: 'Please pick a valid available time slot.', type: 'error' });
       return;
     }
 
     setIsReporting(true);
-    const newDateStr = rescheduleData.newDate.toISOString();
-    
     try {
-      const { error } = await supabase.from('reservations').update({ 
-        date: newDateStr, 
-        timeSlot: rescheduleData.timeSlot, 
-        rescheduleCount: (rescheduleData.reservation.rescheduleCount || 0) + 1 
-      }).eq('id', rescheduleData.reservation.id);
-
-      if (error) throw error;
-
-      if (trackForm.reservationId || currentUser) {
-        setTrackedReservations(prev => prev ? prev.map(r => r.id === rescheduleData.reservation.id ? { 
-          ...r, 
-          date: newDateStr, 
-          timeSlot: rescheduleData.timeSlot, 
-          rescheduleCount: (r.rescheduleCount || 0) + 1 
-        } : r) : null);
-      }
-      setToastMsg({ title: "Rescheduled", desc: "Booking successfully rescheduled.", type: 'success' });
+      const { data, error } = await supabase.rpc('request_booking_reschedule', {
+        booking_id: reservation.id,
+        booking_contact: rescheduleContact.trim(),
+        requested_date: format(newDate, 'yyyy-MM-dd'),
+        requested_time: timeSlot,
+      });
+      if (error || data !== true) throw new Error('Reschedule request was not saved.');
+      setTrackedReservations(prev => prev?.map(r => r.id === reservation.id ? { ...r, requestedRescheduleDate: format(newDate, 'yyyy-MM-dd'), rescheduleCount: 1 } : r) ?? null);
+      await forceFullSync();
+      setToastMsg({ title: 'Request sent', desc: 'Staff will review it. Your current booking stays in place until they approve.', type: 'success' });
       setRescheduleData(null);
-    } catch (error) {
-      setToastMsg({ title: "Error", desc: "Failed to reschedule booking.", type: 'error' });
+    } catch {
+      setToastMsg({ title: 'Request not saved', desc: 'Check the original booking contact and whether you already requested a change.', type: 'error' });
     } finally {
       setIsReporting(false);
     }
@@ -1041,27 +1038,30 @@ export function HomePage() {
     setTimeout(() => { setFeedbackSent(false); setFeedbackForm({ name: '', contact: '', type: '', customType: '', message: '', reservationId: '' }); }, 3000);
   };
 
-  const handleMiniReportSubmit = (e: React.FormEvent) => {
+  const handleMiniReportSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!reportModalResId || !reportMessage.trim()) return;
+    if (!reportModalResId || !reportMessage.trim() || isReporting) return;
     setIsReporting(true);
-    
-    addFeedback({ 
-      customerName: currentUser?.name || 'Guest', 
-      contactInfo: currentUser?.email || 'N/A', 
-      rating: 0, 
-      feedbackType: 'complaint', 
-      comment: reportMessage, 
-      tags: ['Priority Resolution'],
-      reservationId: reportModalResId
-    });
-
-    setTimeout(() => {
-      setIsReporting(false);
+    try {
+      const { error } = await publicSupabase.from('feedback').insert({
+        id: crypto.randomUUID(),
+        customerName: currentUser?.name || 'Guest',
+        contactInfo: currentUser?.email || 'N/A',
+        feedbackType: 'complaint',
+        comment: reportMessage.trim(),
+        tags: JSON.stringify(['Priority Resolution']),
+        reservationId: reportModalResId,
+        date: new Date().toISOString(),
+      });
+      if (error) throw error;
       setReportModalResId(null);
       setReportMessage('');
-      alert("Issue reported successfully. The management team has been notified in real-time.");
-    }, 800);
+      setToastMsg({ title: 'Report sent', desc: 'Staff can review your issue in Feedback.', type: 'success' });
+    } catch {
+      setToastMsg({ title: 'Report not saved', desc: 'Please try again.', type: 'error' });
+    } finally {
+      setIsReporting(false);
+    }
   };
 
   const getEventImage = (attachments: any) => {
@@ -1101,7 +1101,7 @@ export function HomePage() {
     }
   };
 
-  const reservedDates = reservations?.filter((r: any) => r.status !== 'cancelled').map((r: any) => new Date(r.date)) || [];
+  const reservedDates = (bookingAvailability ?? []).map(r => new Date(r.date + 'T00:00:00'));
 
   const allNavSections: { id: string; label: string }[] = [
     { id: 'home', label: 'Home' },
@@ -1712,6 +1712,8 @@ export function HomePage() {
                                     (r.customerName?.startsWith('EVENT:') || r.id?.startsWith('EVT-') || r.paymentRef === 'EVENT')
                                   );
                                   const isEvent = Boolean(eventForTable) || table.status === 'event';
+                                  const hasBookings = bookingAvailability?.some(slot => slot.tableId === table.id &&
+                                    isSameDay(new Date(slot.date + 'T00:00:00'), selectedDate));
                                   
                                   return (
                                     <button
@@ -1738,10 +1740,10 @@ export function HomePage() {
                                     >
                                       <div className="flex justify-between items-center mb-1">
                                         <span className={`text-xs font-bold ${isEvent ? 'text-purple-300' : isSel ? 'text-emerald-400' : 'text-neutral-200'}`}>{table.name}</span>
-                                        <span className={`w-2 h-2 rounded-full ${isMaint ? 'bg-rose-500' : isEvent ? 'bg-purple-400 animate-pulse' : isOcc && isToday(selectedDate) ? 'bg-amber-400 animate-pulse' : 'bg-emerald-500'}`} />
+                                        <span className={`w-2 h-2 rounded-full ${isMaint ? 'bg-rose-500' : isEvent ? 'bg-purple-400 animate-pulse' : isOcc && isToday(selectedDate) ? 'bg-amber-400 animate-pulse' : hasBookings ? 'bg-amber-400' : 'bg-emerald-500'}`} />
                                       </div>
                                       <p className={`text-[10px] font-semibold truncate ${isEvent ? 'text-purple-400' : 'text-neutral-400'}`}>
-                                        {isMaint ? 'Unavailable' : isEvent ? 'EVENT (Click to view)' : isOcc && isToday(selectedDate) ? 'Playing Now' : 'Available Slot'}
+                                        {isMaint ? 'Unavailable' : isEvent ? 'EVENT (Click to view)' : isOcc && isToday(selectedDate) ? 'Playing Now' : hasBookings ? 'Has Reservations' : 'Available Slot'}
                                       </p>
                                     </button>
                                   );
@@ -1790,9 +1792,9 @@ export function HomePage() {
                                       (r.customerName?.startsWith('EVENT:') || r.id?.startsWith('EVT-') || r.paymentRef === 'EVENT')
                                     );
                                     
-                                    const tableRes = reservations.filter((r: any) => 
+                                    const tableRes = (bookingAvailability ?? []).filter(r =>
                                       r.tableId === selectedTableId && 
-                                      isSameDay(new Date(r.date), selectedDate) && 
+                                      isSameDay(new Date(r.date + 'T00:00:00'), selectedDate) &&
                                       r.status !== 'cancelled' && 
                                       r.status !== 'completed'
                                     ).sort((a: any, b: any) => {
@@ -1801,6 +1803,7 @@ export function HomePage() {
                                       return (timeA[0]*60 + timeA[1]) - (timeB[0]*60 + timeB[1]);
                                     });
 
+                                    if (!bookingAvailability) return <p className="text-xs text-neutral-400">Checking booking availability…</p>;
                                     if (tableRes.length === 0 && !isActiveWalkIn && !eventForTable) return <p className="text-xs text-neutral-500 italic">No bookings on this date.</p>;
 
                                     return (
@@ -1828,11 +1831,11 @@ export function HomePage() {
                                           </div>
                                         )}
                                         {tableRes.map((r: any) => {
-                                          const rStart = new Date(r.date);
+                                          const rStart = new Date(r.date + 'T00:00:00');
                                           const [rH, rM] = r.timeSlot.split(':').map(Number);
                                           rStart.setHours(rH, rM, 0, 0);
                                           const rEnd = addMinutes(rStart, r.durationHours * 60);
-                                          const isEventRes = r.customerName?.startsWith('EVENT:') || r.id?.startsWith('EVT-') || r.paymentRef === 'EVENT';
+                                          const isEventRes = r.id.startsWith('EVT-');
 
                                           if (isEventRes) {
                                             return (
@@ -2147,7 +2150,11 @@ export function HomePage() {
                                     <div className="flex items-center gap-3 mt-1.5">
                                       <label className="flex-1 cursor-pointer bg-neutral-950 border border-dashed border-neutral-700 rounded-lg px-3 py-2 text-center h-[42px] flex items-center justify-center hover:border-neutral-500 transition-colors">
                                         <input type="file" accept="image/jpeg, image/png" className="hidden" onChange={e => { const file = e.target.files?.[0]; if (file) { setReceiptPreview(URL.createObjectURL(file)); setReceiptFile(file); } }} />
-                                        <span className="text-[10px] text-neutral-400 font-semibold">{receiptPreview ? 'Change image' : 'Upload JPG/PNG'}</span>
+                                         {receiptPreview ? (
+                                          <span className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1"><CheckCircle size={14} /> Image Attached</span>
+                                        ) : (
+                                          <span className="text-[10px] text-neutral-400 font-semibold">Upload JPG/PNG</span>
+                                        )}
                                       </label>
                                     </div>
                                   </div>
@@ -2349,15 +2356,10 @@ export function HomePage() {
                                     <FileText size={14} className="text-emerald-500" /> View e-Receipt
                                   </button>
                                   
-                                  {/* 🟢 Direct Request Refund / Cancel Button */}
-                                  {(r.status === 'pending' || r.status === 'pending-reschedule' || r.status === 'confirmed') && (
-                                    <button
-                                      type="button"
-                                      onClick={() => handleCancelBooking(r.id, r.date, r.timeSlot)}
-                                      className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 dark:text-rose-300 text-xs font-bold rounded-xl transition-colors border border-rose-200 dark:border-rose-800/60 shadow-sm"
-                                    >
-                                      <XCircle size={14} className="text-rose-500 dark:text-rose-400" /> Cancel / Request Refund
-                                    </button>
+                                  {r.requestedRescheduleDate && ['pending', 'confirmed'].includes(r.status) && (
+                                    <span className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-violet-600 dark:text-violet-300">
+                                      <Clock size={13} /> Reschedule Requested
+                                    </span>
                                   )}
                                   {r.status === 'pending-refund' && (
                                     <span className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-2 bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400 text-xs font-bold rounded-xl border border-amber-200 dark:border-amber-800/40">
@@ -2382,9 +2384,14 @@ export function HomePage() {
                                           exit={{ opacity: 0, y: 5, scale: 0.95 }} 
                                           className="absolute right-0 top-full mt-2 w-48 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-2xl overflow-hidden z-50 flex flex-col py-1"
                                         >
+                                          {['pending', 'pending-reschedule', 'confirmed'].includes(r.status) && (
+                                            <button type="button" onClick={() => { setOpenActionRowId(null); void handleCancelBooking(r.id, r.date, r.timeSlot); }} className="px-4 py-3 text-left text-xs font-bold text-rose-600 dark:text-rose-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 border-b border-neutral-100 dark:border-neutral-800/50">
+                                              Cancel / Request Refund
+                                            </button>
+                                          )}
                                           {/* Request Reschedule */}
-                                          {(r.status === 'pending' || r.status === 'confirmed') && currentUser && (
-                                             <button onClick={(e) => { e.stopPropagation(); handleRequestReschedule(r.id, r); setOpenActionRowId(null); }} className="px-4 py-3 text-left text-xs font-bold text-violet-600 dark:text-violet-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors border-b border-neutral-100 dark:border-neutral-800/50">
+                                          {(r.status === 'pending' || r.status === 'confirmed') && !r.rescheduleCount && (
+                                             <button onClick={(e) => { e.stopPropagation(); handleRequestReschedule(r); setOpenActionRowId(null); }} className="px-4 py-3 text-left text-xs font-bold text-violet-600 dark:text-violet-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors border-b border-neutral-100 dark:border-neutral-800/50">
                                                Request Reschedule
                                              </button>
                                           )}
@@ -2905,13 +2912,17 @@ export function HomePage() {
             <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className="bg-neutral-950 border border-neutral-800 rounded-3xl p-6 w-full max-w-sm shadow-2xl space-y-4">
               <div className="flex justify-between items-start mb-2">
                 <div>
-                  <h3 className="text-lg font-black text-violet-400 flex items-center gap-2"><Calendar size={18} /> Reschedule Booking</h3>
+                  <h3 className="text-lg font-black text-violet-400 flex items-center gap-2"><Calendar size={18} /> Request Reschedule</h3>
                   <p className="text-xs text-neutral-500 mt-1">Reservation #{rescheduleData.reservation.id.toUpperCase()}</p>
                 </div>
                 <button onClick={() => setRescheduleData(null)} className="text-neutral-500 hover:text-white transition-colors"><X size={18} /></button>
               </div>
               
               <form onSubmit={executeReschedule} className="space-y-4">
+                <label className="block text-xs text-neutral-300">
+                  Email or phone used to book
+                  <input required value={rescheduleContact} onChange={e => setRescheduleContact(e.target.value)} className="mt-1 block w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-white" />
+                </label>
                 <div className="bg-neutral-900/50 p-3 rounded-xl border border-neutral-800">
                   <MiniCalendar
                     selectedDate={rescheduleData.newDate}
@@ -2952,8 +2963,8 @@ export function HomePage() {
                 
                 <div className="flex gap-2 pt-2">
                   <button type="button" onClick={() => setRescheduleData(null)} className="flex-1 py-3 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 font-bold rounded-xl text-xs transition-colors border border-neutral-800">Cancel</button>
-                  <button type="submit" disabled={!rescheduleData.newDate || !rescheduleData.timeSlot || isReporting} className="flex-1 py-3 bg-violet-600 hover:bg-violet-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white font-bold rounded-xl text-xs transition-colors flex items-center justify-center gap-2">
-                    {isReporting ? <><RefreshCw size={14} className="animate-spin" /> Verifying...</> : 'Confirm Reschedule'}
+                  <button type="submit" disabled={!rescheduleData.newDate || !rescheduleData.timeSlot || !rescheduleContact.trim() || isReporting} className="flex-1 py-3 bg-violet-600 hover:bg-violet-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white font-bold rounded-xl text-xs transition-colors flex items-center justify-center gap-2">
+                    {isReporting ? <><RefreshCw size={14} className="animate-spin" /> Verifying...</> : 'Send Request'}
                   </button>
                 </div>
               </form>
