@@ -252,7 +252,7 @@ export function HomePage() {
   const [isTableSelectorExpanded, setIsTableSelectorExpanded] = useState(true);
   
   const [resForm, setResForm] = useState({ 
-    name: '', email: '', phone: '', pax: 2, timeSlot: '', duration: 2,
+    name: '', email: '', phone: '', pax: 2, timeSlot: '', duration: 1,
     paymentMethod: 'gcash' as 'gcash' | 'cash', paymentRef: ''
   });
 
@@ -663,24 +663,29 @@ export function HomePage() {
     }
   };
 
+  const isWeekendDay = (d: Date) => d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
+
+  const getOperatingHours = (dateObj: Date | null) => {
+    const isWeekend = dateObj ? isWeekendDay(new Date(dateObj)) : isWeekendDay(new Date());
+    const openTime = (isWeekend ? rates?.weekendStartTime : rates?.weekdayStartTime) || '12:00';
+    const closeTime = (isWeekend ? rates?.weekendEndTime : rates?.weekdayEndTime) || '02:00';
+    return { openTime, closeTime };
+  };
+
   const bookingHoursDisplay = (() => {
     try {
-      const start = rates?.reservationStartTime || '12:00';
-      const end = rates?.reservationEndTime || '02:00';
-      const [sh, sm] = start.split(':').map(Number);
-      const [eh, em] = end.split(':').map(Number);
-      let startMins = sh * 60 + (sm || 0);
-      let endMins = eh * 60 + (em || 0);
-      if (endMins <= startMins) endMins += 24 * 60;
-      const cutoffMins = endMins - 60; 
-      if (cutoffMins <= startMins) return 'No online bookings';
-      return `${fmt12(start)} to ${fmt12(cutoffMins)}`;
+      const wDayStart = rates?.weekdayStartTime || '12:00';
+      const wDayEnd = rates?.weekdayEndTime || '02:00';
+      const wEndStart = rates?.weekendStartTime || '12:00';
+      const wEndEnd = rates?.weekendEndTime || '02:00';
+      if (wDayStart === wEndStart && wDayEnd === wEndEnd) {
+        return `${fmt12(wDayStart)} to ${fmt12(wDayEnd)}`;
+      }
+      return `Mon–Thu ${fmt12(wDayStart)}–${fmt12(wDayEnd)}, Fri–Sun ${fmt12(wEndStart)}–${fmt12(wEndEnd)}`;
     } catch (e) {
-      return `${rates?.reservationStartTime || '12:00'} to ${rates?.reservationEndTime || '02:00'}`;
+      return `${rates?.weekdayStartTime || '12:00'} to ${rates?.weekdayEndTime || '02:00'}`;
     }
   })();
-
-  const isWeekendDay = (d: Date) => d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
 
   const getTermNum = (keys: string[], fallback: number) => {
     if (!reservationTerms) return fallback;
@@ -708,22 +713,43 @@ export function HomePage() {
   })();
 
   const getMaxDuration = () => {
-    if (!resForm.timeSlot) return reservationTerms?.maxHours || 6;
     const parseToMins = (t: string) => {
       const [hh = '0', mm = '0'] = (t || '').split(':');
       return Number(hh) * 60 + Number(mm || 0);
     };
-    const slotMins = parseToMins(resForm.timeSlot);
-    const startMins = parseToMins(rates?.reservationStartTime || '12:00');
-    let endMins = parseToMins(rates?.reservationEndTime || '02:00');
+
+    const { openTime, closeTime } = getOperatingHours(selectedDate);
+    const startMins = parseToMins(openTime);
+    let endMins = parseToMins(closeTime);
     if (endMins <= startMins) endMins += 24 * 60;
+    const totalOperatingHours = Math.max(1, Math.floor((endMins - startMins) / 60));
+
+    // Cap by configured reservation terms if lower than venue operating window
+    const termMax = Number(reservationTerms?.maxHours);
+    const maxVenueHours = (termMax && termMax > 0 && termMax < totalOperatingHours)
+      ? termMax
+      : totalOperatingHours;
+
+    if (!resForm.timeSlot) return maxVenueHours;
+
+    const slotMins = parseToMins(resForm.timeSlot);
     let normalizedSlotMins = slotMins;
     if (slotMins < startMins) normalizedSlotMins += 24 * 60;
     const minsUntilClose = endMins - normalizedSlotMins;
-    return Math.max(1, Math.min(Math.floor(minsUntilClose / 60), reservationTerms?.maxHours || 6));
+    const hoursUntilClose = Math.floor(minsUntilClose / 60);
+
+    return Math.max(1, Math.min(hoursUntilClose, maxVenueHours));
   };
 
   const maxAllowedDuration = getMaxDuration();
+
+  useEffect(() => {
+    if (resForm.duration > maxAllowedDuration) {
+      setResForm(f => ({ ...f, duration: Math.max(1, maxAllowedDuration) }));
+    } else if (resForm.duration < 1) {
+      setResForm(f => ({ ...f, duration: 1 }));
+    }
+  }, [maxAllowedDuration, resForm.duration]);
 
   const minAllowedTime = useMemo(() => {
     if (!selectedDate || !isToday(selectedDate)) return '';
@@ -757,13 +783,14 @@ export function HomePage() {
       if (slotMins < nowMins + advanceNoticeMins) return 'advance';
     }
 
-    const startReserveMins = parseToMins(rates?.reservationStartTime || '12:00');
-    let endReserveMins = parseToMins(rates?.reservationEndTime || '02:00');
+    const { openTime, closeTime } = getOperatingHours(requestedStart);
+    const startReserveMins = parseToMins(openTime);
+    let endReserveMins = parseToMins(closeTime);
     if (endReserveMins <= startReserveMins) endReserveMins += 24 * 60;
 
     let normalizedSlot = slotMins;
     if (slotMins < startReserveMins) normalizedSlot += 24 * 60;
-    if (normalizedSlot < startReserveMins || normalizedSlot >= endReserveMins) return 'closed';
+    if (normalizedSlot < startReserveMins || normalizedSlot + duration * 60 > endReserveMins) return 'closed';
 
     const sameTableRes = reservations.filter((r: any) => 
       r.tableId === tableId && 
