@@ -282,6 +282,21 @@ export function Reservations() {
     return !!hasHistoryRecord;
   };
 
+  const getTableName = (tableId?: string) => {
+    if (!tableId) return '—';
+    const found = tables.find((t: any) => t.id === tableId);
+    if (found) return found.name;
+    const byName = tables.find((t: any) => t.name.toLowerCase() === tableId.toLowerCase());
+    if (byName) return byName.name;
+    const m = /^t(\d+)$/i.exec(tableId);
+    if (m) {
+      const byNum = tables.find((t: any) => t.name.toLowerCase() === `table ${m[1]}`.toLowerCase());
+      if (byNum) return byNum.name;
+      return `Table ${m[1]}`;
+    }
+    return tableId;
+  };
+
  const handleConfirmVoid = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!voidModal) return;
@@ -982,7 +997,7 @@ export function Reservations() {
                       <td className="px-4 py-3"><p className="text-sm text-neutral-300 font-medium">{formatDateTime(r.date, r.timeSlot)}</p></td>
                       <td className="px-4 py-3"><span className="text-sm text-neutral-400">{r.durationHours}h</span></td>
                       <td className="px-4 py-3"><span className="text-sm text-neutral-400">{r.partySize} pax</span></td>
-                      <td className="px-4 py-3"><span className="text-sm text-neutral-400">{r.tableId ? tables.find((t: any) => t.id === r.tableId)?.name || r.tableId : '—'}</span></td>
+                      <td className="px-4 py-3"><span className="text-sm text-neutral-400">{getTableName(r.tableId)}</span></td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${cfg.color}`}>
                           <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />{cfg.label}
@@ -1167,7 +1182,7 @@ export function Reservations() {
                 <div className="space-y-1"><p className="text-xs text-neutral-600 uppercase tracking-wider font-bold">Date & Time</p><p className="text-lg text-neutral-200 font-medium">{format(new Date(selected.date), 'MMM d, yyyy')}</p><p className="text-emerald-400 text-sm font-bold">{formatTimeOnly(selected.timeSlot)}</p></div>
                 <div className="space-y-1"><p className="text-xs text-neutral-600 uppercase tracking-wider font-bold">Duration</p><p className="text-lg text-neutral-200 font-medium">{selected.durationHours} hour{selected.durationHours > 1 ? 's' : ''}</p><p className="text-neutral-400 text-sm font-medium">{selected.partySize} pax</p></div>
                 <div className="space-y-1"><p className="text-xs text-neutral-600 uppercase tracking-wider font-bold">Contact</p><p className="text-lg text-neutral-200 font-medium">{selected.contactNumber}</p>{selected.email ? <p className="text-neutral-400 text-sm">{selected.email}</p> : <p className="text-neutral-600 text-sm italic">No email provided</p>}</div>
-                <div className="space-y-1"><p className="text-xs text-neutral-600 uppercase tracking-wider font-bold">Table</p><p className="text-lg text-neutral-200 font-medium">{selected.tableId ? tables.find((t: any) => t.id === selected.tableId)?.name || selected.tableId : 'Not assigned'}</p></div>
+                <div className="space-y-1"><p className="text-xs text-neutral-600 uppercase tracking-wider font-bold">Table</p><p className="text-lg text-neutral-200 font-medium">{selected.tableId ? getTableName(selected.tableId) : 'Not assigned'}</p></div>
               </div>
 
               {/* 🟢 Cancellation Reason Display */}
@@ -2117,7 +2132,7 @@ export function Reservations() {
                   <div className="flex justify-between"><span>Booking ID:</span><span className="font-bold text-[10px]">{viewingEReceipt.id.toUpperCase()}</span></div>
                   <div className="flex justify-between"><span>Date:</span><span>{format(new Date(viewingEReceipt.date), 'MM/dd/yyyy')}</span></div>
                   <div className="flex justify-between"><span>Time:</span><span>{formatTimeOnly(viewingEReceipt.timeSlot)}</span></div>
-                  <div className="flex justify-between"><span>Table:</span><span>{viewingEReceipt.tableId ? tables.find((t: any) => t.id === viewingEReceipt.tableId)?.name || 'Walk-In' : 'N/A'}</span></div>
+                  <div className="flex justify-between"><span>Table:</span><span>{viewingEReceipt.tableId ? getTableName(viewingEReceipt.tableId) : 'N/A'}</span></div>
                   <div className="flex justify-between"><span>Customer:</span><span>{viewingEReceipt.customerName}</span></div>
                 </div>
 

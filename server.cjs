@@ -315,6 +315,21 @@ if (!sqlite3) {
       db.run(
         `UPDATE staff SET recoveryPin = abs(random() % 9000) + 1000 WHERE recoveryPin IS NULL OR recoveryPin = '' OR recoveryPin = '0000'`
       );
+
+      // Seed default systemSettings if empty or missing
+      const defaultSettings = [
+        ['weekdayStartTime', '12:00'],
+        ['weekdayEndTime', '02:00'],
+        ['weekendStartTime', '12:00'],
+        ['weekendEndTime', '05:00'],
+        ['bookingCutoffMinutes', '60'],
+        ['hourlyRate', '150'],
+        ['overtimeRate', '300'],
+        ['downPaymentPercent', '20']
+      ];
+      defaultSettings.forEach(([k, v]) => {
+        db.run(`INSERT OR IGNORE INTO systemSettings (keyName, settingValue) VALUES (?, ?)`, [k, v]);
+      });
     });
   }
 });
@@ -439,7 +454,7 @@ app.get('/api/tables/:id/availability', (req, res) => {
   let latestEndTimeMs = now + 8 * 3600000;
   let limitingReason = 'closing';
 
-  db.all(`SELECT keyName, settingValue FROM rates`, [], (err, rateRows) => {
+  db.all(`SELECT keyName, settingValue FROM systemSettings`, [], (err, rateRows) => {
     const rates = {};
     if (!err && rateRows) {
       rateRows.forEach(row => { rates[row.keyName] = row.settingValue; });

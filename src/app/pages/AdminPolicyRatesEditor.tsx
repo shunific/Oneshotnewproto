@@ -456,25 +456,7 @@ export default function AdminPolicyRatesEditor() {
               </div>
             </div>
 
-            {/* Weekday & Weekend Operating Hours Link Notice */}
-            <div className="p-4 bg-neutral-950/80 rounded-xl border border-neutral-800/60 mb-4 flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400">
-                  <Clock size={16} />
-                </div>
-                <div>
-                  <p className="text-xs font-bold text-neutral-200">Daily Store Operating Hours</p>
-                  <p className="text-[11px] text-neutral-500">Opening & closing schedules have been moved to Site Settings.</p>
-                </div>
-              </div>
-              <button 
-                type="button"
-                onClick={() => navigate('/admin/site-settings')}
-                className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold rounded-lg transition-colors border border-neutral-700 cursor-pointer"
-              >
-                Configure in Site Settings &rarr;
-              </button>
-            </div>
+
 
             <div className="mt-4">
               <label className="block text-xs text-neutral-400 mb-1 uppercase tracking-wider">Down Payment % Required (All Days)</label>

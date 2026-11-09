@@ -307,6 +307,9 @@ export function AdminUsers() {
           // Check if this card represents the currently logged-in admin
           const isSelf = u.username?.toLowerCase() === staffProfile?.username?.toLowerCase();
           const isSuperAdmin = u.username === 'superadmin' || u.id === 'admin_001';
+          const isCurrentSuperAdmin = staffProfile?.username?.toLowerCase() === 'superadmin' || staffProfile?.id === 'admin_001' || staffProfile?.role === 'Super Admin';
+          const isOtherAdmin = Boolean(u.isAdmin) && !isSuperAdmin;
+          const isEditDisabled = !isCurrentSuperAdmin || isOtherAdmin;
 
           return (
             <div key={u.id} className={`bg-neutral-950 border rounded-xl p-5 transition-colors ${viewTab === 'archived' ? 'border-rose-900/30 opacity-75' : 'border-neutral-800 hover:border-neutral-700'}`}>
@@ -348,7 +351,19 @@ export function AdminUsers() {
                 </div>
 
                 <div className="flex items-center gap-2 flex-shrink-0">
-                  <button type="button" onClick={() => { setOpenDropdownId(null); setEditingEmployee(u); }} className="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 text-xs text-neutral-300 hover:text-white">Edit employee</button>
+                  <button 
+                    type="button" 
+                    disabled={isEditDisabled}
+                    onClick={() => { if (!isEditDisabled) { setOpenDropdownId(null); setEditingEmployee(u); } }} 
+                    title={!isCurrentSuperAdmin ? "Only the Super Admin can edit employee accounts" : isOtherAdmin ? "Accounts with admin access cannot be edited" : "Edit employee"}
+                    className={`px-3 py-2 rounded-lg border text-xs transition-colors ${
+                      isEditDisabled 
+                        ? 'bg-neutral-900/50 border-neutral-800/50 text-neutral-600 cursor-not-allowed' 
+                        : 'bg-neutral-900 border-neutral-800 text-neutral-300 hover:text-white hover:border-neutral-700'
+                    }`}
+                  >
+                    Edit employee
+                  </button>
                   {viewTab === 'active' ? (
                     <>
                       {/* Admin Privilege Switch (Disabled if role is cashier OR if it's the logged-in user or superadmin) */}
