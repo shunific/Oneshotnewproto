@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase, publicSupabase } from '../utils/supabase';
@@ -244,7 +244,6 @@ export function HomePage() {
   const [_now, setNow] = useState(new Date());
   
   const [activeSection, setActiveSection] = useState<Section>('home');
-  const [aboutSubTab, setAboutSubTab] = useState<'about' | 'feedback'>('about');
 
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [isCalendarExpanded, setIsCalendarExpanded] = useState(true);
@@ -283,7 +282,7 @@ export function HomePage() {
   const [openActionRowId, setOpenActionRowId] = useState<string | null>(null);
   
   const [toastMsg, setToastMsg] = useState<{title: string, desc: string, type: 'success'|'error'} | null>(null);
-  const [pendingScroll, setPendingScroll] = useState<string | null>(null);
+  const [scrollTarget, setScrollTarget] = useState<{ section: Section } | null>(null);
   const [showTermsModal, setShowTermsModal] = useState(false);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [receiptImg, setReceiptImg] = useState<string | null>(null);
@@ -298,16 +297,15 @@ export function HomePage() {
     }
   }, [toastMsg]);
 
-  useEffect(() => {
-    if (activeSection === 'home' && pendingScroll) {
-      const timer = setTimeout(() => {
-        const el = document.getElementById(`home-${pendingScroll}-section`);
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        setPendingScroll(null);
-      }, 150);
-      return () => clearTimeout(timer);
+  useLayoutEffect(() => {
+    if (!scrollTarget) return;
+    const { section } = scrollTarget;
+    if (section === 'about' || section === 'feedback') {
+      document.getElementById(`home-${section}-section`)?.scrollIntoView({ block: 'start', behavior: 'instant' });
+    } else {
+      window.scrollTo({ top: 0, behavior: 'instant' });
     }
-  }, [activeSection, pendingScroll]);
+  }, [scrollTarget]);
 
   useEffect(() => {
     const handleClickOutside = () => setOpenActionRowId(null);
@@ -603,43 +601,9 @@ export function HomePage() {
     }
   };
 
-  const handleNavClick = (sectionId: string) => {
-    if (sectionId === 'about') {
-      setActiveSection('about');
-      setAboutSubTab('about');
-      setTimeout(() => {
-        const el = document.getElementById('home-about-section') || document.getElementById('about-passion-section');
-        if (el) {
-          const navOffset = 150;
-          const elementPosition = el.getBoundingClientRect().top;
-          const offsetPosition = elementPosition + window.pageYOffset - navOffset;
-          window.scrollTo({
-            top: Math.max(0, offsetPosition),
-            behavior: 'smooth'
-          });
-        }
-      }, 60);
-      return;
-    }
-    if (sectionId === 'feedback') {
-      setActiveSection('feedback');
-      setAboutSubTab('feedback');
-      setTimeout(() => {
-        const el = document.getElementById('home-feedback-section');
-        if (el) {
-          const navOffset = 150;
-          const elementPosition = el.getBoundingClientRect().top;
-          const offsetPosition = elementPosition + window.pageYOffset - navOffset;
-          window.scrollTo({
-            top: Math.max(0, offsetPosition),
-            behavior: 'smooth'
-          });
-        }
-      }, 60);
-      return;
-    }
-    setActiveSection(sectionId as Section);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+  const handleNavClick = (section: Section) => {
+    setActiveSection(section);
+    setScrollTarget({ section });
   };
 
   const handleReportProblem = (reservationId: string) => {
@@ -939,6 +903,7 @@ export function HomePage() {
   };
 
   const handleCancelBooking = async (id: string, dateString: string, timeSlot: string) => {
+    if (!currentUser) return;
     let notice = '';
     try {
       const resDate = new Date(dateString);
@@ -960,11 +925,8 @@ export function HomePage() {
     }
 
     try {
-      const { data, error } = await supabase.from('reservations').update({
-        status: 'pending-refund',
-        cancellation_reason: 'Customer requested cancellation & refund',
-      }).eq('id', id).in('status', ['pending', 'confirmed', 'pending-reschedule']).select('id').maybeSingle();
-      if (error || !data) throw new Error('Cancellation was not saved.');
+      const { data, error } = await supabase.rpc('request_booking_refund', { booking_id: id });
+      if (error || data !== true) throw new Error('Cancellation was not saved.');
       setTrackedReservations(prev => prev?.map(r => r.id === id ? { ...r, status: 'pending-refund' } : r) ?? null);
       await forceFullSync();
       setToastMsg({ title: 'Refund requested', desc: 'Staff will review your cancellation and refund request.', type: 'success' });
@@ -974,13 +936,14 @@ export function HomePage() {
   };
 
   const handleRequestReschedule = (reservation: any) => {
+    if (!currentUser) return;
     setRescheduleContact('');
     setRescheduleData({ show: true, reservation, newDate: null, timeSlot: reservation.timeSlot });
   };
 
   const executeReschedule = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!rescheduleData?.newDate || !rescheduleData.timeSlot || isReporting) return;
+    if (!currentUser || !rescheduleData?.newDate || !rescheduleData.timeSlot || isReporting) return;
     const { reservation, newDate, timeSlot } = rescheduleData;
     const tableIds = reservation.tableId ? [reservation.tableId] : tables
       .filter((table: any) => table.isActive && !['maintenance', 'event'].includes(table.status))
@@ -1103,7 +1066,7 @@ export function HomePage() {
 
   const reservedDates = (bookingAvailability ?? []).map(r => new Date(r.date + 'T00:00:00'));
 
-  const allNavSections: { id: string; label: string }[] = [
+  const allNavSections: { id: Section; label: string }[] = [
     { id: 'home', label: 'Home' },
     { id: 'reservations', label: 'Reservations' },
     { id: 'rates', label: 'Rates' },
@@ -1307,8 +1270,6 @@ export function HomePage() {
 
       {/* ── Main Content ── */}
       <main className="flex-1 pt-[126px]">
-        <AnimatePresence mode="wait">
-          
           {/* ════ HOME SECTION ════ */}
           {(activeSection === 'home' || activeSection === 'about' || activeSection === 'feedback') && (
             <motion.div key="home" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }}>
@@ -1379,8 +1340,8 @@ export function HomePage() {
               </div>
 
               {/* About & Location */}
-              <div id="home-about-section" className="max-w-5xl mx-auto px-6 pt-20 pb-20 sm:pt-24 sm:pb-24 border-t border-neutral-800 scroll-mt-40">
-                <div id="about-passion-section" className="text-center mb-12 sm:mb-16 scroll-mt-40">
+              <div id="home-about-section" className="max-w-5xl mx-auto px-6 pt-20 pb-20 sm:pt-24 sm:pb-24 border-t border-neutral-800 scroll-mt-[126px]">
+                <div id="about-passion-section" className="text-center mb-12 sm:mb-16 scroll-mt-[126px]">
                   <h2 className="text-3xl sm:text-4xl font-black text-white mb-3 tracking-tight">{cms.aboutTitle}</h2>
                   <p className="text-neutral-400 text-sm sm:text-base max-w-xl mx-auto leading-relaxed">The story behind Cainta's favorite billiards destination</p>
                 </div>
@@ -1498,8 +1459,8 @@ export function HomePage() {
               </div>
 
               {/* FEEDBACK SECTION */}
-              <div id="home-feedback-section" className="max-w-2xl mx-auto px-6 pt-20 pb-24 border-t border-neutral-800 scroll-mt-40">
-                <div id="send-feedback-heading" className="text-center mb-10 scroll-mt-40">
+              <div id="home-feedback-section" className="max-w-2xl mx-auto px-6 pt-20 pb-24 border-t border-neutral-800 scroll-mt-[126px]">
+                <div id="send-feedback-heading" className="text-center mb-10 scroll-mt-[126px]">
                   <h2 className="text-3xl sm:text-4xl font-black text-white mb-2 tracking-tight">Send us Feedback</h2>
                   <p className="text-neutral-400 text-sm sm:text-base">We value your experience. Let us know how we can improve!</p>
                 </div>
@@ -1722,8 +1683,7 @@ export function HomePage() {
                                       disabled={isMaint}
                                       onClick={() => {
                                         if (isEvent) {
-                                          setActiveSection('events');
-                                          window.scrollTo({ top: 0, behavior: 'smooth' });
+                                          handleNavClick('events');
                                           return;
                                         }
                                         setSelectedTableId(table.id);
@@ -1810,7 +1770,7 @@ export function HomePage() {
                                       <div className="space-y-2">
                                         {eventForTable && (
                                           <div 
-                                            onClick={() => { setActiveSection('events'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                                            onClick={() => { handleNavClick('events'); }}
                                             className="flex items-center gap-3 bg-purple-950/40 p-2.5 rounded-lg border border-purple-800/60 cursor-pointer hover:bg-purple-900/50 transition-colors"
                                           >
                                             <div className="w-2 h-2 rounded-full bg-purple-400 animate-pulse shadow-[0_0_8px_rgba(168,85,247,0.6)]" />
@@ -1841,7 +1801,7 @@ export function HomePage() {
                                             return (
                                               <div 
                                                 key={r.id} 
-                                                onClick={() => { setActiveSection('events'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                                                onClick={() => { handleNavClick('events'); }}
                                                 className="flex items-center gap-3 bg-purple-950/40 hover:bg-purple-900/60 p-2.5 rounded-lg border border-purple-800/60 cursor-pointer transition-colors group"
                                               >
                                                 <div className="w-2 h-2 rounded-full bg-purple-400 animate-pulse shadow-[0_0_8px_rgba(168,85,247,0.6)]" />
@@ -2384,13 +2344,13 @@ export function HomePage() {
                                           exit={{ opacity: 0, y: 5, scale: 0.95 }} 
                                           className="absolute right-0 top-full mt-2 w-48 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-2xl overflow-hidden z-50 flex flex-col py-1"
                                         >
-                                          {['pending', 'pending-reschedule', 'confirmed'].includes(r.status) && (
+                                          {currentUser?.email && r.email?.trim().toLowerCase() === currentUser.email.trim().toLowerCase() && ['pending', 'pending-reschedule', 'confirmed'].includes(r.status) && (
                                             <button type="button" onClick={() => { setOpenActionRowId(null); void handleCancelBooking(r.id, r.date, r.timeSlot); }} className="px-4 py-3 text-left text-xs font-bold text-rose-600 dark:text-rose-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 border-b border-neutral-100 dark:border-neutral-800/50">
                                               Cancel / Request Refund
                                             </button>
                                           )}
                                           {/* Request Reschedule */}
-                                          {(r.status === 'pending' || r.status === 'confirmed') && !r.rescheduleCount && (
+                                          {currentUser && (r.status === 'pending' || r.status === 'confirmed') && !r.rescheduleCount && (
                                              <button onClick={(e) => { e.stopPropagation(); handleRequestReschedule(r); setOpenActionRowId(null); }} className="px-4 py-3 text-left text-xs font-bold text-violet-600 dark:text-violet-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors border-b border-neutral-100 dark:border-neutral-800/50">
                                                Request Reschedule
                                              </button>
@@ -2681,7 +2641,7 @@ export function HomePage() {
             </motion.div>
           )}
 
-          </AnimatePresence>
+
 
         {/* 🟢 FOOTER WITH LEGAL LINKS */}
         <footer className={`border-t mt-16 py-8 px-6 text-center text-xs w-full relative transition-colors ${
@@ -2884,7 +2844,7 @@ export function HomePage() {
                 </div>
                 
                 <div className="mt-6 pt-6 border-t border-neutral-800/60 flex flex-col gap-3">
-                  <button onClick={() => { setShowProfileModal(false); setActiveSection('reservations'); setResTab('track'); }} className="w-full flex items-center justify-center gap-2 bg-neutral-800/50 hover:bg-neutral-800 border border-neutral-700 text-neutral-200 font-bold py-3.5 rounded-xl transition-colors text-sm shadow-sm">
+                  <button onClick={() => { setShowProfileModal(false); handleNavClick('reservations'); setResTab('track'); }} className="w-full flex items-center justify-center gap-2 bg-neutral-800/50 hover:bg-neutral-800 border border-neutral-700 text-neutral-200 font-bold py-3.5 rounded-xl transition-colors text-sm shadow-sm">
                     <BookOpen size={16} className="text-emerald-500" /> View My Bookings
                   </button>
                   
@@ -2907,7 +2867,7 @@ export function HomePage() {
         )}
 
         {/* 🟢 RESCHEDULE MODAL */}
-        {rescheduleData?.show && (
+        {currentUser && rescheduleData?.show && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
             <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className="bg-neutral-950 border border-neutral-800 rounded-3xl p-6 w-full max-w-sm shadow-2xl space-y-4">
               <div className="flex justify-between items-start mb-2">
@@ -3182,6 +3142,7 @@ export function HomePage() {
                   <br /><br />
                   <strong className="text-white">Cancellation Policy:</strong> You may request a refund for your reservation as long as the cancellation is made <strong>at least 1 hour prior</strong> to your scheduled start time. Cancellations made less than 1 hour before the reservation are strictly non-refundable.
                 </p>
+                <p>Sign in to request a reschedule, cancellation, or refund. Guests can report an issue from the booking’s Actions menu.</p>
               </div>
               
               <label className="flex items-start gap-3 cursor-pointer mt-4">

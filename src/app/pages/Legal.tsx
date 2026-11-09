@@ -66,6 +66,7 @@ export function Legal() {
 
               <h2 className="text-xl font-bold text-white mt-8 mb-4 border-b border-neutral-800 pb-2">3. Cancellations & No-Shows</h2>
               <p>Cancellations must be made within the grace period specified by the venue. No-shows will forfeit their down payment, and repeated no-shows will negatively impact the user's Net Trust Score, revoking any VIP or Trusted Customer privileges.</p>
+              <p>Sign in to request a reschedule, cancellation, or refund. Guests can report an issue from the booking’s Actions menu.</p>
 
               <h2 className="text-xl font-bold text-white mt-8 mb-4 border-b border-neutral-800 pb-2">4. User Accounts</h2>
               <p>Users are responsible for maintaining the confidentiality of their account credentials. One Shot reserves the right to terminate accounts that violate our community guidelines or exploit the reservation system.</p>
