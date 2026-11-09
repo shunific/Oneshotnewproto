@@ -2444,12 +2444,26 @@ export function HomePage() {
                           <ImageWithFallback src={getEventImage(event.attachments)} alt={event.title} className="w-full h-full object-cover" />
                         </div>
                       )}
-                      <div className="flex justify-between items-start mb-2">
-                        <span className="text-[10px] bg-emerald-500/20 text-emerald-400 font-bold px-2 py-0.5 rounded">{event.type}</span>
-                        <span className="text-xs font-bold text-neutral-400">{event.date}</span>
+                      <div className="flex justify-between items-start mb-2 gap-2">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-[10px] bg-emerald-500/20 text-emerald-400 font-bold px-2 py-0.5 rounded">{event.type}</span>
+                          {event.slotsFull && (
+                            <span className="text-[10px] bg-rose-950 text-rose-400 border border-rose-800/50 font-bold px-2 py-0.5 rounded uppercase tracking-wider">Slots Full</span>
+                          )}
+                        </div>
+                        <span className="text-xs font-bold text-neutral-400 whitespace-nowrap">{event.date}</span>
                       </div>
-                      <h4 className="text-lg font-bold text-white mb-2">{event.title}</h4>
+                      <h4 className="text-lg font-bold mb-2 text-white">{event.title}</h4>
+                      {event.duration && <p className="text-[11px] text-neutral-500 font-medium mb-2 flex items-center gap-1.5"><Clock size={11} /> {event.duration}</p>}
                       <p className="text-xs text-neutral-400 leading-relaxed">{event.description}</p>
+
+                      {event.registrationLink && (
+                        <div className="mt-4 pt-4 border-t border-neutral-800">
+                          <a href={event.registrationLink} target="_blank" rel="noopener noreferrer" className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors">
+                            <ExternalLink size={13} /> Register via Google Form
+                          </a>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

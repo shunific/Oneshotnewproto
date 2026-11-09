@@ -87,6 +87,15 @@ export type Event = {
   allowReservations?: boolean;
   caterWalkIns?: boolean;
   walkInTableCount?: number;
+  bracketLink?: string;
+  minParticipants?: number;
+  reservationTableCount?: number;
+  eventTableIds?: string[];
+  dates?: string[];
+  duration?: string;
+  isCancelled?: boolean;
+  cancelReason?: string;
+  cancelledAt?: string;
 };
 
 export type StaffProfile = {
@@ -614,17 +623,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
           const rawSlotsFull = e.slotsfull ?? e.slots_full ?? e.slotsFull;
           const rawCater = e.caterwalkins ?? e.cater_walkins ?? e.caterWalkIns;
           const rawWalkIns = e.walkintablecount ?? e.walk_in_table_count ?? e.walkInTableCount;
+          let attachments: any[] = [];
+          if (Array.isArray(e.attachments)) attachments = e.attachments;
+          else if (typeof e.attachments === 'string' && e.attachments.trim()) {
+            try {
+              const parsed = JSON.parse(e.attachments);
+              attachments = Array.isArray(parsed) ? parsed : [e.attachments];
+            } catch { attachments = [e.attachments]; }
+          }
 
           return { 
             ...e, 
             dates: parsedDates,
             eventTableIds: parsedTableIds,
             isCancelled,
+            cancelReason: e.cancelReason ?? e.cancelreason ?? '',
+            cancelledAt: e.cancelledAt ?? e.cancelled_at ?? null,
+            registrationLink: e.registrationLink ?? e.registrationlink ?? '',
+            bracketLink: e.bracketLink ?? e.bracketlink ?? '',
             slotsFull: rawSlotsFull === true || rawSlotsFull === 1 || rawSlotsFull === '1' || rawSlotsFull === 'true', 
             allowReservations: !(rawAllowRes === false || rawAllowRes === 0 || rawAllowRes === '0' || rawAllowRes === 'false'), 
             caterWalkIns: !(rawCater === false || rawCater === 0 || rawCater === '0' || rawCater === 'false'), 
-            walkInTableCount: Number(rawWalkIns ?? 10) || 10, 
-            attachments: e.attachments ? (Array.isArray(e.attachments) ? e.attachments : [e.attachments]) : [] 
+            walkInTableCount: Number(rawWalkIns ?? 10) || 10,
+            reservationTableCount: e.reservationTableCount ?? e.reservationtablecount ?? 4,
+            minParticipants: e.minParticipants ?? e.minparticipants ?? 0,
+            maxParticipants: e.maxParticipants ?? e.maxparticipants ?? 0,
+            duration: e.duration ?? '',
+            createdAt: e.createdAt ?? e.createdat ?? null,
+            attachments
           };
         }) as Event[]);
       } else {
