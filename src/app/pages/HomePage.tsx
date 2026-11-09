@@ -285,7 +285,6 @@ export function HomePage() {
   const [showTermsModal, setShowTermsModal] = useState(false);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [receiptImg, setReceiptImg] = useState<string | null>(null);
-  const [showLogoMenu, setShowLogoMenu] = useState(false);
   const [showHelpModal, setShowHelpModal] = useState(false);
 
 
@@ -647,6 +646,18 @@ export function HomePage() {
     } catch (e) { return String(tOrMins); }
   };
 
+  const formatEventDuration = (dur: string) => {
+    if (!dur) return '';
+    if (dur.toLowerCase().includes('whole day')) return 'Whole Day';
+    if (dur.includes('-')) {
+      const parts = dur.split('-').map((s: string) => s.trim());
+      if (parts.length === 2) {
+        return `${fmt12(parts[0])} – ${fmt12(parts[1])}`;
+      }
+    }
+    return fmt12(dur);
+  };
+
   const getOpenHoursDisplay = () => {
     try {
       const currentDay = new Date().getDay();
@@ -663,29 +674,24 @@ export function HomePage() {
     }
   };
 
-  const isWeekendDay = (d: Date) => d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
-
-  const getOperatingHours = (dateObj: Date | null) => {
-    const isWeekend = dateObj ? isWeekendDay(new Date(dateObj)) : isWeekendDay(new Date());
-    const openTime = (isWeekend ? rates?.weekendStartTime : rates?.weekdayStartTime) || '12:00';
-    const closeTime = (isWeekend ? rates?.weekendEndTime : rates?.weekdayEndTime) || '02:00';
-    return { openTime, closeTime };
-  };
-
   const bookingHoursDisplay = (() => {
     try {
-      const wDayStart = rates?.weekdayStartTime || '12:00';
-      const wDayEnd = rates?.weekdayEndTime || '02:00';
-      const wEndStart = rates?.weekendStartTime || '12:00';
-      const wEndEnd = rates?.weekendEndTime || '02:00';
-      if (wDayStart === wEndStart && wDayEnd === wEndEnd) {
-        return `${fmt12(wDayStart)} to ${fmt12(wDayEnd)}`;
-      }
-      return `Mon–Thu ${fmt12(wDayStart)}–${fmt12(wDayEnd)}, Fri–Sun ${fmt12(wEndStart)}–${fmt12(wEndEnd)}`;
+      const start = rates?.reservationStartTime || '12:00';
+      const end = rates?.reservationEndTime || '02:00';
+      const [sh, sm] = start.split(':').map(Number);
+      const [eh, em] = end.split(':').map(Number);
+      let startMins = sh * 60 + (sm || 0);
+      let endMins = eh * 60 + (em || 0);
+      if (endMins <= startMins) endMins += 24 * 60;
+      const cutoffMins = endMins - 60; 
+      if (cutoffMins <= startMins) return 'No online bookings';
+      return `${fmt12(start)} to ${fmt12(cutoffMins)}`;
     } catch (e) {
-      return `${rates?.weekdayStartTime || '12:00'} to ${rates?.weekdayEndTime || '02:00'}`;
+      return `${rates?.reservationStartTime || '12:00'} to ${rates?.reservationEndTime || '02:00'}`;
     }
   })();
+
+  const isWeekendDay = (d: Date) => d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
 
   const getTermNum = (keys: string[], fallback: number) => {
     if (!reservationTerms) return fallback;
@@ -713,43 +719,22 @@ export function HomePage() {
   })();
 
   const getMaxDuration = () => {
+    if (!resForm.timeSlot) return reservationTerms?.maxHours || 6;
     const parseToMins = (t: string) => {
       const [hh = '0', mm = '0'] = (t || '').split(':');
       return Number(hh) * 60 + Number(mm || 0);
     };
-
-    const { openTime, closeTime } = getOperatingHours(selectedDate);
-    const startMins = parseToMins(openTime);
-    let endMins = parseToMins(closeTime);
-    if (endMins <= startMins) endMins += 24 * 60;
-    const totalOperatingHours = Math.max(1, Math.floor((endMins - startMins) / 60));
-
-    // Cap by configured reservation terms if lower than venue operating window
-    const termMax = Number(reservationTerms?.maxHours);
-    const maxVenueHours = (termMax && termMax > 0 && termMax < totalOperatingHours)
-      ? termMax
-      : totalOperatingHours;
-
-    if (!resForm.timeSlot) return maxVenueHours;
-
     const slotMins = parseToMins(resForm.timeSlot);
+    const startMins = parseToMins(rates?.reservationStartTime || '12:00');
+    let endMins = parseToMins(rates?.reservationEndTime || '02:00');
+    if (endMins <= startMins) endMins += 24 * 60;
     let normalizedSlotMins = slotMins;
     if (slotMins < startMins) normalizedSlotMins += 24 * 60;
     const minsUntilClose = endMins - normalizedSlotMins;
-    const hoursUntilClose = Math.floor(minsUntilClose / 60);
-
-    return Math.max(1, Math.min(hoursUntilClose, maxVenueHours));
+    return Math.max(1, Math.min(Math.floor(minsUntilClose / 60), reservationTerms?.maxHours || 6));
   };
 
   const maxAllowedDuration = getMaxDuration();
-
-  useEffect(() => {
-    if (resForm.duration > maxAllowedDuration) {
-      setResForm(f => ({ ...f, duration: Math.max(1, maxAllowedDuration) }));
-    } else if (resForm.duration < 1) {
-      setResForm(f => ({ ...f, duration: 1 }));
-    }
-  }, [maxAllowedDuration, resForm.duration]);
 
   const minAllowedTime = useMemo(() => {
     if (!selectedDate || !isToday(selectedDate)) return '';
@@ -783,14 +768,13 @@ export function HomePage() {
       if (slotMins < nowMins + advanceNoticeMins) return 'advance';
     }
 
-    const { openTime, closeTime } = getOperatingHours(requestedStart);
-    const startReserveMins = parseToMins(openTime);
-    let endReserveMins = parseToMins(closeTime);
+    const startReserveMins = parseToMins(rates?.reservationStartTime || '12:00');
+    let endReserveMins = parseToMins(rates?.reservationEndTime || '02:00');
     if (endReserveMins <= startReserveMins) endReserveMins += 24 * 60;
 
     let normalizedSlot = slotMins;
     if (slotMins < startReserveMins) normalizedSlot += 24 * 60;
-    if (normalizedSlot < startReserveMins || normalizedSlot + duration * 60 > endReserveMins) return 'closed';
+    if (normalizedSlot < startReserveMins || normalizedSlot >= endReserveMins) return 'closed';
 
     const sameTableRes = reservations.filter((r: any) => 
       r.tableId === tableId && 
@@ -1074,7 +1058,7 @@ export function HomePage() {
     }
   };
 
-  const publicEvents = events?.filter((e: any) => e.type !== 'Holiday' && !e.isCancelled) || [];
+  const publicEvents = events?.filter((e: any) => e.type !== 'Holiday') || [];
   const upcomingEvents = publicEvents.filter((e: any) => {
     const dates = e.date ? e.date.split(',') : [];
     const sortedDates = [...dates].sort((a,b) => new Date(a).getTime() - new Date(b).getTime());
@@ -1135,77 +1119,25 @@ export function HomePage() {
 
         <div className="flex items-center gap-4 pr-5 flex-shrink-0 relative">
 
-          {/* Quick Header Theme & Help One Shot Logo Trigger */}
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setShowLogoMenu(v => !v)}
-              title="One Shot Menu (Theme & Help)"
-              className="p-1 rounded-full hover:bg-neutral-800 transition-colors flex items-center justify-center border border-emerald-500/30 hover:border-emerald-500 cursor-pointer"
-            >
-              <img src={logoImg} alt="One Shot Logo" className="w-6 h-6 object-contain rounded-full shadow-sm" />
-            </button>
+          {/* Quick Header Theme Toggle */}
+          <button
+            type="button"
+            onClick={toggleLightMode}
+            title={isLightMode ? "Switch to Dark Mode" : "Switch to Light Mode"}
+            className="p-2 text-neutral-400 hover:text-white transition-colors rounded-full hover:bg-neutral-800 flex items-center justify-center cursor-pointer"
+          >
+            {isLightMode ? <Moon size={19} className="text-emerald-600" /> : <Sun size={19} className="text-amber-400" />}
+          </button>
 
-            <AnimatePresence>
-              {showLogoMenu && (
-                <motion.div
-                  initial={{ opacity: 0, y: 8, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: 8, scale: 0.95 }}
-                  className={`absolute top-full right-0 mt-2 w-52 rounded-2xl shadow-2xl border p-2 z-50 flex flex-col gap-1 backdrop-blur-md ${
-                    isLightMode
-                      ? 'bg-white/95 border-slate-200 text-slate-800 shadow-slate-300/40'
-                      : 'bg-neutral-900/95 border-neutral-800 text-neutral-100 shadow-black/80'
-                  }`}
-                >
-                  <div className="px-3 py-1.5 border-b border-neutral-700/20 flex items-center justify-between">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-500">One Shot</span>
-                    <span className="text-[10px] text-neutral-400">Options</span>
-                  </div>
-
-                  {/* Light / Dark Mode Button */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      toggleLightMode();
-                      setShowLogoMenu(false);
-                    }}
-                    className={`flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors text-left cursor-pointer ${
-                      isLightMode ? 'hover:bg-slate-100 text-slate-800' : 'hover:bg-neutral-800 text-neutral-200'
-                    }`}
-                  >
-                    <span className="flex items-center justify-center w-6 h-6 rounded-lg bg-emerald-500/15 text-emerald-500 shrink-0">
-                      {isLightMode ? <Moon size={14} className="text-emerald-600" /> : <Sun size={14} className="text-amber-400" />}
-                    </span>
-                    <div className="flex flex-col">
-                      <span className="font-bold">{isLightMode ? 'Dark Mode' : 'Light Mode'}</span>
-                      <span className="text-[10px] text-neutral-400 font-normal">{isLightMode ? 'Switch to dark theme' : 'Switch to light theme'}</span>
-                    </div>
-                  </button>
-
-                  {/* Help Button */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowLogoMenu(false);
-                      setShowHelpModal(true);
-                    }}
-                    className={`flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors text-left cursor-pointer ${
-                      isLightMode ? 'hover:bg-slate-100 text-slate-800' : 'hover:bg-neutral-800 text-neutral-200'
-                    }`}
-                  >
-                    <span className="flex items-center justify-center w-6 h-6 rounded-lg bg-sky-500/15 text-sky-500 shrink-0">
-                      <HelpCircle size={14} className="text-sky-500" />
-                    </span>
-                    <div className="flex flex-col">
-                      <span className="font-bold">Help & Support</span>
-                      <span className="text-[10px] text-neutral-400 font-normal">Assistance & hotline</span>
-                    </div>
-                  </button>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
+          {/* Dedicated Help & Support Icon Button */}
+          <button
+            type="button"
+            onClick={() => setShowHelpModal(true)}
+            title="Help & Support (Policies, Rates & Contact)"
+            className="p-2 text-neutral-400 hover:text-white transition-colors rounded-full hover:bg-neutral-800 flex items-center justify-center cursor-pointer"
+          >
+            <HelpCircle size={19} className="text-sky-400" />
+          </button>
           
           {/* Notifications */}
           <div className="relative">
@@ -1519,7 +1451,7 @@ export function HomePage() {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
                         <label className="block text-xs text-neutral-400 mb-1.5">Contact Number <span className="text-rose-500">*</span></label>
-                        <input type="tel" inputMode="numeric" maxLength={11} value={feedbackForm.contact} onChange={e => setFeedbackForm(f => ({ ...f, contact: e.target.value.replace(/\D/g, '').slice(0, 11) }))} placeholder="09XXXXXXXXX (11 digits)" required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500 outline-none" />
+                        <input type="tel" inputMode="numeric" maxLength={9} value={feedbackForm.contact} onChange={e => setFeedbackForm(f => ({ ...f, contact: e.target.value.replace(/\D/g, '').slice(0, 9) }))} placeholder="9XXXXXXXX (9 digits)" required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500 outline-none" />
                       </div>
                       <div>
                         <label className="block text-xs text-neutral-400 mb-1.5">Reservation ID <span className="text-neutral-600">(Optional)</span></label>
@@ -1675,13 +1607,16 @@ export function HomePage() {
                               </div>
 
                               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-                                {tables.filter((t: any) => t.isActive).slice(0, 8).map((table: any) => {
+                                {tables.filter((t: any) => {
+                                  if (!t.isActive) return false;
+                                  const num = parseInt(String(t.id).replace(/\D/g, '') || String(t.name).replace(/\D/g, '') || '0', 10);
+                                  return num === 0 || (num >= 1 && num <= 8);
+                                }).slice(0, 8).map((table: any) => {
                                   const isSel = selectedTableId === table.id;
                                   const isOcc = table.status === 'occupied';
                                   const isMaint = table.status === 'maintenance';
 
                                   const eventForTable = (events || []).find((ev: any) => {
-                                    if (ev.isCancelled) return false;
                                     let evDates: any[] = [];
                                     if (Array.isArray(ev.dates)) evDates = ev.dates;
                                     else if (typeof ev.dates === 'string') {
@@ -1759,7 +1694,6 @@ export function HomePage() {
                                     const isActiveWalkIn = isToday(selectedDate) && targetTable?.status === 'occupied' && targetTable.session?.startTime;
 
                                     const eventForTable = (events || []).find((ev: any) => {
-                                      if (ev.isCancelled) return false;
                                       let evDates: any[] = [];
                                       if (Array.isArray(ev.dates)) evDates = ev.dates;
                                       else if (typeof ev.dates === 'string') {
@@ -1931,10 +1865,10 @@ export function HomePage() {
                                   <input 
                                     type="tel" 
                                     inputMode="numeric" 
-                                    maxLength={11} 
+                                    maxLength={9} 
                                     value={resForm.phone} 
-                                    onChange={e => setResForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 11) }))} 
-                                    placeholder="09XXXXXXXXX (11 digits)" 
+                                    onChange={e => setResForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 9) }))} 
+                                    placeholder="9XXXXXXXX (9 digits)" 
                                     className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-100 outline-none focus:border-emerald-500" 
                                   />
                                 </div>
@@ -2147,7 +2081,7 @@ export function HomePage() {
                                     <div className="flex items-center gap-3 mt-1.5">
                                       <label className="flex-1 cursor-pointer bg-neutral-950 border border-dashed border-neutral-700 rounded-lg px-3 py-2 text-center h-[42px] flex items-center justify-center hover:border-neutral-500 transition-colors">
                                         <input type="file" accept="image/jpeg, image/png" className="hidden" onChange={e => { const file = e.target.files?.[0]; if (file) { setReceiptPreview(URL.createObjectURL(file)); setReceiptFile(file); } }} />
-                                        <span className="text-[10px] text-neutral-400 font-semibold">{receiptPreview ? 'Change image' : 'Upload JPG/PNG'}</span>
+                                        <span className="text-[10px] text-neutral-400 font-semibold">{receiptPreview ? 'Change Image' : 'Upload JPG/PNG'}</span>
                                       </label>
                                     </div>
                                   </div>
@@ -2335,7 +2269,7 @@ export function HomePage() {
                                     <span className="text-xs font-black text-neutral-900 dark:text-white font-mono bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 rounded border border-neutral-300 dark:border-neutral-700">{r.id}</span>
                                     <ReservationStatusBadge status={r.status} />
                                   </div>
-                                  <p className="text-sm font-semibold text-neutral-800 dark:text-neutral-200">{format(new Date(r.date), 'MMM d, yyyy')} · {r.timeSlot} ({r.durationHours}h)</p>
+                                  <p className="text-sm font-semibold text-neutral-800 dark:text-neutral-200">{format(new Date(r.date), 'MMM d, yyyy')} · {fmt12(r.timeSlot)} ({r.durationHours}h)</p>
                                   <p className="text-xs text-neutral-500">
                                     {tables.find((t: any) => t.id === r.tableId)?.name || 'Billiard Table'}
                                   </p>
@@ -2349,16 +2283,7 @@ export function HomePage() {
                                     <FileText size={14} className="text-emerald-500" /> View e-Receipt
                                   </button>
                                   
-                                  {/* 🟢 Direct Request Refund / Cancel Button */}
-                                  {(r.status === 'pending' || r.status === 'pending-reschedule' || r.status === 'confirmed') && (
-                                    <button
-                                      type="button"
-                                      onClick={() => handleCancelBooking(r.id, r.date, r.timeSlot)}
-                                      className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 dark:text-rose-300 text-xs font-bold rounded-xl transition-colors border border-rose-200 dark:border-rose-800/60 shadow-sm"
-                                    >
-                                      <XCircle size={14} className="text-rose-500 dark:text-rose-400" /> Cancel / Request Refund
-                                    </button>
-                                  )}
+
                                   {r.status === 'pending-refund' && (
                                     <span className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-2 bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400 text-xs font-bold rounded-xl border border-amber-200 dark:border-amber-800/40">
                                       <Clock size={13} /> Refund Pending
@@ -2382,6 +2307,16 @@ export function HomePage() {
                                           exit={{ opacity: 0, y: 5, scale: 0.95 }} 
                                           className="absolute right-0 top-full mt-2 w-48 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-2xl overflow-hidden z-50 flex flex-col py-1"
                                         >
+                                          {/* Cancel / Request Refund */}
+                                          {(r.status === 'pending' || r.status === 'pending-reschedule' || r.status === 'confirmed') && (
+                                            <button 
+                                              onClick={(e) => { e.stopPropagation(); handleCancelBooking(r.id, r.date, r.timeSlot); setOpenActionRowId(null); }} 
+                                              className="px-4 py-3 text-left text-xs font-bold text-rose-600 dark:text-rose-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors border-b border-neutral-100 dark:border-neutral-800/50 cursor-pointer"
+                                            >
+                                              Cancel / Request Refund
+                                            </button>
+                                          )}
+
                                           {/* Request Reschedule */}
                                           {(r.status === 'pending' || r.status === 'confirmed') && currentUser && (
                                              <button onClick={(e) => { e.stopPropagation(); handleRequestReschedule(r.id, r); setOpenActionRowId(null); }} className="px-4 py-3 text-left text-xs font-bold text-violet-600 dark:text-violet-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors border-b border-neutral-100 dark:border-neutral-800/50">
@@ -2471,26 +2406,12 @@ export function HomePage() {
                           <ImageWithFallback src={getEventImage(event.attachments)} alt={event.title} className="w-full h-full object-cover" />
                         </div>
                       )}
-                      <div className="flex justify-between items-start mb-2 gap-2">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="text-[10px] bg-emerald-500/20 text-emerald-400 font-bold px-2 py-0.5 rounded">{event.type}</span>
-                          {event.slotsFull && (
-                            <span className="text-[10px] bg-rose-950 text-rose-400 border border-rose-800/50 font-bold px-2 py-0.5 rounded uppercase tracking-wider">Slots Full</span>
-                          )}
-                        </div>
-                        <span className="text-xs font-bold text-neutral-400 whitespace-nowrap">{event.date}</span>
+                      <div className="flex justify-between items-start mb-2">
+                        <span className="text-[10px] bg-emerald-500/20 text-emerald-400 font-bold px-2 py-0.5 rounded">{event.type}</span>
+                        <span className="text-xs font-bold text-neutral-400">{event.date}</span>
                       </div>
-                      <h4 className="text-lg font-bold mb-2 text-white">{event.title}</h4>
-                      {event.duration && <p className="text-[11px] text-neutral-500 font-medium mb-2 flex items-center gap-1.5"><Clock size={11} /> {event.duration}</p>}
+                      <h4 className="text-lg font-bold text-white mb-2">{event.title}</h4>
                       <p className="text-xs text-neutral-400 leading-relaxed">{event.description}</p>
-
-                      {event.registrationLink && (
-                        <div className="mt-4 pt-4 border-t border-neutral-800">
-                          <a href={event.registrationLink} target="_blank" rel="noopener noreferrer" className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors">
-                            <ExternalLink size={13} /> Register via Google Form
-                          </a>
-                        </div>
-                      )}
                     </div>
                   ))}
                 </div>
@@ -2637,37 +2558,116 @@ export function HomePage() {
                   })()}
                 </div>
 
-                <div className={`border rounded-2xl p-6 max-w-4xl mx-auto shadow-sm transition-colors reservation-policy-card ${isLightMode ? 'bg-white border-slate-200 shadow-slate-100' : 'bg-neutral-900 border-neutral-800'}`}>
-                  <h3 className={`font-bold mb-4 text-base ${isLightMode ? 'text-slate-900' : 'text-white'}`}>Reservation Policies & Terms</h3>
-                  <div className={`flex gap-3 border rounded-xl p-4 mb-5 transition-colors policy-redemption-banner ${isLightMode ? 'bg-emerald-50/90 border-emerald-200' : 'bg-emerald-950/40 border-emerald-700/30'}`}>
-                    <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center mt-0.5 ${isLightMode ? 'bg-emerald-100 text-emerald-700' : 'bg-emerald-600/20 text-emerald-400'}`}>
-                      <Info size={15} />
+                {/* 🟢 COMPREHENSIVE RESERVATION POLICIES, CANCELLATION & TERMS */}
+                <div className="max-w-4xl mx-auto space-y-6">
+                  {/* Card 1: Reservation & Booking Policies */}
+                  <div className={`border rounded-2xl p-6 sm:p-7 shadow-sm transition-colors reservation-policy-card ${isLightMode ? 'bg-white border-slate-200 shadow-slate-100' : 'bg-neutral-900 border-neutral-800'}`}>
+                    <div className="flex items-center gap-2.5 mb-4">
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isLightMode ? 'bg-emerald-100 text-emerald-700' : 'bg-emerald-500/10 text-emerald-400'}`}>
+                        <Shield size={18} />
+                      </div>
+                      <div>
+                        <h3 className={`font-bold text-base ${isLightMode ? 'text-slate-900' : 'text-white'}`}>Reservation Policies & Booking Rules</h3>
+                        <p className={`text-xs ${isLightMode ? 'text-slate-500' : 'text-neutral-400'}`}>Synchronized venue guidelines and online table booking parameters</p>
+                      </div>
                     </div>
-                    <div>
-                      <p className={`text-xs font-bold mb-1 policy-banner-title ${isLightMode ? 'text-emerald-800' : 'text-emerald-300'}`}>Reservation Redemption Policy</p>
-                      <p className={`text-xs leading-relaxed policy-banner-desc ${isLightMode ? 'text-slate-700' : 'text-neutral-400'}`}>
-                        After completing your reservation and {rates?.downPaymentPercent ?? 25}% down payment, the <span className={`font-bold policy-banner-highlight ${isLightMode ? 'text-slate-900' : 'text-white font-medium'}`}>remaining balance must be settled before or after your game</span> — payable via <span className={`font-bold policy-banner-highlight ${isLightMode ? 'text-slate-900' : 'text-white font-medium'}`}>Cash or GCash</span>.
-                      </p>
+
+                    <div className={`flex gap-3 border rounded-xl p-4 mb-5 transition-colors policy-redemption-banner ${isLightMode ? 'bg-emerald-50/90 border-emerald-200' : 'bg-emerald-950/40 border-emerald-700/30'}`}>
+                      <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center mt-0.5 ${isLightMode ? 'bg-emerald-100 text-emerald-700' : 'bg-emerald-600/20 text-emerald-400'}`}>
+                        <Info size={15} />
+                      </div>
+                      <div>
+                        <p className={`text-xs font-bold mb-1 policy-banner-title ${isLightMode ? 'text-emerald-800' : 'text-emerald-300'}`}>Reservation Redemption & Payment</p>
+                        <p className={`text-xs leading-relaxed policy-banner-desc ${isLightMode ? 'text-slate-700' : 'text-neutral-400'}`}>
+                          After securing your table with the <span className={`font-bold ${isLightMode ? 'text-slate-900' : 'text-white'}`}>{rates?.downPaymentPercent ?? 25}% down payment</span>, the <span className={`font-bold ${isLightMode ? 'text-slate-900' : 'text-white'}`}>remaining balance must be settled before or after your game</span> at the venue counter — payable via <span className={`font-bold ${isLightMode ? 'text-slate-900' : 'text-white'}`}>Cash or GCash</span>.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 text-sm">
+                      {(() => {
+                        const advanceHours = typeof reservationTerms?.advanceBookingHours === 'number' ? reservationTerms.advanceBookingHours : parseInt(String(reservationTerms?.advanceBookingHours)) || 1;
+                        const minHoursVal = typeof reservationTerms?.minHours === 'number' ? reservationTerms.minHours : parseInt(String(reservationTerms?.minHours)) || 1;
+                        const maxHoursVal = typeof reservationTerms?.maxHours === 'number' ? reservationTerms.maxHours : parseInt(String(reservationTerms?.maxHours)) || 0;
+                        const weekdayMin = typeof reservationTerms?.weekdayMinPartySize === 'number' ? reservationTerms.weekdayMinPartySize : parseInt(String(reservationTerms?.weekdayMinPartySize)) || 1;
+                        const weekdayMax = typeof reservationTerms?.weekdayMaxPartySize === 'number' ? reservationTerms.weekdayMaxPartySize : parseInt(String(reservationTerms?.weekdayMaxPartySize)) || 8;
+                        const weekendMin = typeof reservationTerms?.weekendMinPartySize === 'number' ? reservationTerms.weekendMinPartySize : parseInt(String(reservationTerms?.weekendMinPartySize)) || 1;
+                        const weekendMax = typeof reservationTerms?.weekendMaxPartySize === 'number' ? reservationTerms.weekendMaxPartySize : parseInt(String(reservationTerms?.weekendMaxPartySize)) || 10;
+                        
+                        return [
+                          { label: 'Advance Booking Notice', value: `Requires at least ${advanceHours} hour(s) advance notice` },
+                          { label: 'Online Booking Hours', value: bookingHoursDisplay },
+                          { label: 'Duration Limits', value: `Min: ${minHoursVal} hr${minHoursVal > 1 ? 's' : ''} · Max: ${maxHoursVal > 0 ? `${maxHoursVal} hrs` : 'Closing cut-off'}` },
+                          { label: 'Arrival Grace Period', value: '15 minutes arrival buffer before slot release' },
+                          { label: 'Weekday Party Size', value: `${weekdayMin} to ${weekdayMax} players per table` },
+                          { label: 'Weekend Party Size', value: `${weekendMin} to ${weekendMax} players per table` },
+                          { label: 'Required Down Payment', value: `${rates?.downPaymentPercent ?? 25}% of total table fee` },
+                          { label: 'Overtime Fee & Policy', value: `₱${rates?.overtimeRate ?? 200}/hr (2-min courtesy window upon timer end)` },
+                        ].map(({ label, value }) => (
+                          <div key={label} className={`flex justify-between items-center py-2.5 border-b policy-rule-row ${isLightMode ? 'border-slate-200 text-slate-800' : 'border-neutral-800/60'}`}>
+                            <span className={`text-xs policy-rule-label ${isLightMode ? 'text-slate-600 font-semibold' : 'text-neutral-400'}`}>{label}</span>
+                            <span className={`text-xs font-bold text-right ml-3 policy-rule-value ${isLightMode ? 'text-slate-900' : 'text-neutral-200 font-medium'}`}>{value}</span>
+                          </div>
+                        ));
+                      })()}
                     </div>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                    {(() => {
-                      const advanceHours = typeof reservationTerms?.advanceBookingHours === 'number' ? reservationTerms.advanceBookingHours : parseInt(String(reservationTerms?.advanceBookingHours)) || 1;
-                      const minHoursVal = typeof reservationTerms?.minHours === 'number' ? reservationTerms.minHours : parseInt(String(reservationTerms?.minHours)) || 1;
-                      return [
-                        { label: 'Reservation Rule', value: `Requires at least ${advanceHours} hour(s) advance notice.` },
-                        { label: 'Online Booking Hours', value: bookingHoursDisplay },
-                        { label: 'Minimum Booking', value: `${minHoursVal} hour(s)` },
-                        { label: 'Maximum Booking', value: 'Depending on closing cut-off' },
-                        { label: 'Grace Period', value: '15 minutes' },
-                        { label: 'Cancellation Policy', value: reservationTerms?.cancellationPolicy || 'Booking Policy' },
-                      ].map(({ label, value }) => (
-                        <div key={label} className={`flex justify-between py-2.5 border-b policy-rule-row ${isLightMode ? 'border-slate-200 text-slate-800' : 'border-neutral-800/60'}`}>
-                          <span className={`text-xs policy-rule-label ${isLightMode ? 'text-slate-600 font-semibold' : 'text-neutral-500'}`}>{label}</span>
-                          <span className={`text-xs font-bold text-right ml-2 policy-rule-value ${isLightMode ? 'text-slate-900' : 'text-neutral-200 font-medium'}`}>{value}</span>
+
+                  {/* Card 2: Cancellation & Refund Policy */}
+                  <div className={`border rounded-2xl p-6 sm:p-7 shadow-sm transition-colors ${isLightMode ? 'bg-white border-slate-200 shadow-slate-100' : 'bg-neutral-900 border-neutral-800'}`}>
+                    <div className="flex items-center gap-2.5 mb-4">
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isLightMode ? 'bg-sky-100 text-sky-700' : 'bg-sky-500/10 text-sky-400'}`}>
+                        <Clock size={18} />
+                      </div>
+                      <div>
+                        <h3 className={`font-bold text-base ${isLightMode ? 'text-slate-900' : 'text-white'}`}>Cancellation & Refund Policy</h3>
+                        <p className={`text-xs ${isLightMode ? 'text-slate-500' : 'text-neutral-400'}`}>Official notice window and refund terms for reservations</p>
+                      </div>
+                    </div>
+
+                    <div className={`rounded-xl p-4 mb-4 border ${isLightMode ? 'bg-sky-50/60 border-sky-200 text-slate-800' : 'bg-sky-950/20 border-sky-800/30 text-neutral-300'}`}>
+                      <div className="flex items-center justify-between text-xs font-semibold mb-2">
+                        <span className="text-sky-600 dark:text-sky-400 font-bold uppercase tracking-wider text-[11px]">Notice Window</span>
+                        <span className="px-2.5 py-0.5 rounded-full bg-sky-500/15 text-sky-600 dark:text-sky-400 font-bold text-[11px]">
+                          {reservationTerms?.cancellationHours || 24} hours notice
+                        </span>
+                      </div>
+                      <p className={`text-xs leading-relaxed ${isLightMode ? 'text-slate-700' : 'text-neutral-300'}`}>
+                        {reservationTerms?.cancellationPolicy?.trim() || 'Cancellations submitted at least 24 hours prior to your scheduled reservation time qualify for a refund or flexible date rescheduling. Cancellations within the notice window or no-shows may forfeit the initial reservation down payment.'}
+                      </p>
+                    </div>
+
+                    <p className={`text-[11px] leading-relaxed ${isLightMode ? 'text-slate-500' : 'text-neutral-400'}`}>
+                      * To cancel or request a refund, go to <span className="font-semibold text-emerald-500">Reservations &gt; Track Booking</span> and select <span className="font-semibold">Cancel / Request Refund</span> from the Actions menu.
+                    </p>
+                  </div>
+
+                  {/* Card 3: General Terms & Conditions */}
+                  <div className={`border rounded-2xl p-6 sm:p-7 shadow-sm transition-colors ${isLightMode ? 'bg-white border-slate-200 shadow-slate-100' : 'bg-neutral-900 border-neutral-800'}`}>
+                    <div className="flex items-center gap-2.5 mb-4">
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isLightMode ? 'bg-purple-100 text-purple-700' : 'bg-purple-500/10 text-purple-400'}`}>
+                        <BookOpen size={18} />
+                      </div>
+                      <div>
+                        <h3 className={`font-bold text-base ${isLightMode ? 'text-slate-900' : 'text-white'}`}>General Terms & Conditions</h3>
+                        <p className={`text-xs ${isLightMode ? 'text-slate-500' : 'text-neutral-400'}`}>House rules, billiard etiquette, and equipment responsibilities</p>
+                      </div>
+                    </div>
+
+                    <div className={`rounded-xl p-4.5 border space-y-3 text-xs leading-relaxed ${isLightMode ? 'bg-slate-50 border-slate-200 text-slate-700' : 'bg-neutral-950/60 border-neutral-800 text-neutral-300'}`}>
+                      {reservationTerms?.termsAndConditions?.trim() ? (
+                        <div className="whitespace-pre-line">
+                          {reservationTerms.termsAndConditions}
                         </div>
-                      ));
-                    })()}
+                      ) : (
+                        <div className="space-y-2.5">
+                          <p><strong className={isLightMode ? 'text-slate-900' : 'text-white'}>1. Equipment Care:</strong> Players must handle cue sticks, chalk, balls, and tournament felt with care. Sitting on tables, massé shots without proper cue elevation, or intentional damage to cloth will incur equipment replacement or re-felting charges.</p>
+                          <p><strong className={isLightMode ? 'text-slate-900' : 'text-white'}>2. Payment & Settlement:</strong> The reservation down payment is credited towards your final table total. Remaining balances and food & bar purchases must be paid at the counter before departing via Cash or GCash.</p>
+                          <p><strong className={isLightMode ? 'text-slate-900' : 'text-white'}>3. Session Overtime Buffer:</strong> When your booked table time expires, a 2-minute courtesy talk buffer is provided for you to discuss extensions with counter staff before extra overtime rates are charged.</p>
+                          <p><strong className={isLightMode ? 'text-slate-900' : 'text-white'}>4. House Conduct:</strong> Friendly, courteous sportsmanship is required. Management reserves the right to reassign tables or deny service in cases of disruptive or disrespectful behavior.</p>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2752,7 +2752,7 @@ export function HomePage() {
                   </div>
                   <div className="flex justify-between"><span>Customer:</span><span>{viewingReceipt.customerName}</span></div>
                   <div className="flex justify-between"><span>Date:</span><span>{format(new Date(viewingReceipt.date), 'MM/dd/yyyy')}</span></div>
-                  <div className="flex justify-between"><span>Time Slot:</span><span>{viewingReceipt.timeSlot} ({viewingReceipt.durationHours}h)</span></div>
+                  <div className="flex justify-between"><span>Time Slot:</span><span>{fmt12(viewingReceipt.timeSlot)} ({viewingReceipt.durationHours}h)</span></div>
                 </div>
 
                 <div className="space-y-1 text-xs font-semibold">
@@ -3062,10 +3062,10 @@ export function HomePage() {
                         <input 
                           type={type} 
                           inputMode={key === 'phone' ? 'numeric' : undefined} 
-                          maxLength={key === 'phone' ? 11 : undefined}
-                          placeholder={key === 'phone' ? '09XXXXXXXXX (11 digits)' : undefined}
+                          maxLength={key === 'phone' ? 9 : undefined}
+                          placeholder={key === 'phone' ? '9XXXXXXXX (9 digits)' : undefined}
                           value={(registerForm as any)[key]} 
-                          onChange={e => setRegisterForm(f => ({ ...f, [key]: key === 'phone' ? e.target.value.replace(/\D/g, '').slice(0, 11) : e.target.value, error: '' }))} 
+                          onChange={e => setRegisterForm(f => ({ ...f, [key]: key === 'phone' ? e.target.value.replace(/\D/g, '').slice(0, 9) : e.target.value, error: '' }))} 
                           className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-sm text-neutral-100 focus:border-emerald-500 outline-none transition-colors" 
                         />
                       </div>
@@ -3211,83 +3211,53 @@ export function HomePage() {
       </AnimatePresence>
 
       {/* 🟢 FLOATING ONE SHOT LOGO BUTTON WITH THEME & HELP POPUP */}
-      <div className="fixed bottom-6 right-6 z-40 flex flex-col items-end">
-        <AnimatePresence>
-          {showLogoMenu && (
-            <motion.div
-              initial={{ opacity: 0, y: 10, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 10, scale: 0.95 }}
-              className={`mb-3 p-2.5 rounded-2xl shadow-2xl border backdrop-blur-md flex flex-col gap-1 min-w-[210px] ${
-                isLightMode 
-                  ? 'bg-white/95 border-slate-200 text-slate-800 shadow-slate-300/40 ring-1 ring-slate-200' 
-                  : 'bg-neutral-900/95 border-neutral-800 text-neutral-100 shadow-black/80 ring-1 ring-neutral-700/50'
-              }`}
-            >
-              <div className="px-3 py-1.5 border-b border-neutral-700/20 flex items-center justify-between">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-500">One Shot</span>
-                <span className="text-[10px] text-neutral-400">Quick Access</span>
-              </div>
-
-              {/* Light / Dark Mode Button */}
-              <button
-                type="button"
-                onClick={() => {
-                  toggleLightMode();
-                  setShowLogoMenu(false);
-                }}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors text-left cursor-pointer ${
-                  isLightMode ? 'hover:bg-slate-100 text-slate-800' : 'hover:bg-neutral-800 text-neutral-200'
-                }`}
-              >
-                <span className="flex items-center justify-center w-7 h-7 rounded-lg bg-emerald-500/15 text-emerald-500 shrink-0">
-                  {isLightMode ? <Moon size={16} className="text-emerald-600" /> : <Sun size={16} className="text-amber-400" />}
-                </span>
-                <div className="flex flex-col">
-                  <span className="font-bold">{isLightMode ? 'Dark Mode' : 'Light Mode'}</span>
-                  <span className="text-[10px] text-neutral-400 font-normal">{isLightMode ? 'Switch to dark theme' : 'Switch to light theme'}</span>
-                </div>
-              </button>
-
-              {/* Help Button */}
-              <button
-                type="button"
-                onClick={() => {
-                  setShowLogoMenu(false);
-                  setShowHelpModal(true);
-                }}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors text-left cursor-pointer ${
-                  isLightMode ? 'hover:bg-slate-100 text-slate-800' : 'hover:bg-neutral-800 text-neutral-200'
-                }`}
-              >
-                <span className="flex items-center justify-center w-7 h-7 rounded-lg bg-sky-500/15 text-sky-500 shrink-0">
-                  <HelpCircle size={16} className="text-sky-500" />
-                </span>
-                <div className="flex flex-col">
-                  <span className="font-bold">Help & Support</span>
-                  <span className="text-[10px] text-neutral-400 font-normal">Assistance & hotline</span>
-                </div>
-              </button>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
+      {/* 🟢 FLOATING ACTION BUTTONS */}
+      <div className="fixed bottom-6 right-6 z-40 flex flex-col items-end gap-3">
+        {/* Floating Help & Support Icon Button */}
         <motion.button
           type="button"
           initial={{ scale: 0, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
-          whileHover={{ scale: 1.08 }}
+          whileHover={{ scale: 1.06 }}
           whileTap={{ scale: 0.95 }}
-          onClick={() => setShowLogoMenu(!showLogoMenu)}
-          title="One Shot Menu (Theme & Help)"
-          className={`flex items-center justify-center w-13 h-13 rounded-full shadow-2xl transition-all duration-300 border cursor-pointer relative group ${
+          onClick={() => setShowHelpModal(true)}
+          title="Help, Policies & Rates"
+          className={`flex items-center gap-2 px-3.5 py-2.5 rounded-full shadow-xl transition-all duration-300 border cursor-pointer ${
             isLightMode
-              ? 'bg-white border-emerald-500/40 shadow-emerald-500/20 ring-2 ring-emerald-500/20 hover:bg-slate-50'
-              : 'bg-neutral-900 border-emerald-500/40 shadow-black/80 ring-2 ring-emerald-500/30 hover:bg-neutral-800'
+              ? 'bg-white border-sky-300 text-sky-700 shadow-sky-500/15 hover:bg-sky-50 ring-1 ring-sky-200'
+              : 'bg-neutral-900 border-sky-500/40 text-sky-400 shadow-black/80 hover:bg-neutral-800 ring-1 ring-sky-500/30'
           }`}
         >
-          <img src={logoImg} alt="One Shot" className="w-8 h-8 object-contain rounded-full transition-transform group-hover:scale-105" />
-          <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-emerald-500 rounded-full border-2 border-neutral-950 animate-pulse" />
+          <HelpCircle size={17} className="text-sky-500 shrink-0" />
+          <span className="text-xs font-bold">Help & Policies</span>
+        </motion.button>
+
+        {/* Floating Direct Theme Toggle */}
+        <motion.button
+          type="button"
+          initial={{ scale: 0, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          whileHover={{ scale: 1.06 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={toggleLightMode}
+          title={isLightMode ? "Switch to Dark Mode" : "Switch to Light Mode"}
+          className={`flex items-center gap-2 px-3.5 py-2.5 rounded-full shadow-2xl transition-all duration-300 border cursor-pointer ${
+            isLightMode
+              ? 'bg-white border-slate-300 text-slate-800 shadow-slate-300/50 hover:bg-slate-50 ring-1 ring-slate-200'
+              : 'bg-neutral-900 border-neutral-700 text-neutral-100 shadow-black/80 hover:bg-neutral-800'
+          }`}
+        >
+          {isLightMode ? (
+            <>
+              <Moon size={16} className="text-emerald-600 shrink-0" />
+              <span className="text-xs font-bold text-slate-800">Dark Mode</span>
+            </>
+          ) : (
+            <>
+              <Sun size={16} className="text-amber-400 shrink-0" />
+              <span className="text-xs font-bold text-neutral-200">Light Mode</span>
+            </>
+          )}
         </motion.button>
       </div>
 
@@ -3298,24 +3268,24 @@ export function HomePage() {
             initial={{ opacity: 0 }} 
             animate={{ opacity: 1 }} 
             exit={{ opacity: 0 }} 
-            className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+            className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
           >
             <motion.div 
               initial={{ scale: 0.95, opacity: 0 }} 
               animate={{ scale: 1, opacity: 1 }} 
               exit={{ scale: 0.95, opacity: 0 }} 
-              className={`border rounded-3xl p-6 w-full max-w-md shadow-2xl space-y-5 transition-colors ${
+              className={`border rounded-3xl p-6 w-full max-w-lg shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto transition-colors ${
                 isLightMode ? 'bg-white border-slate-200 text-slate-800' : 'bg-neutral-950 border-neutral-800 text-neutral-100'
               }`}
             >
-              <div className="flex justify-between items-start">
+              <div className="flex justify-between items-start sticky top-0 pt-1 pb-2 z-10 backdrop-blur-md">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
                     <img src={logoImg} alt="One Shot" className="w-7 h-7 object-contain rounded-lg" />
                   </div>
                   <div>
-                    <h3 className="text-base font-bold text-emerald-500">One Shot Customer Help</h3>
-                    <p className="text-xs text-neutral-400">Assistance, reservations & inquiries</p>
+                    <h3 className="text-base font-bold text-emerald-500">One Shot Help & Support</h3>
+                    <p className="text-xs text-neutral-400">Policies, facility rates & assistance</p>
                   </div>
                 </div>
                 <button 
@@ -3326,27 +3296,80 @@ export function HomePage() {
                 </button>
               </div>
 
-              <div className="space-y-3">
+              <div className="space-y-3 text-xs">
+                {/* Contact Hotline */}
                 <div className={`p-4 rounded-2xl border ${isLightMode ? 'bg-slate-50 border-slate-200' : 'bg-neutral-900 border-neutral-800'}`}>
                   <p className="text-xs font-bold text-emerald-400 mb-1 flex items-center gap-1.5">
-                    <Phone size={13} /> Customer Hotline & GCash Inquiries
+                    <Phone size={13} /> Customer Hotline & Inquiries
                   </p>
                   <p className="text-sm font-semibold">{cms.phone || '0917-123-4567 | 0998-765-4321'}</p>
-                  <p className="text-[11px] text-neutral-400 mt-1">Available during operating hours for table bookings and instant support.</p>
+                  <p className="text-[11px] text-neutral-400 mt-1">Available during operating hours for table reservations, GCash verification, and assistance.</p>
                 </div>
 
+                {/* Operating Hours in AM / PM */}
                 <div className={`p-4 rounded-2xl border ${isLightMode ? 'bg-slate-50 border-slate-200' : 'bg-neutral-900 border-neutral-800'}`}>
                   <p className="text-xs font-bold text-amber-400 mb-1 flex items-center gap-1.5">
                     <Clock size={13} /> Venue Operating Hours
                   </p>
-                  <div className="text-xs space-y-1 text-neutral-300">
-                    <p>• Weekdays: {rates.weekdayStartTime || '14:00'} – {rates.weekdayEndTime || '02:00'}</p>
-                    <p>• Weekends: {rates.weekendStartTime || '12:00'} – {rates.weekendEndTime || '03:00'}</p>
+                  <div className="space-y-1 text-neutral-300">
+                    <p>• Weekdays: <span className="font-semibold">{fmt12(rates?.weekdayStartTime || '14:00')} – {fmt12(rates?.weekdayEndTime || '02:00')}</span></p>
+                    <p>• Weekends: <span className="font-semibold">{fmt12(rates?.weekendStartTime || '12:00')} – {fmt12(rates?.weekendEndTime || '03:00')}</span></p>
+                    <p className="text-[11px] text-neutral-400 pt-1">Online Booking Window: {bookingHoursDisplay}</p>
                   </div>
                 </div>
 
+                {/* Rates & Overtime Summary */}
                 <div className={`p-4 rounded-2xl border ${isLightMode ? 'bg-slate-50 border-slate-200' : 'bg-neutral-900 border-neutral-800'}`}>
-                  <p className="text-xs font-bold text-sky-400 mb-1 flex items-center gap-1.5">
+                  <p className="text-xs font-bold text-emerald-400 mb-1.5 flex items-center gap-1.5">
+                    <Tag size={13} /> Facility Rates & Pricing
+                  </p>
+                  <div className="space-y-1.5 text-neutral-300">
+                    <div className="flex justify-between">
+                      <span>Regular Table Rate:</span>
+                      <span className="font-bold text-emerald-400">₱{rates?.hourlyRate ?? 150}.00 / hour</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Required Down Payment:</span>
+                      <span className="font-bold">{rates?.downPaymentPercent ?? 25}% of table fee</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Overtime Fee:</span>
+                      <span className="font-bold">₱{rates?.overtimeRate ?? 200}.00 / hour</span>
+                    </div>
+                    <p className="text-[10px] text-neutral-400 pt-1 leading-normal">
+                      * A courtesy 2-minute transition window upon end of session is provided before extra overtime fees begin, giving you time to speak with staff if extending.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Reservation & Cancellation Policy */}
+                <div className={`p-4 rounded-2xl border ${isLightMode ? 'bg-slate-50 border-slate-200' : 'bg-neutral-900 border-neutral-800'}`}>
+                  <p className="text-xs font-bold text-sky-400 mb-1.5 flex items-center gap-1.5">
+                    <Shield size={13} /> Reservation & Cancellation Policy
+                  </p>
+                  <div className="space-y-1 text-neutral-300">
+                    <p>• Advance Booking Notice: <span className="font-semibold">At least {typeof reservationTerms?.advanceBookingHours === 'number' ? reservationTerms.advanceBookingHours : (parseInt(String(reservationTerms?.advanceBookingHours)) || 1)} hour(s)</span></p>
+                    <p>• Cancellation Notice: <span className="font-semibold">At least {reservationTerms?.cancellationHours || 24} hour(s) before schedule</span></p>
+                    <p>• Grace Period: <span className="font-semibold">15 minutes arrival buffer</span></p>
+                    <p className="text-[11px] text-neutral-400 pt-1 leading-relaxed">
+                      {reservationTerms?.cancellationPolicy?.trim() || 'Cancellations requested at least 24 hours prior to game time are eligible for refund or rescheduling. Down payment may be forfeited for late cancellations or no-shows.'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* General Terms & Conditions */}
+                <div className={`p-4 rounded-2xl border ${isLightMode ? 'bg-slate-50 border-slate-200' : 'bg-neutral-900 border-neutral-800'}`}>
+                  <p className="text-xs font-bold text-purple-400 mb-1.5 flex items-center gap-1.5">
+                    <BookOpen size={13} /> General Terms & Conditions
+                  </p>
+                  <div className="space-y-1 text-neutral-300 text-[11px] leading-relaxed">
+                    <p>{reservationTerms?.termsAndConditions?.trim() || '1. Guests must treat all billiard tables, cloth, and cue sticks with proper care. Damage fees apply for ripped felt or equipment abuse. 2. Remaining table fees must be settled upon check-in or after game completion via Cash or GCash. 3. Outside food and beverages are subject to house policies.'}</p>
+                  </div>
+                </div>
+
+                {/* Report Issue */}
+                <div className={`p-4 rounded-2xl border ${isLightMode ? 'bg-slate-50 border-slate-200' : 'bg-neutral-900 border-neutral-800'}`}>
+                  <p className="text-xs font-bold text-rose-400 mb-1 flex items-center gap-1.5">
                     <AlertTriangle size={13} /> Need to Report an Issue?
                   </p>
                   <p className="text-xs text-neutral-300 mb-3">
