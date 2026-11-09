@@ -223,14 +223,24 @@ function tableCreationRank(t: any): number {
   return digits ? Number(digits) : Number.MAX_SAFE_INTEGER;
 }
 
-function selectCanonicalTables<T extends { id?: any; name?: any }>(rows: T[], max = 8): T[] {
+export function selectCanonicalTables<T extends { id?: any; name?: any }>(rows: T[], max = 8): T[] {
   const byNumber = new Map<number, T>();
-  for (const row of rows) {
+  for (const row of rows || []) {
     const n = tableNumberForRow(row);
     if (n < 1 || n > max) continue;
     const existing = byNumber.get(n);
     if (!existing || tableCreationRank(row) < tableCreationRank(existing)) {
       byNumber.set(n, row);
+    }
+  }
+  for (let i = 1; i <= max; i++) {
+    if (!byNumber.has(i)) {
+      byNumber.set(i, {
+        id: `t${i}`,
+        name: `Table ${i}`,
+        status: 'available',
+        isActive: true,
+      } as any);
     }
   }
   return [...byNumber.entries()].sort((a, b) => a[0] - b[0]).map(([, row]) => row);

@@ -14,7 +14,7 @@ import {
   Sparkles, Upload, Search, ExternalLink, AlertTriangle, XCircle, Bell, RefreshCw, Lock,
   Table2, LogOut, FileText, QrCode, Sun, Moon, HelpCircle
 } from 'lucide-react';
-import { useAppContext, HOURLY_RATE, DOWN_PAYMENT_RATE } from '../context/AppContext';
+import { useAppContext, HOURLY_RATE, DOWN_PAYMENT_RATE, selectCanonicalTables } from '../context/AppContext';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
 import { ReservationStatusBadge } from '../components/ReservationStatusBadge';
 
@@ -250,6 +250,10 @@ export function HomePage() {
   const [isCalendarExpanded, setIsCalendarExpanded] = useState(true);
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   const [isTableSelectorExpanded, setIsTableSelectorExpanded] = useState(true);
+  
+  const venueTables = useMemo(() => {
+    return selectCanonicalTables(tables || [], 8);
+  }, [tables]);
   
   const [resForm, setResForm] = useState({ 
     name: '', email: '', phone: '', pax: 2, timeSlot: '', duration: 1,
@@ -1576,17 +1580,21 @@ export function HomePage() {
                       </div>
 
                       {/* STEP 2: ALL-IN-ONE TABLE BOARD */}
-                      <div className={`bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden shadow-xl flex flex-col ${isTableSelectorExpanded && selectedDate ? 'flex-1' : 'shrink-0'}`}>
+                      <div className={`bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden shadow-xl flex flex-col ${isTableSelectorExpanded ? 'flex-1' : 'shrink-0'}`}>
                         <div 
-                          onClick={() => selectedDate && setIsTableSelectorExpanded(!isTableSelectorExpanded)}
-                          className={`bg-neutral-950 px-5 py-4 flex items-center justify-between border-b border-neutral-800/80 shrink-0 ${selectedDate ? 'cursor-pointer hover:bg-neutral-900/80' : 'opacity-50 cursor-not-allowed'}`}
+                          onClick={() => setIsTableSelectorExpanded(!isTableSelectorExpanded)}
+                          className="bg-neutral-950 px-5 py-4 flex items-center justify-between border-b border-neutral-800/80 shrink-0 cursor-pointer hover:bg-neutral-900/80"
                         >
                           <div className="flex items-center gap-3">
                             <div className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs ${selectedTableId ? 'bg-emerald-500 text-white' : 'bg-neutral-800 text-neutral-400'}`}>2</div>
                             <div>
                               <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-bold">Step 2 — Table Selector</p>
                               <p className="text-sm font-bold text-white">
-                                {selectedTableId ? `${tables.find((t: any) => t.id === selectedTableId)?.name} Selected` : selectedDate ? 'Select an available table below' : 'Select a date first'}
+                                {selectedTableId 
+                                  ? `${venueTables.find((t: any) => t.id === selectedTableId)?.name || 'Table'} Selected` 
+                                  : selectedDate 
+                                  ? 'Select an available table below' 
+                                  : 'Select an available table (or choose a date in Step 1)'}
                               </p>
                             </div>
                           </div>
@@ -1594,11 +1602,18 @@ export function HomePage() {
                         </div>
 
                         <AnimatePresence>
-                          {isTableSelectorExpanded && selectedDate && (
+                          {isTableSelectorExpanded && (
                             <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="p-5 bg-neutral-950/30 flex-1 overflow-y-auto hide-scrollbar">
                               
+                              {!selectedDate && (
+                                <div className="mb-3.5 p-2.5 rounded-xl bg-emerald-950/30 border border-emerald-500/20 text-emerald-300 text-xs flex items-center gap-2">
+                                  <Info size={14} className="shrink-0 text-emerald-400" />
+                                  <span>Showing venue tables for Today. Pick a date in Step 1 to check other days.</span>
+                                </div>
+                              )}
+
                               <div className="flex items-center justify-between mb-3 text-xs text-neutral-400">
-                                <span className="font-semibold text-[11px] uppercase tracking-wider">Venue Layout Status</span>
+                                <span className="font-semibold text-[11px] uppercase tracking-wider">Venue Layout (8 Tables)</span>
                                 <div className="flex items-center gap-3 text-[10px]">
                                   <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> Free</span>
                                   <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> Active</span>
@@ -1606,15 +1621,13 @@ export function HomePage() {
                                 </div>
                               </div>
 
-                              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-                                {tables.filter((t: any) => {
-                                  if (!t.isActive) return false;
-                                  const num = parseInt(String(t.id).replace(/\D/g, '') || String(t.name).replace(/\D/g, '') || '0', 10);
-                                  return num === 0 || (num >= 1 && num <= 8);
-                                }).slice(0, 8).map((table: any) => {
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                                {venueTables.map((table: any) => {
                                   const isSel = selectedTableId === table.id;
                                   const isOcc = table.status === 'occupied';
                                   const isMaint = table.status === 'maintenance';
+                                  const checkDate = selectedDate || new Date();
+                                  const checkIsToday = selectedDate ? isToday(selectedDate) : true;
 
                                   const eventForTable = (events || []).find((ev: any) => {
                                     let evDates: any[] = [];
@@ -1625,7 +1638,7 @@ export function HomePage() {
                                     if (ev.date && !evDates.includes(ev.date)) evDates.push(ev.date);
 
                                     const evDateMatch = evDates.some((d: any) => {
-                                      try { return isSameDay(new Date(d), selectedDate); } catch { return false; }
+                                      try { return isSameDay(new Date(d), checkDate); } catch { return false; }
                                     });
                                     if (!evDateMatch) return false;
 
@@ -1642,7 +1655,7 @@ export function HomePage() {
                                     return false;
                                   }) || (reservations || []).find((r: any) => 
                                     r.tableId === table.id && 
-                                    isSameDay(new Date(r.date || r.reservation_date || r.reservationDate), selectedDate) && 
+                                    isSameDay(new Date(r.date || r.reservation_date || r.reservationDate), checkDate) && 
                                     r.status !== 'cancelled' &&
                                     (r.customerName?.startsWith('EVENT:') || r.id?.startsWith('EVT-') || r.paymentRef === 'EVENT')
                                   );
@@ -1659,6 +1672,9 @@ export function HomePage() {
                                           window.scrollTo({ top: 0, behavior: 'smooth' });
                                           return;
                                         }
+                                        if (!selectedDate) {
+                                          setSelectedDate(new Date());
+                                        }
                                         setSelectedTableId(table.id);
                                       }}
                                       className={`relative p-3 rounded-xl border text-left flex flex-col justify-between transition-all ${
@@ -1673,10 +1689,10 @@ export function HomePage() {
                                     >
                                       <div className="flex justify-between items-center mb-1">
                                         <span className={`text-xs font-bold ${isEvent ? 'text-purple-300' : isSel ? 'text-emerald-400' : 'text-neutral-200'}`}>{table.name}</span>
-                                        <span className={`w-2 h-2 rounded-full ${isMaint ? 'bg-rose-500' : isEvent ? 'bg-purple-400 animate-pulse' : isOcc && isToday(selectedDate) ? 'bg-amber-400 animate-pulse' : 'bg-emerald-500'}`} />
+                                        <span className={`w-2 h-2 rounded-full ${isMaint ? 'bg-rose-500' : isEvent ? 'bg-purple-400 animate-pulse' : isOcc && checkIsToday ? 'bg-amber-400 animate-pulse' : 'bg-emerald-500'}`} />
                                       </div>
                                       <p className={`text-[10px] font-semibold truncate ${isEvent ? 'text-purple-400' : 'text-neutral-400'}`}>
-                                        {isMaint ? 'Unavailable' : isEvent ? 'EVENT (Click to view)' : isOcc && isToday(selectedDate) ? 'Playing Now' : 'Available Slot'}
+                                        {isMaint ? 'Unavailable' : isEvent ? 'EVENT (Click to view)' : isOcc && checkIsToday ? 'Playing Now' : 'Available Slot'}
                                       </p>
                                     </button>
                                   );
@@ -1687,11 +1703,12 @@ export function HomePage() {
                               {selectedTableId && (
                                 <div className="mt-5 bg-neutral-950 rounded-xl p-4 border border-neutral-800 animate-in fade-in zoom-in-95">
                                   <p className="text-[10px] text-emerald-500 uppercase tracking-widest font-bold mb-3 flex items-center gap-1.5">
-                                    <Calendar size={12} /> {tables.find((t: any) => t.id === selectedTableId)?.name} — Schedule for {format(selectedDate, 'MMM d')}
+                                    <Calendar size={12} /> {venueTables.find((t: any) => t.id === selectedTableId)?.name || 'Table'} — Schedule for {format(selectedDate || new Date(), 'MMM d')}
                                   </p>
                                   {(() => {
-                                    const targetTable = tables.find((t: any) => t.id === selectedTableId);
-                                    const isActiveWalkIn = isToday(selectedDate) && targetTable?.status === 'occupied' && targetTable.session?.startTime;
+                                    const targetTable = venueTables.find((t: any) => t.id === selectedTableId) || tables.find((t: any) => t.id === selectedTableId);
+                                    const checkDate = selectedDate || new Date();
+                                    const isActiveWalkIn = isToday(checkDate) && targetTable?.status === 'occupied' && targetTable.session?.startTime;
 
                                     const eventForTable = (events || []).find((ev: any) => {
                                       let evDates: any[] = [];
