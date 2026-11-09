@@ -1047,7 +1047,7 @@ export function HomePage() {
     }
   };
 
-  const publicEvents = events?.filter((e: any) => e.type !== 'Holiday') || [];
+  const publicEvents = events?.filter((e: any) => e.type !== 'Holiday' && !e.isCancelled) || [];
   const upcomingEvents = publicEvents.filter((e: any) => {
     const dates = e.date ? e.date.split(',') : [];
     const sortedDates = [...dates].sort((a,b) => new Date(a).getTime() - new Date(b).getTime());
@@ -1492,7 +1492,7 @@ export function HomePage() {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
                         <label className="block text-xs text-neutral-400 mb-1.5">Contact Number <span className="text-rose-500">*</span></label>
-                        <input type="tel" inputMode="numeric" maxLength={9} value={feedbackForm.contact} onChange={e => setFeedbackForm(f => ({ ...f, contact: e.target.value.replace(/\D/g, '').slice(0, 9) }))} placeholder="9XXXXXXXX (9 digits)" required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500 outline-none" />
+                        <input type="tel" inputMode="numeric" maxLength={11} value={feedbackForm.contact} onChange={e => setFeedbackForm(f => ({ ...f, contact: e.target.value.replace(/\D/g, '').slice(0, 11) }))} placeholder="09XXXXXXXXX (11 digits)" required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500 outline-none" />
                       </div>
                       <div>
                         <label className="block text-xs text-neutral-400 mb-1.5">Reservation ID <span className="text-neutral-600">(Optional)</span></label>
@@ -1648,16 +1648,13 @@ export function HomePage() {
                               </div>
 
                               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-                                {tables.filter((t: any) => {
-                                  if (!t.isActive) return false;
-                                  const num = parseInt(String(t.id).replace(/\D/g, '') || String(t.name).replace(/\D/g, '') || '0', 10);
-                                  return num === 0 || (num >= 1 && num <= 8);
-                                }).slice(0, 8).map((table: any) => {
+                                {tables.filter((t: any) => t.isActive).slice(0, 8).map((table: any) => {
                                   const isSel = selectedTableId === table.id;
                                   const isOcc = table.status === 'occupied';
                                   const isMaint = table.status === 'maintenance';
 
                                   const eventForTable = (events || []).find((ev: any) => {
+                                    if (ev.isCancelled) return false;
                                     let evDates: any[] = [];
                                     if (Array.isArray(ev.dates)) evDates = ev.dates;
                                     else if (typeof ev.dates === 'string') {
@@ -1735,6 +1732,7 @@ export function HomePage() {
                                     const isActiveWalkIn = isToday(selectedDate) && targetTable?.status === 'occupied' && targetTable.session?.startTime;
 
                                     const eventForTable = (events || []).find((ev: any) => {
+                                      if (ev.isCancelled) return false;
                                       let evDates: any[] = [];
                                       if (Array.isArray(ev.dates)) evDates = ev.dates;
                                       else if (typeof ev.dates === 'string') {
@@ -1906,10 +1904,10 @@ export function HomePage() {
                                   <input 
                                     type="tel" 
                                     inputMode="numeric" 
-                                    maxLength={9} 
+                                    maxLength={11} 
                                     value={resForm.phone} 
-                                    onChange={e => setResForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 9) }))} 
-                                    placeholder="9XXXXXXXX (9 digits)" 
+                                    onChange={e => setResForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 11) }))} 
+                                    placeholder="09XXXXXXXXX (11 digits)" 
                                     className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-100 outline-none focus:border-emerald-500" 
                                   />
                                 </div>
@@ -2122,7 +2120,7 @@ export function HomePage() {
                                     <div className="flex items-center gap-3 mt-1.5">
                                       <label className="flex-1 cursor-pointer bg-neutral-950 border border-dashed border-neutral-700 rounded-lg px-3 py-2 text-center h-[42px] flex items-center justify-center hover:border-neutral-500 transition-colors">
                                         <input type="file" accept="image/jpeg, image/png" className="hidden" onChange={e => { const file = e.target.files?.[0]; if (file) { setReceiptPreview(URL.createObjectURL(file)); setReceiptFile(file); } }} />
-                                        <span className="text-[10px] text-neutral-400 font-semibold">{receiptPreview ? 'Change Image' : 'Upload JPG/PNG'}</span>
+                                        <span className="text-[10px] text-neutral-400 font-semibold">{receiptPreview ? 'Change image' : 'Upload JPG/PNG'}</span>
                                       </label>
                                     </div>
                                   </div>
@@ -3023,10 +3021,10 @@ export function HomePage() {
                         <input 
                           type={type} 
                           inputMode={key === 'phone' ? 'numeric' : undefined} 
-                          maxLength={key === 'phone' ? 9 : undefined}
-                          placeholder={key === 'phone' ? '9XXXXXXXX (9 digits)' : undefined}
+                          maxLength={key === 'phone' ? 11 : undefined}
+                          placeholder={key === 'phone' ? '09XXXXXXXXX (11 digits)' : undefined}
                           value={(registerForm as any)[key]} 
-                          onChange={e => setRegisterForm(f => ({ ...f, [key]: key === 'phone' ? e.target.value.replace(/\D/g, '').slice(0, 9) : e.target.value, error: '' }))} 
+                          onChange={e => setRegisterForm(f => ({ ...f, [key]: key === 'phone' ? e.target.value.replace(/\D/g, '').slice(0, 11) : e.target.value, error: '' }))} 
                           className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-sm text-neutral-100 focus:border-emerald-500 outline-none transition-colors" 
                         />
                       </div>

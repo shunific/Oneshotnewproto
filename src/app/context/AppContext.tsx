@@ -193,6 +193,40 @@ export type AppContextType = {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
+// Table ids in the cloud are timestamp based (e.g. "t1790923595927"), so the
+// number must be read from the display name ("Table 3"), not the id. Older
+// duplicate test tables share the same name; keep the earliest created row per
+// number so the venue always resolves to exactly the 8 canonical tables.
+function tableNumberForRow(t: any): number {
+  const name = String(t?.name ?? '');
+  const nameMatch = name.match(/table\s*#?\s*(\d+)/i) || name.match(/^t\s*(\d+)$/i);
+  if (nameMatch) return parseInt(nameMatch[1], 10);
+  const id = String(t?.id ?? '');
+  const idMatch = id.match(/^t?(\d{1,2})$/i);
+  if (idMatch) return parseInt(idMatch[1], 10);
+  const digits = id.replace(/\D/g, '');
+  const n = digits ? parseInt(digits, 10) : 0;
+  return n > 0 && n <= 8 ? n : 0;
+}
+
+function tableCreationRank(t: any): number {
+  const digits = String(t?.id ?? '').replace(/\D/g, '');
+  return digits ? Number(digits) : Number.MAX_SAFE_INTEGER;
+}
+
+function selectCanonicalTables<T extends { id?: any; name?: any }>(rows: T[], max = 8): T[] {
+  const byNumber = new Map<number, T>();
+  for (const row of rows) {
+    const n = tableNumberForRow(row);
+    if (n < 1 || n > max) continue;
+    const existing = byNumber.get(n);
+    if (!existing || tableCreationRank(row) < tableCreationRank(existing)) {
+      byNumber.set(n, row);
+    }
+  }
+  return [...byNumber.entries()].sort((a, b) => a[0] - b[0]).map(([, row]) => row);
+}
+
 export function AppProvider({ children }: { children: ReactNode }) {
   const [isInitializing, setIsInitializing] = useState(true);
 
@@ -203,10 +237,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (cached) {
         const parsed = JSON.parse(cached);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const sanitized = parsed.filter((t: any) => {
-            const num = parseInt(String(t.id).replace(/\D/g, '') || String(t.name).replace(/\D/g, '') || '0', 10);
-            return num >= 1 && num <= 8;
-          }).slice(0, 8);
+          const sanitized = selectCanonicalTables(parsed);
           if (sanitized.length > 0) return sanitized;
         }
       }
@@ -386,10 +417,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (tablesRes && tablesRes.ok) { 
         const newTables = await tablesRes.json(); 
         if (Array.isArray(newTables)) {
-          const sanitized = newTables.filter((t: any) => {
-            const num = parseInt(String(t.id).replace(/\D/g, '') || String(t.name).replace(/\D/g, '') || '0', 10);
-            return num >= 1 && num <= 8;
-          }).slice(0, 8);
+          const sanitized = selectCanonicalTables(newTables);
           setTables(prev => JSON.stringify(prev) !== JSON.stringify(sanitized) ? sanitized : prev);
         }
       }
@@ -398,39 +426,65 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } catch (error) {}
   };
 
+  // Safely read a JSON response. Static hosts (Vercel) rewrite unknown
+  // /api/* routes to index.html, so blindly calling .json() throws and used to
+  // abort the entire cloud sync before Supabase was ever queried.
+  const readJsonResponse = async (response: Response | null) => {
+    if (!response || !response.ok) return null;
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('json')) return null;
+    try { return await response.json(); } catch { return null; }
+  };
+
+  // Local POS API: try the same-origin route first, then the local machine.
+  // Returns null (never throws) when the route is unavailable or not JSON.
+  const fetchLocalJson = async (path: string) => {
+    let servedStaticHtml = false;
+    try {
+      const res = await fetch(path);
+      if (res.ok) {
+        const contentType = res.headers.get('content-type') || '';
+        if (contentType.includes('json')) {
+          try { return await res.json(); } catch { return null; }
+        }
+        servedStaticHtml = true;
+      }
+    } catch {}
+    // On a static deployment the same-origin route is the SPA fallback; don't
+    // waste time probing the local machine.
+    if (servedStaticHtml) return null;
+    try {
+      return await readJsonResponse(await fetch(`http://localhost:3001${path}`));
+    } catch { return null; }
+  };
+
   const forceFullSync = async () => {
     try {
       // 1. FETCH FLOOR DATA (Local Machine is Absolute Source of Truth for physical operations)
-      const [tablesRes, invRes, queueRes, staffRes, historyRes, activitiesRes, feedRes, lostRes, watchRes] = await Promise.all([
-        fetch('/api/tables').catch(() => fetch('http://localhost:3001/api/tables')).catch(() => null),
-        fetch('/api/inventory').catch(() => fetch('http://localhost:3001/api/inventory')).catch(() => null),
-        fetch('/api/queue').catch(() => fetch('http://localhost:3001/api/queue')).catch(() => null),
-        fetch('/api/staff').catch(() => fetch('http://localhost:3001/api/staff')).catch(() => null),
-        fetch('/api/session-history').catch(() => fetch('http://localhost:3001/api/session-history')).catch(() => null),
-        fetch('/api/activities').catch(() => fetch('http://localhost:3001/api/activities')).catch(() => null),
-        fetch('/api/feedback').catch(() => fetch('http://localhost:3001/api/feedback')).catch(() => null),
-        fetch('/api/lost-and-found').catch(() => fetch('http://localhost:3001/api/lost-and-found')).catch(() => null),
-        fetch('/api/watchlist').catch(() => fetch('http://localhost:3001/api/watchlist')).catch(() => null)
+      const [rawTables, localInventory, localQueue, localStaff, localHistory, localActivities, localFeedback, localLost, localWatchlist] = await Promise.all([
+        fetchLocalJson('/api/tables'),
+        fetchLocalJson('/api/inventory'),
+        fetchLocalJson('/api/queue'),
+        fetchLocalJson('/api/staff'),
+        fetchLocalJson('/api/session-history'),
+        fetchLocalJson('/api/activities'),
+        fetchLocalJson('/api/feedback'),
+        fetchLocalJson('/api/lost-and-found'),
+        fetchLocalJson('/api/watchlist')
       ]);
 
-      if (tablesRes && tablesRes.ok) {
-        const rawTables = await tablesRes.json();
-        if (Array.isArray(rawTables)) {
-          const sanitized = rawTables.filter((t: any) => {
-            const num = parseInt(String(t.id).replace(/\D/g, '') || String(t.name).replace(/\D/g, '') || '0', 10);
-            return num >= 1 && num <= 8;
-          }).slice(0, 8);
-          setTables(sanitized);
-        }
+      if (Array.isArray(rawTables)) {
+        const sanitized = selectCanonicalTables(rawTables);
+        setTables(sanitized);
       }
-      if (invRes && invRes.ok) setInventory(await invRes.json());
-      if (queueRes && queueRes.ok) setQueue(await queueRes.json());
-      if (staffRes && staffRes.ok) setStaffUsers(await staffRes.json());
-      if (historyRes && historyRes.ok) setSessionHistory(await historyRes.json()); // 🟢 Local History is King
-      if (activitiesRes && activitiesRes.ok) setActivities(await activitiesRes.json());
-      if (feedRes && feedRes.ok) setFeedback(await feedRes.json());
-      if (lostRes && lostRes.ok) setLostItems(await lostRes.json());
-      if (watchRes && watchRes.ok) setWatchlist(await watchRes.json());
+      if (Array.isArray(localInventory)) setInventory(localInventory);
+      if (Array.isArray(localQueue)) setQueue(localQueue);
+      if (Array.isArray(localStaff)) setStaffUsers(localStaff);
+      if (Array.isArray(localHistory)) setSessionHistory(localHistory); // 🟢 Local History is King
+      if (Array.isArray(localActivities)) setActivities(localActivities);
+      if (Array.isArray(localFeedback)) setFeedback(localFeedback);
+      if (Array.isArray(localLost)) setLostItems(localLost);
+      if (Array.isArray(localWatchlist)) setWatchlist(localWatchlist);
 
       // 2. FETCH CLOUD DATA (Supabase is Source of Truth for Online Reservations, CMS & Tables)
       const [
@@ -471,16 +525,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
             maintenanceReason: t.maintenanceReason || t.maintenancereason || undefined,
             session
           };
-        }).filter((t: any) => {
-          const num = parseInt(String(t.id).replace(/\D/g, '') || String(t.name).replace(/\D/g, '') || '0', 10);
-          return num >= 1 && num <= 8;
-        }).slice(0, 8);
+        });
+        // Keep the 8 canonical venue tables only (cloud contains duplicate test rows).
+        const canonicalCloudTables = selectCanonicalTables(mappedCloudTables);
 
         setTables(prev => {
           // If local tables fetch failed (like when viewing customer facing site without local machine running),
           // adopt cloud tables from Supabase!
-          if (!tablesRes || !tablesRes.ok || !prev || prev.length === 0) {
-            return mappedCloudTables;
+          if (!Array.isArray(rawTables) || !prev || prev.length === 0) {
+            return canonicalCloudTables;
           }
           return prev;
         });
@@ -502,25 +555,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
           };
         }) as Announcement[]);
       } else {
-        try {
-          const localAnn = await fetch('/api/announcements').catch(() => fetch('http://localhost:3001/api/announcements')).catch(() => null);
-          if (localAnn && localAnn.ok) {
-            const rows = await localAnn.json();
-            if (Array.isArray(rows) && rows.length > 0) setAnnouncements(rows);
-          }
-        } catch {}
+        const localAnn = await fetchLocalJson('/api/announcements');
+        if (Array.isArray(localAnn) && localAnn.length > 0) setAnnouncements(localAnn);
       }
 
       if (closedDatesData && (closedDatesData as any[]).length > 0) {
         setClosedDates(closedDatesData as ClosedDate[]);
       } else {
-        try {
-          const localCd = await fetch('/api/closed-dates').catch(() => fetch('http://localhost:3001/api/closed-dates')).catch(() => null);
-          if (localCd && localCd.ok) {
-            const rows = await localCd.json();
-            if (Array.isArray(rows) && rows.length > 0) setClosedDates(rows);
-          }
-        } catch {}
+        const localCd = await fetchLocalJson('/api/closed-dates');
+        if (Array.isArray(localCd) && localCd.length > 0) setClosedDates(localCd);
       }
       if (feedData) setFeedback((feedData as any[]).map(f => ({ ...f, tags: typeof f.tags === 'string' ? JSON.parse(f.tags || '[]') : (f.tags || []) })) as Feedback[]);
       if (promoData) {
@@ -565,25 +608,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
             try { parsedTableIds = JSON.parse(rawTIds); } catch { parsedTableIds = [rawTIds]; }
           }
 
+          const rawCancelled = e.iscancelled ?? e.is_cancelled ?? e.isCancelled;
+          const isCancelled = rawCancelled === true || rawCancelled === 1 || rawCancelled === '1' || rawCancelled === 'true' || String(e.status || '').toLowerCase() === 'cancelled';
+          const rawAllowRes = e.allowreservations ?? e.allow_reservations ?? e.allowReservations;
+          const rawSlotsFull = e.slotsfull ?? e.slots_full ?? e.slotsFull;
+          const rawCater = e.caterwalkins ?? e.cater_walkins ?? e.caterWalkIns;
+          const rawWalkIns = e.walkintablecount ?? e.walk_in_table_count ?? e.walkInTableCount;
+
           return { 
             ...e, 
             dates: parsedDates,
             eventTableIds: parsedTableIds,
-            slotsFull: !!e.slotsFull, 
-            allowReservations: e.allowReservations !== false, 
-            caterWalkIns: e.caterWalkIns !== false, 
-            walkInTableCount: e.walkInTableCount ?? 10, 
+            isCancelled,
+            slotsFull: rawSlotsFull === true || rawSlotsFull === 1 || rawSlotsFull === '1' || rawSlotsFull === 'true', 
+            allowReservations: !(rawAllowRes === false || rawAllowRes === 0 || rawAllowRes === '0' || rawAllowRes === 'false'), 
+            caterWalkIns: !(rawCater === false || rawCater === 0 || rawCater === '0' || rawCater === 'false'), 
+            walkInTableCount: Number(rawWalkIns ?? 10) || 10, 
             attachments: e.attachments ? (Array.isArray(e.attachments) ? e.attachments : [e.attachments]) : [] 
           };
         }) as Event[]);
       } else {
-        try {
-          const localEv = await fetch('/api/events').catch(() => fetch('http://localhost:3001/api/events')).catch(() => null);
-          if (localEv && localEv.ok) {
-            const rows = await localEv.json();
-            if (Array.isArray(rows) && rows.length > 0) setEvents(rows);
-          }
-        } catch {}
+        const localEv = await fetchLocalJson('/api/events');
+        if (Array.isArray(localEv) && localEv.length > 0) setEvents(localEv);
       }
       
       let configObj: any = {};
@@ -628,47 +674,40 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }).catch(() => {});
       } else {
         // Fallback to local reservations from SQLite if Supabase returns 0 rows (e.g. user auth change)
-        try {
-          const localRes = await fetch('/api/reservations').catch(() => fetch('http://localhost:3001/api/reservations')).catch(() => null);
-          if (localRes && localRes.ok) {
-            const rows = await localRes.json();
-            if (Array.isArray(rows) && rows.length > 0) {
-              setReservations(rows.map((r: any) => ({ ...r, date: new Date(r.date), createdAt: new Date(r.createdAt || Date.now()) })));
-            }
-          }
-        } catch {}
+        const localRes = await fetchLocalJson('/api/reservations');
+        if (Array.isArray(localRes) && localRes.length > 0) {
+          setReservations(localRes.map((r: any) => ({ ...r, date: new Date(r.date), createdAt: new Date(r.createdAt || Date.now()) })));
+        }
       }
       
       setLastSynced(new Date());
 
     } catch (err) {
-      console.warn("⚠️ Supabase Offline. Loading Reservations from Local Cache...", err);
+      console.warn("⚠️ Cloud sync skipped. Loading from local cache...", err);
       // 4. STRICT OFFLINE FALLBACK FOR RESERVATIONS & CLOUD SETTINGS
-      const [resRes, ratesRes, annRes, cmsRes, closedDatesRes, promoRes, eventsRes, historyResFb] = await Promise.all([
-        fetch('/api/reservations').catch(() => fetch('http://localhost:3001/api/reservations')).catch(() => null),
-        fetch('/api/settings/rates').catch(() => fetch('http://localhost:3001/api/settings/rates')).catch(() => null),
-        fetch('/api/announcements').catch(() => fetch('http://localhost:3001/api/announcements')).catch(() => null),
-        fetch('/api/cms').catch(() => fetch('http://localhost:3001/api/cms')).catch(() => null),
-        fetch('/api/closed-dates').catch(() => fetch('http://localhost:3001/api/closed-dates')).catch(() => null),
-        fetch('/api/promo-codes').catch(() => fetch('http://localhost:3001/api/promo-codes')).catch(() => null),
-        fetch('/api/events').catch(() => fetch('http://localhost:3001/api/events')).catch(() => null),
-        fetch('/api/session-history').catch(() => fetch('http://localhost:3001/api/session-history')).catch(() => null)
+      const [localRes, localRates, localAnn, localCms, localClosedDates, localPromo, localEvents, localHistoryFb] = await Promise.all([
+        fetchLocalJson('/api/reservations'),
+        fetchLocalJson('/api/settings/rates'),
+        fetchLocalJson('/api/announcements'),
+        fetchLocalJson('/api/cms'),
+        fetchLocalJson('/api/closed-dates'),
+        fetchLocalJson('/api/promo-codes'),
+        fetchLocalJson('/api/events'),
+        fetchLocalJson('/api/session-history')
       ]);
 
-      if (resRes && resRes.ok) setReservations(await resRes.json());
-      if (annRes && annRes.ok) setAnnouncements(await annRes.json());
-      if (cmsRes && cmsRes.ok) setSiteConfig(await cmsRes.json());
-      if (closedDatesRes && closedDatesRes.ok) setClosedDates(await closedDatesRes.json());
-      if (promoRes && promoRes.ok) setPromoCodes(await promoRes.json());
-      if (historyResFb && historyResFb.ok) setSessionHistory(await historyResFb.json()); // 🟢 Fallback retains local history
-      if (eventsRes && eventsRes.ok) {
-        const dbEvents = await eventsRes.json();
-        setEvents(prev => { const existingIds = new Set(prev.map(e => e.id)); return [...prev, ...dbEvents.filter((e: any) => !existingIds.has(e.id))]; });
+      if (Array.isArray(localRes)) setReservations(localRes);
+      if (Array.isArray(localAnn)) setAnnouncements(localAnn);
+      if (localCms) setSiteConfig(localCms);
+      if (Array.isArray(localClosedDates)) setClosedDates(localClosedDates);
+      if (Array.isArray(localPromo)) setPromoCodes(localPromo);
+      if (Array.isArray(localHistoryFb)) setSessionHistory(localHistoryFb); // 🟢 Fallback retains local history
+      if (Array.isArray(localEvents)) {
+        setEvents(prev => { const existingIds = new Set(prev.map(e => e.id)); return [...prev, ...localEvents.filter((e: any) => !existingIds.has(e.id))]; });
       }
-      if (ratesRes && ratesRes.ok) {
-        const dbSettings = await ratesRes.json();
-        setRates(prev => ({ ...prev, ...dbSettings }));
-        setReservationTerms(prev => ({ ...prev, ...dbSettings }));
+      if (localRates) {
+        setRates(prev => ({ ...prev, ...localRates }));
+        setReservationTerms(prev => ({ ...prev, ...localRates }));
       }
     } finally {
       setIsInitializing(false);
@@ -677,6 +716,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     forceFullSync();
+  }, []);
+
+  // Re-pull cloud data when the visitor comes back to the tab so admin changes
+  // to rates, policies, reservations and events show up without a hard reload.
+  useEffect(() => {
+    const refreshIfVisible = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        forceFullSync();
+      }
+    };
+    document.addEventListener('visibilitychange', refreshIfVisible);
+    window.addEventListener('focus', refreshIfVisible);
+    return () => {
+      document.removeEventListener('visibilitychange', refreshIfVisible);
+      window.removeEventListener('focus', refreshIfVisible);
+    };
   }, []);
 
   useEffect(() => {
