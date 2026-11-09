@@ -12,11 +12,14 @@
     "postinstall": "electron-builder install-app-deps",
     "rebuild": "electron-rebuild -f -w sqlite3",
     "electron:dev": "cross-env NODE_ENV=development concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
-    "electron:build": "npm run rebuild && vite build && electron-builder",
-    "electron:build:mac": "npm run rebuild && vite build && electron-builder --mac",
+    "electron:build": "cross-env ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npm run rebuild && vite build && electron-builder",
+    "electron:build:mac": "cross-env ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npm run rebuild && vite build && electron-builder --mac",
     "test": "node --test tests/*.test.cjs electron/tests/*.test.cjs"
   },
   "build": {
+    "electronDownload": {
+      "mirror": "https://npmmirror.com/mirrors/electron/"
+    },
     "appId": "com.oneshot.ms",
     "productName": "One Shot Management System",
     "asar": true,
