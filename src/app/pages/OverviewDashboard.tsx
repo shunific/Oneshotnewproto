@@ -433,7 +433,11 @@ export function OverviewDashboard() {
           ) : (
             <div className="space-y-2.5">
               {upcomingReservations.map((r: any) => (
-                <div key={r.id} className="flex items-center gap-3 bg-neutral-900 rounded-lg px-3 py-2.5 border border-neutral-800/60">
+                <div 
+                  key={r.id} 
+                  onClick={() => navigate('/staff/reservations')} // <-- ADDED: Navigate to reservations manager
+                  className="flex items-center gap-3 bg-neutral-900 hover:bg-neutral-800 rounded-lg px-3 py-2.5 border border-neutral-800/60 cursor-pointer transition-colors" // <-- ADDED: hover styles and cursor pointer
+                >
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-neutral-200 truncate">{r.customerName}</p>
                     <p className="text-xs text-neutral-500">

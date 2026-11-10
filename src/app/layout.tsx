@@ -96,8 +96,13 @@ function SidebarSmartTimer({ tables, onNavigate }: { tables: any[]; onNavigate: 
     }
     const end = addMinutes(start, t.session.durationMinutes);
     const remainingSecs = differenceInSeconds(end, now);
+    
+    // Offset by +120 seconds to match the Table Monitor's exact grace buffer
+    if (remainingSecs <= -120) {
+      return { table: t, type: 'overtime' as const, secs: remainingSecs + 120 };
+    }
     if (remainingSecs <= 0) {
-      return { table: t, type: 'overtime' as const, secs: remainingSecs };
+      return { table: t, type: 'grace' as const, secs: remainingSecs + 120 };
     }
     if (remainingSecs <= 900) {
       return { table: t, type: 'warning' as const, secs: remainingSecs };
@@ -108,9 +113,10 @@ function SidebarSmartTimer({ tables, onNavigate }: { tables: any[]; onNavigate: 
   tableStatuses.sort((a, b) => {
     const score = (type: string) => {
       if (type === 'overtime') return 1;
-      if (type === 'warning') return 2;
-      if (type === 'active') return 3;
-      return 4;
+      if (type === 'grace') return 2;
+      if (type === 'warning') return 3;
+      if (type === 'active') return 4;
+      return 5;
     };
     if (score(a.type) !== score(b.type)) return score(a.type) - score(b.type);
     return a.secs - b.secs;
@@ -118,12 +124,13 @@ function SidebarSmartTimer({ tables, onNavigate }: { tables: any[]; onNavigate: 
 
   const primary = tableStatuses[0];
   const isOt = primary.type === 'overtime';
+  const isGrace = primary.type === 'grace';
   const isWarn = primary.type === 'warning';
   const isOpen = primary.type === 'open';
 
   const cardStyle = isOt
     ? 'bg-rose-950/30 border-rose-500/60 text-rose-400'
-    : isWarn
+    : (isGrace || isWarn)
     ? 'bg-amber-950/30 border-amber-500/60 text-amber-400'
     : 'bg-neutral-900 border-neutral-800 text-blue-400';
 
@@ -135,16 +142,16 @@ function SidebarSmartTimer({ tables, onNavigate }: { tables: any[]; onNavigate: 
       >
         <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider mb-1">
           <span className="flex items-center gap-1.5 truncate">
-            {isOt ? <AlertTriangle size={13} className="animate-bounce" /> : <Clock size={13} />}
-            <span>{isOt ? '⚠️ OVERTIME' : isWarn ? '⏳ ENDS SOON' : '⏱️ NEXT UP'} · {primary.table.name}</span>
+            {(isOt || isGrace) ? <AlertTriangle size={13} className="animate-bounce" /> : <Clock size={13} />}
+            <span>{isOt ? '⚠️ OVERTIME' : isGrace ? '⏳ GRACE (2M)' : isWarn ? '⏳ ENDS SOON' : '⏱️ NEXT UP'} · {primary.table.name}</span>
           </span>
         </div>
         <div className="flex items-baseline gap-1.5">
-          <p className={`text-xl font-black ${isOt ? 'text-rose-400 animate-pulse' : 'text-neutral-900 dark:text-neutral-100'}`}>
+          <p className={`text-xl font-black ${isOt ? 'text-rose-400 animate-pulse' : isGrace ? 'text-amber-400 animate-pulse' : 'text-neutral-900 dark:text-neutral-100'}`}>
             {formatDuration(primary.secs)}
           </p>
           <span className="text-[10px] text-neutral-600 dark:text-neutral-400 font-semibold">
-            {isOt ? 'unpaid' : isOpen ? 'elapsed' : 'left'}
+            {isOt ? 'unpaid' : isGrace ? 'grace' : isOpen ? 'elapsed' : 'left'}
           </span>
         </div>
         <p className="text-[11px] text-neutral-600 dark:text-neutral-400 mt-1 truncate">
