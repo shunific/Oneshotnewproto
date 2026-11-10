@@ -12,7 +12,7 @@ import {
   Calendar, CheckCircle, ArrowRight, Users, ChevronDown,
   Info, Shield, Award, Mail, Tag, BookOpen,
   Sparkles, Upload, Search, ExternalLink, AlertTriangle, XCircle, Bell, RefreshCw, Lock,
-  Table2, LogOut, FileText, QrCode, Sun, Moon, HelpCircle
+  Table2, LogOut, FileText, Sun, Moon, HelpCircle
 } from 'lucide-react';
 import { useAppContext, HOURLY_RATE, DOWN_PAYMENT_RATE, selectCanonicalTables } from '../context/AppContext';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
@@ -2868,60 +2868,90 @@ export function HomePage() {
         {viewingReceipt && (() => {
           const receiptTableName = venueTables.find((t: any) => t.id === viewingReceipt.tableId)?.name
             || venueTables.find((t: any) => String(t.name).toLowerCase() === String(viewingReceipt.tableId || '').toLowerCase())?.name
-            || 'N/A';
-          const fmtPHP = (amount?: number | string | null) => `₱${(Number(amount) || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
+            || '—';
+          const fmtPHP = (amount?: number | string | null) => `₱${(Number(amount) || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+          const durationLabel = Number(viewingReceipt.durationHours) > 0 ? `${viewingReceipt.durationHours}h` : '—';
+          const st = String(viewingReceipt.status || '').toLowerCase();
+          const settled = ['confirmed', 'completed', 'settled', 'done'].includes(st);
+          const voided = st.startsWith('voided') || st === 'refund_pending' || st === 'cancelled' || st === 'canceled';
           return (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[110] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 sm:p-8" onClick={() => setViewingReceipt(null)}>
-            <motion.div initial={{ scale: 0.9, y: 10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 10 }} onClick={e => e.stopPropagation()} className="w-full max-w-sm relative max-h-full overflow-y-auto hide-scrollbar rounded-2xl">
-              <button
-                onClick={() => setViewingReceipt(null)}
-                className="absolute top-2 right-2 z-10 p-2 text-neutral-400 hover:text-white transition-colors bg-neutral-900/80 rounded-full"
-                title="Close Receipt"
-              >
-                <X size={18} />
-              </button>
+            <motion.div initial={{ scale: 0.9, y: 10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 10 }} onClick={e => e.stopPropagation()} className="w-full max-w-[340px] relative max-h-full overflow-y-auto hide-scrollbar rounded-xl drop-shadow-2xl flex flex-col">
+              <div className="pb-2 w-full">
+                {/* THERMAL PAPER UI */}
+                <div className="bg-[#f8f9fa] text-neutral-800 rounded-sm shadow-2xl relative overflow-hidden font-mono text-[11px] leading-tight w-full">
+                  {/* Torn Paper Top */}
+                  <div className="w-full h-3 bg-repeat-x flex" style={{ backgroundImage: 'radial-gradient(circle at 4px 0, transparent 4px, #f8f9fa 5px)', backgroundSize: '8px 10px' }} />
 
-              <div className="bg-neutral-100 text-neutral-900 rounded-b-xl shadow-2xl relative overflow-hidden" style={{ filter: 'drop-shadow(0 10px 15px rgba(16,185,129,0.2))' }}>
-                <div className="h-4 w-full flex space-x-1 absolute top-0 left-0 bg-black">
-                  {Array.from({ length: 30 }).map((_, i) => (
-                    <div key={i} className="w-3 h-3 bg-neutral-100 rounded-full -mt-1.5" />
-                  ))}
-                </div>
-
-                <div className="px-6 pt-10 pb-8 flex flex-col items-center font-mono">
-                  <h2 className="text-3xl font-black tracking-tighter mb-1">ONE SHOT</h2>
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-neutral-500 mb-6">Bar &amp; Billiards</p>
-
-                  <div className="w-full space-y-2 text-xs font-semibold border-b-2 border-dashed border-neutral-300 pb-4 mb-4">
-                    <div className="flex justify-between"><span>Booking ID:</span><span className="font-bold text-[10px]">{String(viewingReceipt.id).toUpperCase()}</span></div>
-                    <div className="flex justify-between"><span>Date:</span><span>{format(new Date(viewingReceipt.date), 'MM/dd/yyyy')}</span></div>
-                    <div className="flex justify-between"><span>Time:</span><span>{fmt12(viewingReceipt.timeSlot)}</span></div>
-                    <div className="flex justify-between"><span>Table:</span><span>{receiptTableName}</span></div>
-                    <div className="flex justify-between"><span>Customer:</span><span>{viewingReceipt.customerName}</span></div>
-                  </div>
-
-                  <div className="w-full space-y-2 text-xs font-bold border-b-2 border-dashed border-neutral-300 pb-4 mb-4">
-                    <div className="flex justify-between"><span>Table Booked ({viewingReceipt.durationHours}h)</span><span>{fmtPHP(viewingReceipt.totalAmount)}</span></div>
-                  </div>
-
-                  <div className="w-full space-y-1.5 text-sm">
-                    <div className="flex justify-between font-black text-base"><span>TOTAL DUE</span><span>{fmtPHP(viewingReceipt.totalAmount)}</span></div>
-                    <div className="flex justify-between text-neutral-500 font-semibold text-xs"><span>Down Payment</span><span>-{fmtPHP(viewingReceipt.downPaymentAmount)}</span></div>
-                    <div className="flex justify-between text-neutral-500 font-semibold text-xs"><span>Balance Paid</span><span>-{fmtPHP(Math.max(0, Number(viewingReceipt.totalAmount || 0) - Number(viewingReceipt.downPaymentAmount || 0)))}</span></div>
-                  </div>
-
-                  <div className="w-full mt-4 pt-4 border-t-[3px] border-neutral-800 flex justify-between font-black text-xl">
-                    <span>STATUS</span>
-                    <span className="text-emerald-600">SETTLED</span>
-                  </div>
-
-                  <div className="mt-8 flex flex-col items-center">
-                    <div className="p-2 border-2 border-neutral-900 rounded-lg mb-2 opacity-80">
-                      <QrCode size={64} strokeWidth={1.5} />
+                  <div className="px-5 pt-6 pb-8 flex flex-col">
+                    {/* Store Header */}
+                    <div className="text-center mb-4 space-y-0.5">
+                      <h2 className="text-base font-black tracking-wide text-black uppercase">{siteConfig?.venueName || 'One Shot Bar & Billiards'}</h2>
+                      <p className="text-[9px] text-neutral-600">{siteConfig?.address || 'Manila, Philippines'}</p>
+                      {(siteConfig?.contactNumber || siteConfig?.contactEmail) && <p className="text-[9px] text-neutral-600">{[siteConfig?.contactNumber, siteConfig?.contactEmail].filter(Boolean).join(' · ')}</p>}
                     </div>
-                    <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600 bg-emerald-500/10 px-3 py-1 rounded-full">Completed Booking</p>
+
+                    {/* Invoice Title */}
+                    <div className="text-center mb-4 space-y-1 border-t border-b border-dashed border-neutral-400 py-2">
+                      <p className="text-[9px] uppercase tracking-widest text-neutral-500 font-bold">Invoice · Reservation Summary</p>
+                      <h2 className="text-lg font-black tracking-widest text-black">*** RECEIPT ***</h2>
+                    </div>
+
+                    {/* Invoice Meta */}
+                    <div className="space-y-1 text-[9px] font-bold text-neutral-600 mb-3 border-b border-dashed border-neutral-400 pb-3">
+                      <div className="flex justify-between"><span>BOOKING NO.</span><span>{String(viewingReceipt.id || '').toUpperCase()}</span></div>
+                      <div className="flex justify-between"><span>DATE ISSUED</span><span>{format(new Date(viewingReceipt.date), 'dd/MM/yyyy')}</span></div>
+                      <div className="flex justify-between"><span>TIME SLOT</span><span>{fmt12(viewingReceipt.timeSlot)}</span></div>
+                      <div className="flex justify-between"><span>TABLE</span><span>{receiptTableName}</span></div>
+                      <div className="flex justify-between"><span>CUSTOMER</span><span>{viewingReceipt.customerName || 'Guest'}</span></div>
+                    </div>
+
+                    {/* Items */}
+                    <div className="space-y-3 mb-4">
+                      <div className="flex justify-between font-bold text-black">
+                        <span>TABLE RENTAL ({durationLabel})</span>
+                        <span>{fmtPHP(viewingReceipt.totalAmount)}</span>
+                      </div>
+                    </div>
+
+                    <div className="border-t border-dashed border-neutral-400 my-3" />
+
+                    {/* Subtotals */}
+                    <div className="space-y-1.5 font-bold mb-3 text-black">
+                      <div className="flex justify-between"><span>SUBTOTAL</span><span>{fmtPHP(viewingReceipt.totalAmount)}</span></div>
+                      <div className="flex justify-between text-neutral-600"><span>DOWN PAYMENT</span><span>-{fmtPHP(viewingReceipt.downPaymentAmount)}</span></div>
+                    </div>
+
+                    <div className="border-t border-dashed border-neutral-400 my-3" />
+
+                    {/* Totals */}
+                    <div className="space-y-1.5 text-black">
+                      <div className="flex justify-between font-black text-sm">
+                        <span>BALANCE DUE AT VENUE</span>
+                        <span>{fmtPHP(Math.max(0, Number(viewingReceipt.totalAmount || 0) - Number(viewingReceipt.downPaymentAmount || 0)))}</span>
+                      </div>
+                      <div className="flex justify-between font-bold mt-2">
+                        <span>STATUS</span>
+                        <span className={voided ? 'text-rose-600' : settled ? 'text-emerald-600' : 'text-amber-600'}>{String(viewingReceipt.status || '').replace(/-/g, ' ').toUpperCase() || 'PENDING'}</span>
+                      </div>
+                    </div>
+
+                    <div className="border-t border-dashed border-neutral-400 my-4" />
+
+                    {/* Footer */}
+                    <div className="text-center space-y-4">
+                      <p className="font-bold text-[10px] uppercase tracking-widest text-black">THANK YOU FOR BOOKING!</p>
+                      <p className="text-[9px] text-neutral-600">This serves as your official booking receipt. Please present this at the venue.</p>
+                    </div>
                   </div>
+
+                  {/* Torn Paper Bottom */}
+                  <div className="w-full h-3 bg-repeat-x flex rotate-180" style={{ backgroundImage: 'radial-gradient(circle at 4px 0, transparent 4px, #f8f9fa 5px)', backgroundSize: '8px 10px' }} />
                 </div>
+
+                <button onClick={() => setViewingReceipt(null)} className="mt-4 w-full bg-neutral-800 hover:bg-neutral-700 text-white font-bold py-3.5 rounded-xl transition-colors border border-neutral-700">
+                  Close Receipt
+                </button>
               </div>
             </motion.div>
           </motion.div>
