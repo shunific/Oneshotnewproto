@@ -23,5 +23,17 @@ const supabaseKey =
   FALLBACK_SUPABASE_KEY;
 
 export const supabase = createClient(supabaseUrl, supabaseKey);
-export const publicSupabase = supabase;
+
+// Public data client: never attaches a user session. Staff login is local, but
+// if a customer Supabase session exists in this browser the default client
+// would run cloud reads as the `authenticated` role and RLS would filter out
+// website feedback and reservations. This client always uses the anon/service
+// role so local machine data stays complete.
+export const publicSupabase = createClient(supabaseUrl, supabaseKey, {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+    detectSessionInUrl: false
+  }
+});
 
