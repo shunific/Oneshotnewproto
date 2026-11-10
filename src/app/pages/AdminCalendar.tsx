@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useAppContext, ClosedDate } from '../context/AppContext';
 import { CalendarX2, X, Plus, CheckCircle, AlertTriangle, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isBefore, startOfDay, addMonths, subMonths } from 'date-fns';
+import { TimeField } from '../components/ui/TimeField';
 
 const todayStart = startOfDay(new Date());
 
@@ -227,13 +228,13 @@ export function AdminCalendar() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs text-neutral-400 mb-1.5 block">Open Time</label>
-                    <input type="time" value={form.openTime} onChange={e => setForm(f=>({...f,openTime:e.target.value}))}
-                      className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-amber-600/50 transition-colors" />
+                    <TimeField value={form.openTime} onChange={v => setForm(f=>({...f,openTime:v}))}
+                      className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200" />
                   </div>
                   <div>
                     <label className="text-xs text-neutral-400 mb-1.5 block">Close Time</label>
-                    <input type="time" value={form.closeTime} onChange={e => setForm(f=>({...f,closeTime:e.target.value}))}
-                      className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-amber-600/50 transition-colors" />
+                    <TimeField value={form.closeTime} onChange={v => setForm(f=>({...f,closeTime:v}))}
+                      className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200" />
                   </div>
                 </div>
               )}

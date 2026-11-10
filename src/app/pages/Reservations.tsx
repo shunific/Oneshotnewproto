@@ -10,6 +10,7 @@ import { format, isToday, isTomorrow, isPast, startOfMonth, endOfMonth, eachDayO
 import { useNavigate } from 'react-router';
 import { supabase } from '../utils/supabase';
 import { motion, AnimatePresence } from 'motion/react';
+import { TimeField } from '../components/ui/TimeField';
 
 const formatPHP = (amount?: number | string | null) => {
   const val = Number(amount) || 0;
@@ -396,10 +397,43 @@ export function Reservations() {
     }
   };
 
+  // Weekdays Mon–Thu use the weekday schedule; Fri/Sat/Sun use the weekend schedule.
+  const isWeekendDate = (d: Date) => [0, 5, 6].includes(d.getDay());
+  const getOpeningTimeStr = (d: Date) => (isWeekendDate(d) ? rates?.weekendStartTime : rates?.weekdayStartTime) || '12:00';
+
+  // Default the booking start time to the store's opening hour so staff never have to
+  // pick a slot outside operating hours. Today is clamped to the current time.
+  const defaultStartTimeFor = (d: Date) => {
+    const openStr = getOpeningTimeStr(d);
+    const nowStr = format(new Date(), 'HH:mm');
+    if (isToday(d) && openStr < nowStr) return nowStr;
+    return openStr;
+  };
+
+  // Reservations that still hold a table on the given date (cancelled/completed release it).
+  const blockingReservationsFor = (date: Date) => reservations.filter((r: any) =>
+    r.tableId && isSameDay(new Date(r.date), date) && r.status !== 'cancelled' && r.status !== 'completed'
+  );
+
+  // Table status for the selected date: occupied by an active walk-in session today, or
+  // reserved by another booking. Used to surface occupancy on the New Manual Booking feed.
+  const getTableBookingState = (table: any) => {
+    if (!selectedDate) return { occupied: false, reserved: false, label: 'Available Slot' };
+    if (isToday(selectedDate) && table.status === 'occupied' && table.session?.startTime) {
+      return { occupied: true, reserved: false, label: 'Occupied — Playing Now' };
+    }
+    const blocks = blockingReservationsFor(selectedDate).filter((r: any) => r.tableId === table.id);
+    if (blocks.length > 0) {
+      const first = [...blocks].sort((a: any, b: any) => (a.timeSlot || '').localeCompare(b.timeSlot || ''))[0];
+      return { occupied: false, reserved: true, label: `Reserved ${formatTimeOnly(first.timeSlot)}` };
+    }
+    return { occupied: false, reserved: false, label: 'Available Slot' };
+  };
+
   const getNextClosingTime = (dateObj: Date) => {
     if (!dateObj) return null;
     const d = new Date(dateObj);
-    const isWeekend = d.getDay() === 5 || d.getDay() === 6;
+    const isWeekend = [0, 5, 6].includes(d.getDay());
     const closeTimeStr = isWeekend ? rates?.weekendEndTime : rates?.weekdayEndTime;
     if (!closeTimeStr) return null;
     
@@ -1560,21 +1594,18 @@ export function Reservations() {
                            </div>
                            <div>
                               <label className="block text-[10px] text-neutral-500 mb-1">New Time</label>
-                              <input 
-                                type="time" 
-                                value={rescheduleData.newTimeSlot} 
+                              <TimeField
+                                value={rescheduleData.newTimeSlot}
                                 min={rescheduleData.newDate && isToday(rescheduleData.newDate) ? format(new Date(), 'HH:mm') : undefined}
-                                onChange={e => {
-                                  const val = e.target.value;
+                                onChange={val => {
                                   const nowTime = format(new Date(), 'HH:mm');
                                   if (rescheduleData.newDate && isToday(rescheduleData.newDate) && val && val < nowTime) {
                                     setRescheduleData(prev => prev ? ({ ...prev, newTimeSlot: nowTime }) : null);
                                     return;
                                   }
                                   setRescheduleData(prev => prev ? ({...prev, newTimeSlot: val}) : null);
-                                }} 
-                                className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-[10px] text-neutral-100 focus:outline-none focus:border-amber-500" 
-                                style={{ colorScheme: 'dark' }} 
+                                }}
+                                className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-[10px] text-neutral-100 focus-within:border-amber-500"
                               />
                            </div>
                            <div className="col-span-2">
@@ -1694,7 +1725,7 @@ export function Reservations() {
                       <div className="p-4">
                         <MiniCalendar
                           selectedDate={selectedDate}
-                          onSelect={(d) => { setSelectedDate(d); setSelectedTableId(null); setIsCalendarExpanded(false); }}
+                          onSelect={(d) => { setSelectedDate(d); setSelectedTableId(null); setIsCalendarExpanded(false); setForm(f => ({ ...f, timeSlot: defaultStartTimeFor(d) })); }}
                           reservedDates={[]} closedDates={closedDates}
                         />
                       </div>
@@ -1714,7 +1745,8 @@ export function Reservations() {
                         <span className="font-semibold text-[11px] uppercase tracking-wider">Venue Layout Status</span>
                         <div className="flex items-center gap-3 text-[10px]">
                           <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> Free</span>
-                          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> Active</span>
+                          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-sky-400" /> Reserved</span>
+                          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> Occupied</span>
                           <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-rose-500" /> Maint.</span>
                         </div>
                       </div>
@@ -1722,8 +1754,8 @@ export function Reservations() {
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
                         {tables.filter((t: any) => t.isActive).map((table: any) => {
                           const isSel = selectedTableId === table.id;
-                          const isOcc = table.status === 'occupied';
                           const isMaint = table.status === 'maintenance';
+                          const booking = getTableBookingState(table);
                           
                           return (
                             <button
@@ -1741,10 +1773,10 @@ export function Reservations() {
                             >
                               <div className="flex justify-between items-center mb-1">
                                 <span className={`text-xs font-bold ${isSel ? 'text-emerald-400' : 'text-neutral-200'}`}>{table.name}</span>
-                                <span className={`w-2 h-2 rounded-full ${isMaint ? 'bg-rose-500' : isOcc && isToday(selectedDate) ? 'bg-amber-400 animate-pulse' : 'bg-emerald-500'}`} />
+                                <span className={`w-2 h-2 rounded-full ${isMaint ? 'bg-rose-500' : booking.occupied ? 'bg-amber-400 animate-pulse' : booking.reserved ? 'bg-sky-400' : 'bg-emerald-500'}`} />
                               </div>
-                              <p className="text-[10px] text-neutral-400 truncate">
-                                {isMaint ? 'Unavailable' : isOcc && isToday(selectedDate) ? 'Playing Now' : 'Available Slot'}
+                              <p className={`text-[10px] truncate ${booking.reserved ? 'text-sky-400 font-semibold' : booking.occupied ? 'text-amber-400 font-semibold' : 'text-neutral-400'}`}>
+                                {isMaint ? 'Unavailable' : booking.label}
                               </p>
                             </button>
                           );
@@ -1852,22 +1884,19 @@ export function Reservations() {
                               <span className="text-[9px] text-amber-500 font-semibold">Min: {format(new Date(), 'HH:mm')}</span>
                             )}
                           </label>
-                          <input 
-                            required 
-                            type="time" 
-                            style={{ colorScheme: 'dark' }} 
+                          <TimeField
+                            required
                             min={selectedDate && isToday(selectedDate) ? format(new Date(), 'HH:mm') : undefined}
-                            value={form.timeSlot} 
-                            onChange={e => {
-                              const val = e.target.value;
+                            value={form.timeSlot}
+                            onChange={val => {
                               const nowTime = format(new Date(), 'HH:mm');
                               if (selectedDate && isToday(selectedDate) && val && val < nowTime) {
                                 setForm(f => ({ ...f, timeSlot: nowTime }));
                                 return;
                               }
                               setForm(f => ({ ...f, timeSlot: val }));
-                            }} 
-                            className={`w-full bg-neutral-800 border rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-emerald-500 ${timeValidation !== 'valid' && form.timeSlot ? 'border-rose-500/50 text-rose-200' : 'border-neutral-700'}`} 
+                            }}
+                            className={`w-full bg-neutral-800 border rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus-within:border-emerald-500 ${timeValidation !== 'valid' && form.timeSlot ? 'border-rose-500/50 text-rose-200' : 'border-neutral-700'}`}
                           />
                         </div>
                         <div className="flex flex-col justify-end">

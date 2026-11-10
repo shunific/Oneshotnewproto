@@ -421,7 +421,7 @@ export default function AdminPolicyRatesEditor() {
         <div className="space-y-8">
           <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6 shadow-sm">
             <h2 className="text-xl font-bold text-neutral-100 flex items-center gap-2 mb-6">
-              <PesoSign className="text-emerald-500" size={20} /> Base Rates & Store Hours
+              <PesoSign className="text-emerald-500" size={20} /> Base Rates
             </h2>
             <div className="grid grid-cols-2 gap-4 mb-6">
               <div>
@@ -518,7 +518,7 @@ export default function AdminPolicyRatesEditor() {
         <div className="space-y-6">
           <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6 shadow-sm">
             <h2 className="text-xl font-bold text-neutral-100 flex items-center gap-2 mb-6">
-              <FileText className="text-emerald-500" /> Booking Rules & Limits
+              <FileText className="text-emerald-500" /> Booking Rules
             </h2>
             <div className="space-y-4">
 
@@ -568,8 +568,12 @@ export default function AdminPolicyRatesEditor() {
                     e.currentTarget.style.height = 'auto';
                     e.currentTarget.style.height = e.currentTarget.scrollHeight + 'px';
                   }}
+                  onFocus={(e) => {
+                    e.currentTarget.style.height = 'auto';
+                    e.currentTarget.style.height = e.currentTarget.scrollHeight + 'px';
+                  }}
                   rows={2}
-                  className="w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-sm text-neutral-100 focus:border-emerald-500 outline-none resize-none overflow-hidden"
+                  className="w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-sm text-neutral-100 focus:border-emerald-500 outline-none resize-none overflow-hidden transition-[height] duration-150"
                   placeholder="E.g. No refunds on same-day cancellations..."
                 />
               </div>
@@ -587,8 +591,12 @@ export default function AdminPolicyRatesEditor() {
                     e.currentTarget.style.height = 'auto';
                     e.currentTarget.style.height = e.currentTarget.scrollHeight + 'px';
                   }}
+                  onFocus={(e) => {
+                    e.currentTarget.style.height = 'auto';
+                    e.currentTarget.style.height = e.currentTarget.scrollHeight + 'px';
+                  }}
                   rows={2}
-                  className="w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-sm text-neutral-100 focus:border-emerald-500 outline-none resize-none overflow-hidden"
+                  className="w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-sm text-neutral-100 focus:border-emerald-500 outline-none resize-none overflow-hidden transition-[height] duration-150"
                   placeholder="General establishment rules..."
                 />
               </div>

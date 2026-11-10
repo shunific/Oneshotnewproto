@@ -13,6 +13,7 @@ import { useAppContext, generateRandomPromoCode } from '../context/AppContext';
 import type { Event, PromoCode, ClosedDate, Reservation } from '../context/AppContext';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isBefore, startOfDay, addMonths, subMonths } from 'date-fns';
 import { supabase } from '../utils/supabase';
+import { TimeField } from '../components/ui/TimeField';
 
 const EVENT_TYPES = ['Tournament', 'League', 'Other']; 
 const todayStart = startOfDay(new Date());
@@ -1255,7 +1256,7 @@ export function AdminEvents() {
                     {actionModal.type === 'refund' ? (
                        <p>Please contact the customer to manually settle the GCash refund of <strong>₱{actionModal.reservation.downPaymentAmount?.toFixed(2) || '0.00'}</strong>.</p>
                     ) : (
-                       <p>Please contact the customer to manually reschedule their booking from <strong>{format(new Date(actionModal.reservation.date), 'MMM d, yyyy')}</strong> at <strong>{actionModal.reservation.timeSlot}</strong>.</p>
+                       <p>Please contact the customer to manually reschedule their booking from <strong>{format(new Date(actionModal.reservation.date), 'MMM d, yyyy')}</strong> at <strong>{fmt12(actionModal.reservation.timeSlot)}</strong>.</p>
                     )}
                   </div>
                   <div>
@@ -1516,11 +1517,11 @@ export function AdminEvents() {
                       <div className="grid grid-cols-2 gap-4">
                         <div>
                           <label className="text-[10px] font-semibold text-neutral-400 block mb-1.5 uppercase tracking-wider flex items-center gap-1.5"><Clock size={11}/> Start Time</label>
-                          <input type="time" value={eventForm.startTime} onChange={e => setEventForm({...eventForm, startTime: e.target.value})} className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-amber-600/50" />
+                          <TimeField value={eventForm.startTime} onChange={v => setEventForm({...eventForm, startTime: v})} className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-200" />
                         </div>
                         <div>
                           <label className="text-[10px] font-semibold text-neutral-400 block mb-1.5 uppercase tracking-wider flex items-center gap-1.5"><Clock size={11}/> End Time</label>
-                          <input type="time" value={eventForm.endTime} onChange={e => setEventForm({...eventForm, endTime: e.target.value})} className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-amber-600/50" />
+                          <TimeField value={eventForm.endTime} onChange={v => setEventForm({...eventForm, endTime: v})} className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-200" />
                         </div>
                       </div>
                     )}
@@ -1792,11 +1793,11 @@ export function AdminEvents() {
                           <div className="grid grid-cols-2 gap-3">
                             <div>
                               <label className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-1">Open Time</label>
-                              <input type="time" value={closureForm.openTime} onChange={e => setClosureForm(f=>({...f,openTime:e.target.value}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-rose-500" />
+                              <TimeField value={closureForm.openTime} onChange={v => setClosureForm(f=>({...f,openTime:v}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200" />
                             </div>
                             <div>
                               <label className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-1">Close Time</label>
-                              <input type="time" value={closureForm.closeTime} onChange={e => setClosureForm(f=>({...f,closeTime:e.target.value}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:border-rose-500" />
+                              <TimeField value={closureForm.closeTime} onChange={v => setClosureForm(f=>({...f,closeTime:v}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200" />
                             </div>
                           </div>
                         )}
