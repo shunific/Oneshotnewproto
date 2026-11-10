@@ -36,7 +36,7 @@ const COLOR_PALETTES = [
 ];
 
 export function SettingsPage() {
-  const { staffProfile, updateStaffProfile, activities, changeOwnCredentials, verifyPassword, staffUsers, updateStaffUser, theme, updateTheme, primaryColor, updatePrimaryColor } = useAppContext();
+  const { staffProfile, updateStaffProfile, activities, changeOwnCredentials, verifyPassword, staffUsers, updateStaffUser, theme, updateTheme, primaryColor, updatePrimaryColor, tables } = useAppContext();
   const navigate = useNavigate();
 
   const [activeSection, setActiveSection] = useState<Section>('overview');
@@ -61,9 +61,9 @@ export function SettingsPage() {
   const stats = useMemo(() => ({
     total: userActivities.length,
     reservations: userActivities.filter(a => a.type.includes('reservation')).length,
-    posOrders: userActivities.filter(a => a.type === 'pos_order').length,
+    posOrders: (tables || []).filter((t: any) => t.isActive !== false && t.status === 'available').length,
     tablesAssigned: userActivities.filter(a => a.type === 'table_assigned').length,
-  }), [userActivities]);
+  }), [userActivities, tables]);
 
   const pwStrength = getPasswordStrength(secForm.newPassword);
 
@@ -255,7 +255,7 @@ export function SettingsPage() {
       {activeSection === 'overview' && (
         <div className="space-y-4">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-             {[{ label: 'Total Actions', val: stats.total, icon: BarChart2, color: 'text-emerald-500' }, { label: 'Bookings', val: stats.reservations, icon: CalendarCheck, color: 'text-blue-500' }, { label: 'POS Orders', val: stats.posOrders, icon: ShoppingCart, color: 'text-amber-500' }, { label: 'Tables Seated', val: stats.tablesAssigned, icon: LayoutGrid, color: 'text-purple-500' }].map((s, i) => (
+             {[{ label: 'Total Actions', val: stats.total, icon: BarChart2, color: 'text-emerald-500' }, { label: 'Bookings', val: stats.reservations, icon: CalendarCheck, color: 'text-blue-500' }, { label: 'Available tables', val: stats.posOrders, icon: LayoutGrid, color: 'text-amber-500' }, { label: 'Tables Seated', val: stats.tablesAssigned, icon: LayoutGrid, color: 'text-purple-500' }].map((s, i) => (
                <div key={i} className="bg-neutral-950 border border-neutral-800 rounded-xl p-4 flex flex-col justify-between">
                  <div className="flex justify-between items-start mb-2"><p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold">{s.label}</p><s.icon size={14} className={s.color} /></div>
                  <p className="text-3xl font-black text-neutral-900 dark:text-white">{s.val}</p>

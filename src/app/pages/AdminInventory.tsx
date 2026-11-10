@@ -161,10 +161,9 @@ export function AdminInventory() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filtered.map(item => {
           const outOfStock = item.stock <= 0;
-          const lowStock = item.stock > 0 && item.stock <= 5;
           
           return (
-            <Card key={item.id} className={`bg-neutral-900 overflow-hidden flex flex-col ${outOfStock ? 'border-rose-900/50' : lowStock ? 'border-amber-900/50' : 'border-neutral-800'}`}>
+            <Card key={item.id} className={`bg-neutral-900 overflow-hidden flex flex-col ${outOfStock ? 'border-rose-900/50' : 'border-neutral-800'}`}>
               <CardContent className="p-5 flex-1 flex flex-col justify-between">
                 <div>
                   <div className="flex justify-between items-start mb-2">
@@ -179,13 +178,10 @@ export function AdminInventory() {
                   
                   <div className="flex items-center gap-2 mt-4">
                     <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-semibold ${
-                      outOfStock ? 'bg-rose-950/40 border-rose-800/50 text-rose-400' : 
-                      lowStock ? 'bg-amber-950/40 border-amber-800/50 text-amber-400' : 
-                      'bg-neutral-950 border-neutral-800 text-neutral-400'
+                      outOfStock ? 'bg-rose-950/40 border-rose-800/50 text-rose-400' : 'bg-emerald-950/40 border-emerald-800/50 text-emerald-400'
                     }`}>
-                      <Archive size={12} /> Stock: {item.stock}{!item.isActive && ' · Archived'}
+                      <Archive size={12} /> {outOfStock ? 'Unavailable' : 'Available'}{!item.isActive && ' · Archived'}
                     </div>
-                    {outOfStock && <span className="text-[10px] font-bold text-rose-500 uppercase tracking-wider flex items-center gap-1"><AlertTriangle size={10}/> Out of Stock</span>}
                   </div>
                 </div>
 

@@ -91,7 +91,8 @@ export function Tables() {
     staffProfile, rates, reservationTerms, staffUsers, hashPassword,
     addSessionHistory, addActivity, addWatchlistItem,
     seatQueueCustomer, removeFromQueue, updateReservationStatus, forceFullSync,
-    pendingReservationMoves, reservationMoveError, heldTableIds, availableTables, recoverReservationTransfer, refreshReservationTransfers
+    pendingReservationMoves, reservationMoveError, heldTableIds, availableTables, recoverReservationTransfer, refreshReservationTransfers,
+    siteConfig
   } = useAppContext() as any;
 
   // 🟢 Audio alert & Toast Notifications for active tables
@@ -1262,16 +1263,15 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
                         className={`w-full flex items-center justify-between p-3 rounded-xl border text-left transition-all ${outOfStock ? 'bg-neutral-900/50 border-neutral-800/50 opacity-60 cursor-not-allowed' : 'bg-neutral-900 border-neutral-800 hover:border-emerald-600/40'}`}>
                         <div>
                           <p className={`text-sm font-semibold ${outOfStock ? 'text-neutral-500' : 'text-neutral-200'}`}>{item.name}</p>
-                          <p className="text-[10px] text-neutral-500 flex items-center">
+                          <p className="text-[10px] text-neutral-500 flex items-center gap-1.5">
                             {item.category}
-                            {!showArchivedMenu && item.stock <= 0 && (
-                              <span className="text-rose-500 font-bold ml-1.5 uppercase tracking-wider text-[8px] px-1.5 py-0.5 bg-rose-950/40 rounded-sm">Unavailable</span>
+                            {!showArchivedMenu && (
+                              <span className={`font-bold uppercase tracking-wider text-[8px] px-1.5 py-0.5 rounded-sm ${outOfStock ? 'text-rose-500 bg-rose-950/40' : 'text-emerald-500 bg-emerald-950/40'}`}>{outOfStock ? 'Unavailable' : 'Available'}</span>
                             )}
                           </p>
                         </div>
                         <div className="text-right">
                           <p className={`text-sm font-black ${outOfStock ? 'text-neutral-500' : 'text-emerald-400'}`}>{formatPHP(item.price)}</p>
-                          {outOfStock && <p className="text-[9px] text-rose-500 font-bold uppercase">Unavailable</p>}
                         </div>
                       </button>
                     );
@@ -2073,6 +2073,12 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
 
         if (!rData) return null;
 
+        const storeName = siteConfig?.venueName || 'One Shot Bar & Billiards';
+        const storeAddress = siteConfig?.address || 'Manila, Philippines';
+        const storeContact = siteConfig?.contactNumber || '';
+        const storeEmail = siteConfig?.contactEmail || '';
+        const customerName = rData.customerName || 'Walk-in Guest';
+
         return (
           <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 sm:p-8" onClick={() => isLive ? setViewingLiveReceiptId(null) : null}>
             <div className="w-full max-w-[340px] relative animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto hide-scrollbar rounded-xl drop-shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
@@ -2084,16 +2090,26 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
                   <div className="w-full h-3 bg-repeat-x flex" style={{ backgroundImage: 'radial-gradient(circle at 4px 0, transparent 4px, #f8f9fa 5px)', backgroundSize: '8px 10px' }} />
                   
                   <div className="px-5 pt-6 pb-8 flex flex-col">
-                    {/* Header */}
-                    <div className="text-center mb-5 space-y-1">
-                      <p className="text-[9px] uppercase tracking-widest text-neutral-500 font-bold mb-2">{isLive ? 'Running Tab' : 'Official Receipt'}</p>
-                      <h2 className="text-xl font-black tracking-widest text-black">*** RECEIPT ***</h2>
+                    {/* Store Header */}
+                    <div className="text-center mb-4 space-y-0.5">
+                      <h2 className="text-base font-black tracking-wide text-black uppercase">{storeName}</h2>
+                      {storeAddress && <p className="text-[9px] text-neutral-600">{storeAddress}</p>}
+                      {(storeContact || storeEmail) && <p className="text-[9px] text-neutral-600">{[storeContact, storeEmail].filter(Boolean).join(' · ')}</p>}
                     </div>
-                    
-                    {/* Meta Data */}
-                    <div className="flex justify-between items-center uppercase text-[9px] font-bold text-neutral-500 mb-3 border-b border-dashed border-neutral-400 pb-3">
-                      <span>CASHIER: {rData.staffName.split(' ')[0]}</span>
-                      <span>{format(rData.endTime, 'dd/MM/yyyy - hh:mm a')}</span>
+
+                    {/* Invoice Title */}
+                    <div className="text-center mb-4 space-y-1 border-t border-b border-dashed border-neutral-400 py-2">
+                      <p className="text-[9px] uppercase tracking-widest text-neutral-500 font-bold">{isLive ? 'Running Tab' : 'Invoice · Official Receipt'}</p>
+                      <h2 className="text-lg font-black tracking-widest text-black">*** RECEIPT ***</h2>
+                    </div>
+
+                    {/* Invoice Meta */}
+                    <div className="space-y-1 text-[9px] font-bold text-neutral-600 mb-3 border-b border-dashed border-neutral-400 pb-3">
+                      <div className="flex justify-between"><span>INVOICE NO.</span><span>{rData.id}</span></div>
+                      <div className="flex justify-between"><span>DATE ISSUED</span><span>{format(rData.endTime, 'dd/MM/yyyy - hh:mm a')}</span></div>
+                      <div className="flex justify-between"><span>TABLE</span><span>{rData.tableName}</span></div>
+                      <div className="flex justify-between"><span>CUSTOMER</span><span>{customerName}</span></div>
+                      <div className="flex justify-between"><span>PROCESSED BY</span><span>{rData.staffName}</span></div>
                     </div>
 
                     {/* Items List */}
@@ -2171,12 +2187,7 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
                       <p className="font-bold text-[10px] uppercase tracking-widest text-black">
                         {isLive ? 'STILL PLAYING...' : rData.status?.startsWith('voided') ? 'VOIDED SESSION' : 'THANK YOU FOR PLAYING!'}
                       </p>
-                      <div className="flex flex-col items-center opacity-80">
-                        <svg width="180" height="40" viewBox="0 0 180 40" fill="black" xmlns="http://www.w3.org/2000/svg">
-                          <rect x="0" y="0" width="4" height="40"/><rect x="8" y="0" width="2" height="40"/><rect x="14" y="0" width="6" height="40"/><rect x="24" y="0" width="2" height="40"/><rect x="30" y="0" width="4" height="40"/><rect x="38" y="0" width="8" height="40"/><rect x="50" y="0" width="2" height="40"/><rect x="56" y="0" width="4" height="40"/><rect x="64" y="0" width="2" height="40"/><rect x="70" y="0" width="6" height="40"/><rect x="80" y="0" width="8" height="40"/><rect x="92" y="0" width="2" height="40"/><rect x="98" y="0" width="4" height="40"/><rect x="106" y="0" width="2" height="40"/><rect x="112" y="0" width="6" height="40"/><rect x="122" y="0" width="4" height="40"/><rect x="130" y="0" width="2" height="40"/><rect x="136" y="0" width="8" height="40"/><rect x="148" y="0" width="2" height="40"/><rect x="154" y="0" width="6" height="40"/><rect x="164" y="0" width="4" height="40"/><rect x="172" y="0" width="8" height="40"/>
-                        </svg>
-                        <p className="text-[9px] mt-1 tracking-widest">{rData.id}</p>
-                      </div>
+                      <p className="text-[9px] text-neutral-600">This serves as your official invoice and receipt. Please keep for your records.</p>
                     </div>
                   </div>
 

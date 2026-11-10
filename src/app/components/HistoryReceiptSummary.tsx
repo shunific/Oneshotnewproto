@@ -18,7 +18,7 @@ export function HistoryReceiptSummary({record,receipt,state}:{record:any;receipt
  }
  const a=saved.amounts;
  return <section aria-label="Saved receipt payment summary" className="space-y-2 text-black">
-  <p className="text-[10px] text-neutral-600">Saved receipt · {saved.receiptNo}</p>
+  <p className="text-[10px] text-neutral-600">Saved receipt verified.</p>
   <p className="font-bold">{saved.customerName} · {saved.tableName}</p>
   <p>START: {savedTime(saved.startTime)}</p>
   <p>END: {savedTime(saved.endTime)}</p>

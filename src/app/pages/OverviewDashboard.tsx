@@ -299,7 +299,7 @@ export function OverviewDashboard() {
             }`}
           >
             <RefreshCw size={14} className={isSyncing ? 'animate-spin' : ''} />
-            <span>{isSyncing ? 'Syncing to Cloud...' : 'Run Cloud Backup'}</span>
+            <span>{isSyncing ? 'Syncing to Cloud...' : 'Save current data'}</span>
           </button>
 
           {staffProfile?.isAdmin && (
@@ -313,7 +313,7 @@ export function OverviewDashboard() {
               ) : (
                 <Download size={14} className="text-amber-400" />
               )}
-              <span>Download Local Backup</span>
+              <span>Save local data</span>
             </button>
           )}
         </div>

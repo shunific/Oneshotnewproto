@@ -39,7 +39,7 @@ export function AdminDashboard() {
 
   // ── Connectivity & Local Backup State ─────────────────────────
   const [lastSync, setLastSync] = useState<Date>(new Date());
-  const [isBrowserOffline, setIsBrowserOffline] = useState(!navigator.onLine);
+  const [isBrowserOffline, setIsBrowserOffline] = useState(typeof navigator !== 'undefined' ? !navigator.onLine : false);
   const [offlineSince, setOfflineSince] = useState<Date | null>(null);
   const [isBackingUp, setIsBackingUp] = useState(false);
   const [backupSuccess, setBackupSuccess] = useState(false);
@@ -192,7 +192,8 @@ export function AdminDashboard() {
     const history = sessionHistory || [];
     return days.map(day => {
       const daySessions = history.filter((h: any) => isSameDay(new Date(h.startTime || h.endTime), day));
-      const rev = daySessions.reduce((s: number, h: any) => s + (Number(h.totalAmount) || 0), 0);
+      // Receipt-backed bills only; unmatched/legacy rows are excluded by the summary helper.
+      const rev = summarizeSessionFinancials(daySessions).billedCents / 100;
       return {
         label: format(day, "EEE"),
         date: format(day, "MMM dd"),
@@ -200,12 +201,6 @@ export function AdminDashboard() {
         sessions: daySessions.length
       };
     });
-  }, [sessionHistory]);
-
-  const todayRevenue = useMemo(() => {
-    return (sessionHistory || [])
-      .filter((h: any) => isToday(new Date(h.startTime || h.endTime)))
-      .reduce((s: number, h: any) => s + (Number(h.totalAmount) || 0), 0);
   }, [sessionHistory]);
 
   const todayCompletedSessions = useMemo(() => {
@@ -313,7 +308,7 @@ export function AdminDashboard() {
             }`}
           >
             <RefreshCw size={14} className={isSyncing ? 'animate-spin' : ''} />
-            <span>{isSyncing ? 'Syncing to Cloud...' : 'Run Cloud Backup'}</span>
+            <span>{isSyncing ? 'Syncing to Cloud...' : 'Save current data'}</span>
           </button>
 
           {/* Local JSON Backup Button */}
@@ -327,7 +322,7 @@ export function AdminDashboard() {
             ) : (
               <Download size={14} className="text-amber-400" />
             )}
-            <span>Run Local Backup</span>
+            <span>Save local data</span>
           </button>
         </div>
       </div>
@@ -440,9 +435,9 @@ export function AdminDashboard() {
         {/* 3 Metric Mini-Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="bg-neutral-900/60 border border-neutral-800/80 rounded-xl p-4">
-            <p className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">Today Revenue</p>
-            <p className="text-2xl font-black text-emerald-400 mt-1">₱{todayRevenue.toLocaleString("en-PH", { minimumFractionDigits: 2 })}</p>
-            <p className="text-[10px] text-neutral-500 mt-1">From completed sessions today</p>
+            <p className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">Session Bills</p>
+            <p className="text-2xl font-black text-emerald-400 mt-1">₱{totalRevenue.toLocaleString("en-PH", { minimumFractionDigits: 2 })}</p>
+            <p className="text-[10px] text-neutral-500 mt-1">Receipt-backed · Outstanding ₱{(finances.outstandingCents / 100).toLocaleString("en-PH", { minimumFractionDigits: 2 })}</p>
           </div>
           <div className="bg-neutral-900/60 border border-neutral-800/80 rounded-xl p-4">
             <p className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">Today Completed Sessions</p>

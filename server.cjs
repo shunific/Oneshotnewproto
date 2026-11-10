@@ -145,6 +145,13 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 const { registerAuthRoutes } = require('./server-auth.cjs');
+const { registerBackupRoutes } = require('./server-backup.cjs');
+
+// Auth routes own the session/role middleware; backup downloads reuse requireAdmin.
+const registerCoreRoutes = (database) => {
+  const auth = registerAuthRoutes(app, database);
+  registerBackupRoutes(app, database, { requireAdmin: auth.requireAdmin });
+};
 
 // ====================================================================
 // 🟢 SQLITE DATABASE INITIALIZATION & AUTO-MIGRATIONS
@@ -192,7 +199,7 @@ let db = null;
 if (!sqlite3) {
   console.warn('⚠️ SQLite3 native library not loaded. Operating in fallback database mode.');
   db = createFallbackDb();
-  registerAuthRoutes(app, db);
+  registerCoreRoutes(db);
 } else {
   try {
     db = new sqlite3.Database(dbPath, (err) => {
@@ -201,7 +208,7 @@ if (!sqlite3) {
   } else {
     console.log('✅ Connected to local SQLite database.');
     db.configure('busyTimeout', 5000);
-    registerAuthRoutes(app, db);
+    registerCoreRoutes(db);
     
     db.serialize(() => {
       db.run(`CREATE TABLE IF NOT EXISTS systemSettings (keyName TEXT PRIMARY KEY, settingValue TEXT, updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP)`);
@@ -336,7 +343,7 @@ if (!sqlite3) {
   } catch (err) {
     console.error('❌ Failed to instantiate SQLite database:', err.message);
     db = createFallbackDb();
-    registerAuthRoutes(app, db);
+    registerCoreRoutes(db);
   }
 }
 
@@ -591,7 +598,24 @@ app.get('/api/announcements', (req, res) => {
 app.get('/api/session-history', (req, res) => {
   db.all(`SELECT * FROM session_history ORDER BY endTime DESC`, [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
-    res.json(rows.map(r => ({ ...r, orders: safeParseJSON(r.orders, []) })));
+    const normalized = rows.map(r => ({ ...r, orders: safeParseJSON(r.orders, []) }));
+    if (!normalized.length) return res.json(normalized);
+    // Attach the immutable saved receipt that shares the session's id so dashboards can
+    // reconcile money from the receipt instead of trusting the mutable history row.
+    const placeholders = normalized.map(() => '?').join(',');
+    db.all(`SELECT * FROM e_receipts WHERE id IN (${placeholders})`, normalized.map(r => r.id), (receiptErr, receipts) => {
+      if (receiptErr) return res.json(normalized.map(r => ({ ...r, receipt: null })));
+      const byId = new Map((receipts || []).map(receipt => [receipt.id, receipt]));
+      res.json(normalized.map(r => ({ ...r, receipt: byId.get(r.id) || null })));
+    });
+  });
+});
+
+app.get('/api/e-receipts/:id', (req, res) => {
+  db.get(`SELECT * FROM e_receipts WHERE id = ?`, [req.params.id], (err, row) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!row) return res.status(404).json({ error: 'Receipt not found.' });
+    res.json(row);
   });
 });
 

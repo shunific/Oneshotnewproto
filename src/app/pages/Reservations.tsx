@@ -4,7 +4,7 @@ import {
   Plus, X, Calendar, Clock, Users, Phone, Mail, ChevronDown, CheckCircle,
   XCircle, Search, Filter, DollarSign, AlertTriangle, Download, Image as ImageIcon,
   CalendarX2, List as ListIcon, Lock, ChevronLeft, ChevronRight, Send, Upload, ShieldAlert, RefreshCw, Table2,
-  FileText, QrCode
+  FileText, QrCode, CalendarClock, ThumbsDown
 } from 'lucide-react';
 import { format, isToday, isTomorrow, isPast, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isBefore, startOfDay, addMonths, subMonths, differenceInSeconds, isThisWeek, addMinutes, differenceInHours, differenceInDays } from 'date-fns';
 import { useNavigate } from 'react-router';
@@ -14,6 +14,15 @@ import { motion, AnimatePresence } from 'motion/react';
 const formatPHP = (amount?: number | string | null) => {
   const val = Number(amount) || 0;
   return `₱${val.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
+};
+
+// Customer-initiated reschedule requests reuse the free-text cancellationReason column so
+// no schema change is needed on either SQLite or Supabase. The marker keeps the customer's
+// requested schedule and stated reason while the reservation keeps its original booking.
+const RESCHEDULE_PREFIX = '__RESCHEDULE_REQUEST__';
+const parseRescheduleRequest = (raw: any): { requestedDate?: string; requestedTime?: string; reason?: string } | null => {
+  if (typeof raw !== 'string' || !raw.startsWith(RESCHEDULE_PREFIX)) return null;
+  try { return JSON.parse(raw.slice(RESCHEDULE_PREFIX.length)); } catch { return null; }
 };
 
 const statusConfig: Record<string, { label: string; color: string; dot: string }> = {
@@ -238,6 +247,8 @@ export function Reservations() {
     staffConfirmed: boolean;
   } | null>(null);
   const [isRescheduling, setIsRescheduling] = useState(false);
+  const [rejectTarget, setRejectTarget] = useState<any>(null);
+  const [rejectNotes, setRejectNotes] = useState('');
 
   // Form state
   const [form, setForm] = useState({
@@ -704,9 +715,12 @@ export function Reservations() {
            timeSlot: rescheduleData.newTimeSlot,
            durationHours: rescheduleData.newDuration,
            tableId: rescheduleData.newTableId,
-           cancellationReason: `Rescheduled: ${callSummary}` 
+           cancellationReason: `Rescheduled: ${callSummary}`,
+           rescheduleCount: parseRescheduleRequest(actionModal.reservation.cancellationReason)
+             ? (Number(actionModal.reservation.rescheduleCount) || 0) + 1
+             : (Number(actionModal.reservation.rescheduleCount) || 0),
          });
-         flash("Marked as contacted and reservation rescheduled successfully.", "success");
+         flash("Reservation rescheduled and the customer has been notified.", "success");
       }
       
       setActionModal(null);
@@ -737,8 +751,35 @@ export function Reservations() {
 
   const selected = reservations.find((r: any) => r.id === selectedId);
 
+  const openRescheduleApproval = (r: any) => {
+    const request = parseRescheduleRequest(r.cancellationReason);
+    const baseDate = request?.requestedDate ? new Date(request.requestedDate) : new Date(r.date);
+    setRescheduleData({
+      newDate: Number.isFinite(baseDate.getTime()) ? baseDate : new Date(r.date),
+      newTimeSlot: request?.requestedTime || r.timeSlot,
+      newDuration: r.durationHours,
+      newTableId: r.tableId || null,
+      staffConfirmed: false,
+    });
+    setActionModal({ type: 'reschedule', reservation: r });
+    setSelectedId(null);
+  };
+
+  const confirmRescheduleRejection = () => {
+    if (!rejectTarget) return;
+    updateReservation(rejectTarget.id, {
+      status: 'confirmed',
+      cancellationReason: `${RESCHEDULE_PREFIX}${JSON.stringify({ decision: 'rejected', reason: rejectNotes.trim() })}`,
+    });
+    addActivity('admin_action', `Declined reschedule request for reservation #${rejectTarget.id.toUpperCase()}.`);
+    flash('Reschedule request declined. The customer will be notified.', 'success');
+    setRejectTarget(null);
+    setRejectNotes('');
+  };
+
   const todayCount = reservations.filter((r: any) => isToday(new Date(r.date))).length;
   const pendingCount = reservations.filter((r: any) => r.status === 'pending').length;
+  const rescheduleRequests = reservations.filter((r: any) => r.status === 'pending-reschedule');
   
   const totalRevenue = reservations.filter((r: any) => r.status === 'completed').reduce((s: number, r: any) => s + (Number(r.totalAmount) || 0), 0);
   const pendingPayment = reservations.filter((r: any) => r.status !== 'cancelled').reduce((s: number, r: any) => {
@@ -869,6 +910,66 @@ export function Reservations() {
           </div>
         ))}
       </div>
+
+      {/* 🟢 RESCHEDULE REQUESTS */}
+      {rescheduleRequests.length > 0 && (
+        <div className="bg-neutral-950 border border-violet-900/40 rounded-xl overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-violet-900/30 bg-violet-950/20">
+            <div className="flex items-center gap-2">
+              <CalendarClock size={16} className="text-violet-400" />
+              <h3 className="text-sm font-bold text-neutral-200">Reschedule Requests</h3>
+              <span className="text-[10px] font-black text-violet-300 bg-violet-900/40 border border-violet-800/60 px-2 py-0.5 rounded-full">{rescheduleRequests.length}</span>
+            </div>
+            <p className="hidden sm:block text-[10px] text-neutral-500">Approve to edit the schedule, or decline to keep the original booking.</p>
+          </div>
+          <div className="divide-y divide-neutral-800/50">
+            {rescheduleRequests.map((r: any) => {
+              const request = parseRescheduleRequest(r.cancellationReason);
+              const requestedDate = request?.requestedDate ? new Date(request.requestedDate) : null;
+              const validRequested = requestedDate && Number.isFinite(requestedDate.getTime());
+              return (
+                <div key={r.id} className="p-4 flex flex-col lg:flex-row lg:items-center gap-4">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-neutral-200 flex items-center gap-2">
+                      {r.customerName}
+                      <span className="text-[9px] font-mono text-neutral-500 bg-neutral-800 px-1.5 py-0.5 rounded tracking-widest">{r.id}</span>
+                    </p>
+                    <p className="text-xs text-neutral-500 mt-0.5">{r.contactNumber} · {r.partySize} pax · {r.durationHours}h</p>
+                    <div className="flex flex-wrap items-center gap-2 mt-2 text-xs">
+                      <span className="text-neutral-500">From</span>
+                      <span className="text-neutral-300 font-medium">{formatDateTime(r.date, r.timeSlot)}</span>
+                      <ChevronRight size={12} className="text-neutral-600" />
+                      <span className="text-violet-300 font-semibold">
+                        {validRequested ? `${format(requestedDate as Date, 'MMM d, yyyy')} · ${formatTimeOnly(request?.requestedTime || r.timeSlot)}` : 'New schedule not specified'}
+                      </span>
+                    </div>
+                    {request?.reason && (
+                      <div className="mt-2 bg-neutral-900/60 border border-neutral-800 rounded-lg px-3 py-2">
+                        <p className="text-[10px] uppercase tracking-wider text-neutral-500 font-semibold mb-0.5">Reason for reschedule</p>
+                        <p className="text-xs text-neutral-300 leading-relaxed">{request.reason}</p>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <button
+                      onClick={() => { setRejectTarget(r); setRejectNotes(''); }}
+                      className="px-4 py-2.5 bg-neutral-900 hover:bg-rose-950/40 border border-neutral-800 hover:border-rose-800 text-rose-400 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5"
+                    >
+                      <ThumbsDown size={13} /> Decline
+                    </button>
+                    <button
+                      onClick={() => openRescheduleApproval(r)}
+                      className="px-4 py-2.5 bg-violet-600 hover:bg-violet-500 text-white rounded-lg text-xs font-bold shadow-lg shadow-violet-900/30 transition-colors flex items-center gap-1.5"
+                    >
+                      <CalendarClock size={13} /> Approve & Edit
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* 🟢 ENHANCED TOOLBAR */}
       <div className="flex flex-col lg:flex-row gap-3 items-stretch lg:items-center">
@@ -1029,7 +1130,7 @@ export function Reservations() {
                                   <motion.div initial={{ opacity: 0, y: 5, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 5, scale: 0.95 }} className="absolute right-4 top-10 mt-1 w-44 bg-neutral-900 border border-neutral-700 rounded-xl shadow-2xl overflow-hidden z-[60] flex flex-col py-1">
                                     {r.status === 'pending' && <button onClick={(e) => { e.stopPropagation(); setActionModal({ type: 'receipt', reservation: r }); setOpenActionRowId(null); setSelectedId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-emerald-400 hover:bg-neutral-800 transition-colors">Verify Booking</button>}
                                     {r.status === 'pending-refund' && <button onClick={(e) => { e.stopPropagation(); setActionModal({ type: 'refund', reservation: r }); setOpenActionRowId(null); setSelectedId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-rose-400 hover:bg-neutral-800 transition-colors">Process Refund</button>}
-                                    {r.status === 'pending-reschedule' && <button onClick={(e) => { e.stopPropagation(); setRescheduleData({ newDate: new Date(r.date), newTimeSlot: r.timeSlot, newDuration: r.durationHours, newTableId: r.tableId, staffConfirmed: false }); setActionModal({ type: 'reschedule', reservation: r }); setOpenActionRowId(null); setSelectedId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-violet-400 hover:bg-neutral-800 transition-colors">Process Reschedule</button>}
+                                    {r.status === 'pending-reschedule' && <button onClick={(e) => { e.stopPropagation(); setOpenActionRowId(null); openRescheduleApproval(r); }} className="px-4 py-2.5 text-left text-xs font-bold text-violet-400 hover:bg-neutral-800 transition-colors">Process Reschedule</button>}
                                     {r.status === 'confirmed' && (
                                       <>
                                         <button onClick={(e) => { e.stopPropagation(); handleCheckIn(r); setOpenActionRowId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-blue-400 hover:bg-neutral-800 transition-colors border-b border-neutral-800/50">Check In</button>
@@ -1291,7 +1392,7 @@ export function Reservations() {
                       <motion.div initial={{ opacity: 0, y: -10, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -10, scale: 0.95 }} className="absolute bottom-full left-0 mb-2 w-full bg-neutral-900 border border-neutral-700 rounded-xl shadow-2xl overflow-hidden z-[60] flex flex-col py-1">
                         {selected.status === 'pending' && <button onClick={(e) => { e.stopPropagation(); setActionModal({ type: 'receipt', reservation: selected }); setOpenActionRowId(null); setSelectedId(null); }} className="px-5 py-3 text-left text-sm font-bold text-emerald-400 hover:bg-neutral-800 transition-colors">Verify Booking</button>}
                         {selected.status === 'pending-refund' && <button onClick={(e) => { e.stopPropagation(); setActionModal({ type: 'refund', reservation: selected }); setOpenActionRowId(null); setSelectedId(null); }} className="px-5 py-3 text-left text-sm font-bold text-rose-400 hover:bg-neutral-800 transition-colors">Process Refund</button>}
-                        {selected.status === 'pending-reschedule' && <button onClick={(e) => { e.stopPropagation(); setRescheduleData({ newDate: new Date(selected.date), newTimeSlot: selected.timeSlot, newDuration: selected.durationHours, newTableId: selected.tableId, staffConfirmed: false }); setActionModal({ type: 'reschedule', reservation: selected }); setOpenActionRowId(null); setSelectedId(null); }} className="px-5 py-3 text-left text-sm font-bold text-violet-400 hover:bg-neutral-800 transition-colors">Process Reschedule</button>}
+                        {selected.status === 'pending-reschedule' && <button onClick={(e) => { e.stopPropagation(); openRescheduleApproval(selected); }} className="px-5 py-3 text-left text-sm font-bold text-violet-400 hover:bg-neutral-800 transition-colors">Process Reschedule</button>}
                         {selected.status === 'confirmed' && (
                           <>
                             <button onClick={(e) => { e.stopPropagation(); handleCheckIn(selected); setOpenActionRowId(null); }} className="px-5 py-3 text-left text-sm font-bold text-blue-400 hover:bg-neutral-800 transition-colors border-b border-neutral-800/50">Check In Customer</button>
@@ -1518,6 +1619,40 @@ export function Reservations() {
                 )}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* 🟢 DECLINE RESCHEDULE REQUEST MODAL */}
+      {rejectTarget && (
+        <div className="fixed inset-0 z-[85] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden">
+            <div className="p-4 border-b border-neutral-800 flex justify-between items-center bg-neutral-900/50">
+              <h3 className="font-bold text-neutral-200 flex items-center gap-2"><ThumbsDown size={15} className="text-rose-400" /> Decline Reschedule Request</h3>
+              <button onClick={() => { setRejectTarget(null); setRejectNotes(''); }} className="p-1.5 text-neutral-500 hover:text-white rounded-lg transition-colors"><X size={15}/></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-3 text-xs text-neutral-300">
+                <p><strong>Customer:</strong> {rejectTarget.customerName}</p>
+                <p className="mt-1"><strong>Booking:</strong> {formatDateTime(rejectTarget.date, rejectTarget.timeSlot)}</p>
+              </div>
+              <p className="text-xs text-neutral-400 leading-relaxed">The customer will be notified that the request was declined and their original schedule is retained.</p>
+              <div>
+                <label className="text-xs text-neutral-400 font-bold uppercase tracking-wider block mb-2">Reason for declining (optional)</label>
+                <textarea
+                  value={rejectNotes}
+                  onChange={e => setRejectNotes(e.target.value)}
+                  placeholder="e.g. Requested slot is fully booked. Customer may rebook another time."
+                  className="w-full bg-neutral-900 border border-neutral-700 rounded-xl p-3 text-xs text-neutral-200 focus:border-rose-500 outline-none resize-none h-20"
+                />
+              </div>
+            </div>
+            <div className="p-4 border-t border-neutral-800 bg-neutral-900/50 flex gap-3">
+              <button onClick={() => { setRejectTarget(null); setRejectNotes(''); }} className="flex-1 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-xl text-xs font-bold transition-colors">Cancel</button>
+              <button onClick={confirmRescheduleRejection} className="flex-[2] py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-rose-900/30 transition-colors flex items-center justify-center gap-2">
+                <ThumbsDown size={13} /> Decline Request
+              </button>
+            </div>
           </div>
         </div>
       )}

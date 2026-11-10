@@ -545,7 +545,7 @@ export function Analytics() {
         </div>
 
         <div className="rounded-xl border border-neutral-800 bg-neutral-950 p-4 text-sm text-neutral-300">
-          <p>Applied to bills: {formatPHP(finances.appliedCents / 100)} · Outstanding: {formatPHP(finances.outstandingCents / 100)} · Pending prepaid returns: {formatPHP(finances.pendingReturnCents / 100)}</p>
+          <p>Outstanding: {formatPHP(finances.outstandingCents / 100)} · Pending prepaid returns: {formatPHP(finances.pendingReturnCents / 100)}</p>
           <p className="mt-1 text-xs text-neutral-500">Receipt-backed session totals by session start date; not cash collected during this date range. Refund returns and earlier reservation deposits may occur on other dates. {finances.reviewCount > 0 ? `${finances.reviewCount} history records need receipt review and are excluded from money totals.` : 'No unmatched history records in this range.'}</p>
         </div>
 
@@ -587,7 +587,7 @@ export function Analytics() {
                     <Cell key={`pie-cell-${i}`} fill={COLORS[i % COLORS.length]} />
                   ))}
                 </Pie>
-                <Tooltip contentStyle={{ backgroundColor: '#171717', border: '1px solid #404040', borderRadius: '8px', fontSize: '12px' }} />
+                <Tooltip contentStyle={{ backgroundColor: '#171717', border: '1px solid #404040', borderRadius: '8px', fontSize: '12px', color: '#e5e5e5' }} labelStyle={{ color: '#e5e5e5' }} itemStyle={{ color: '#e5e5e5' }} />
               </PieChart>
             </ResponsiveContainer>
             <div className="space-y-1.5 mt-2">

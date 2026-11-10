@@ -4,14 +4,14 @@ import { HistoryReceiptSummary } from '../components/HistoryReceiptSummary';
 import { projectHistoryReceipt } from '../utils/historyReceiptProjection.js';
 import { ReceiptRefundReturn } from '../components/ReceiptRefundReturn';
 import { useAppContext } from '../context/AppContext';
-import { History, Search, Calendar, Clock, DollarSign, ShoppingCart, CheckCircle, X, ChevronRight, Filter, QrCode } from 'lucide-react';
+import { History, Search, Calendar, Clock, DollarSign, ShoppingCart, CheckCircle, X, ChevronRight, Filter } from 'lucide-react';
 import { format, isToday, isThisWeek, isThisMonth, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
 
 // 🟢 BULLETPROOF FORMATTER: Safely handles null/undefined amounts to prevent crashes
 const formatPHP = (amount: any) => `₱${(Number(amount) || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
 
 export function SessionHistory() {
-  const { sessionHistory, reservations, tables, staffProfile } = useAppContext() as any;
+  const { sessionHistory, reservations, tables, staffProfile, siteConfig } = useAppContext() as any;
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'table_session' | 'reservation'>('all');
   const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'week' | 'month' | 'custom'>('all');
@@ -230,15 +230,24 @@ export function SessionHistory() {
                   
                   <div className="px-5 pt-6 pb-8 flex flex-col">
                     {/* Header */}
-                    <div className="text-center mb-5 space-y-1">
-                      <p className="text-[9px] uppercase tracking-widest text-neutral-500 font-bold mb-2">History Record</p>
-                      <h2 className="text-xl font-black tracking-widest text-black">*** SESSION SUMMARY ***</h2>
+                    <div className="text-center mb-4 space-y-0.5">
+                      <h2 className="text-base font-black tracking-wide text-black uppercase">{siteConfig?.venueName || 'One Shot Bar & Billiards'}</h2>
+                      <p className="text-[9px] text-neutral-600">{siteConfig?.address || 'Manila, Philippines'}</p>
+                      {(siteConfig?.contactNumber || siteConfig?.contactEmail) && <p className="text-[9px] text-neutral-600">{[siteConfig?.contactNumber, siteConfig?.contactEmail].filter(Boolean).join(' · ')}</p>}
+                    </div>
+
+                    <div className="text-center mb-4 space-y-1 border-t border-b border-dashed border-neutral-400 py-2">
+                      <p className="text-[9px] uppercase tracking-widest text-neutral-500 font-bold">Invoice · Session Summary</p>
+                      <h2 className="text-lg font-black tracking-widest text-black">*** RECEIPT ***</h2>
                     </div>
                     
                     {/* Meta Data */}
-                    <div className="flex justify-between items-center uppercase text-[9px] font-bold text-neutral-500 mb-3 border-b border-dashed border-neutral-400 pb-3">
-                      <span>CASHIER: ARCHIVE</span>
-                      <span>{format(receiptDate, 'dd/MM/yyyy - hh:mm a')}</span>
+                    <div className="space-y-1 text-[9px] font-bold text-neutral-600 mb-3 border-b border-dashed border-neutral-400 pb-3">
+                      <div className="flex justify-between"><span>INVOICE NO.</span><span>{rData.id}</span></div>
+                      <div className="flex justify-between"><span>DATE ISSUED</span><span>{format(receiptDate, 'dd/MM/yyyy - hh:mm a')}</span></div>
+                      <div className="flex justify-between"><span>TABLE</span><span>{rData.tableName || '—'}</span></div>
+                      <div className="flex justify-between"><span>CUSTOMER</span><span>{rData.customerName || 'Walk-in Guest'}</span></div>
+                      <div className="flex justify-between"><span>PROCESSED BY</span><span>{receiptSnapshot?.receipt?.processed_by_name || staffProfile?.fullName || staffProfile?.username || 'Archive'}</span></div>
                     </div>
 
                     <HistoryReceiptSummary record={rData} receipt={receiptSnapshot?.receipt} state={receiptSnapshot?.state||(rData.source==='table_session'?'loading':'history')} />
@@ -251,10 +260,7 @@ export function SessionHistory() {
                       <p className="font-bold text-[10px] uppercase tracking-widest text-black">
                         THANK YOU FOR PLAYING!
                       </p>
-                      <div className="flex flex-col items-center opacity-80">
-                        <QrCode size={40} strokeWidth={1.5} className="mb-2" />
-                        <p className="text-[9px] tracking-widest">{rData.id}</p>
-                      </div>
+                      <p className="text-[9px] text-neutral-600">This serves as your official invoice and receipt. Please keep for your records.</p>
                     </div>
                   </div>
 
