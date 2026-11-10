@@ -65,6 +65,13 @@ export function AdminSiteSettings() {
     toastTimeout.current = setTimeout(() => setToast(null), 5000);
   };
 
+  // Confirmation dialog gating every Site Settings save action
+  const [confirmState, setConfirmState] = useState<{ title: string; message: string; confirmLabel: string; onConfirm: () => void } | null>(null);
+
+  const requestConfirm = (title: string, message: string, confirmLabel: string, onConfirm: () => void) => {
+    setConfirmState({ title, message, confirmLabel, onConfirm });
+  };
+
   // Sync from siteConfig (handles initial load and async Supabase cloud updates)
   useEffect(() => {
     if (siteConfig && Object.keys(siteConfig).length > 0) {
@@ -172,6 +179,20 @@ export function AdminSiteSettings() {
     }
   };
 
+  const saveGeneralInfoConfirmed = () => {
+    // Phone validation: numbers only
+    const cleanPhone = (form.contactNumber || "").trim();
+    if (cleanPhone && !/^\d+$/.test(cleanPhone)) {
+      flash("Contact phone must contain only numbers (no letters or special characters).", "error");
+      return;
+    }
+    if (cleanPhone && (cleanPhone.length < 11 || cleanPhone.length > 13)) {
+      flash("Contact phone number must be between 11 and 13 digits (e.g. 09171234567).", "error");
+      return;
+    }
+    requestConfirm("Save General Information", "Apply these venue name, tagline, description, and contact details across the site?", "Save Info", saveGeneralInfo);
+  };
+
   // Save Location & Pin
   const saveLocationPin = async () => {
     setIsProcessing(true);
@@ -187,6 +208,10 @@ export function AdminSiteSettings() {
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  const saveLocationPinConfirmed = () => {
+    requestConfirm("Save Location & Map", "Update the venue address and Google Maps embed shown to customers?", "Save Location", saveLocationPin);
   };
 
   // Save Operating Hours
@@ -214,6 +239,18 @@ export function AdminSiteSettings() {
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  const saveOperatingHoursConfirmed = () => {
+    if (hoursForm.weekdayStartTime === hoursForm.weekdayEndTime) {
+      flash("Weekday opening and closing times cannot be identical.", "error");
+      return;
+    }
+    if (hoursForm.weekendStartTime === hoursForm.weekendEndTime) {
+      flash("Weekend opening and closing times cannot be identical.", "error");
+      return;
+    }
+    requestConfirm("Save Operating Hours", "Apply these weekday and weekend opening/closing hours to the booking system?", "Save Hours", saveOperatingHours);
   };
 
   // Save Max Occupancies & Global Adjustments (Clamped: Max 30 Pax, Max 24 Hours)
@@ -252,6 +289,23 @@ export function AdminSiteSettings() {
     }
   };
 
+  const saveOccupancyAndAdjustmentsConfirmed = () => {
+    const minWkDay = Math.max(1, Math.min(30, Number(occupancyForm.weekdayMinPartySize) || 1));
+    const maxWkDay = Math.max(1, Math.min(30, Number(occupancyForm.weekdayMaxPartySize) || 8));
+    const minWkEnd = Math.max(1, Math.min(30, Number(occupancyForm.weekendMinPartySize) || 1));
+    const maxWkEnd = Math.max(1, Math.min(30, Number(occupancyForm.weekendMaxPartySize) || 10));
+
+    if (minWkDay > maxWkDay) {
+      flash(`Weekday Min (${minWkDay}) cannot exceed Max (${maxWkDay}).`, "error");
+      return;
+    }
+    if (minWkEnd > maxWkEnd) {
+      flash(`Weekend Min (${minWkEnd}) cannot exceed Max (${maxWkEnd}).`, "error");
+      return;
+    }
+    requestConfirm("Save Global Adjustments", "Apply these party-size limits, advance booking notice, and cancellation rules?", "Save Adjustments", saveOccupancyAndAdjustments);
+  };
+
   // Image Upload / Removal
   const saveHeroImages = async () => {
     setIsProcessing(true);
@@ -265,6 +319,10 @@ export function AdminSiteSettings() {
     }
   };
 
+  const saveHeroImagesConfirmed = () => {
+    requestConfirm("Save Hero Gallery", "Publish these slider images to the customer-facing hero gallery?", "Save Gallery", saveHeroImages);
+  };
+
   const saveAboutImage = async () => {
     setIsProcessing(true);
     try {
@@ -275,6 +333,10 @@ export function AdminSiteSettings() {
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  const saveAboutImageConfirmed = () => {
+    requestConfirm("Save Feature Photo", "Set this image as the About Us feature photo on the website?", "Save Feature Photo", saveAboutImage);
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, target: "hero" | "about") => {
@@ -383,6 +445,41 @@ export function AdminSiteSettings() {
         </div>
       )}
 
+      {/* Save Confirmation Dialog */}
+      {confirmState && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <div className="p-6 space-y-4">
+              <div className="flex items-start gap-3">
+                <div className="p-2 bg-emerald-500/10 text-emerald-400 rounded-xl flex-shrink-0">
+                  <AlertTriangle size={18} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-neutral-100">{confirmState.title}</h3>
+                  <p className="text-xs text-neutral-400 mt-1 leading-relaxed">{confirmState.message}</p>
+                </div>
+              </div>
+              <div className="flex gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setConfirmState(null)}
+                  className="flex-1 px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm rounded-xl transition-colors font-semibold"
+                >
+                  No, Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { const action = confirmState.onConfirm; setConfirmState(null); action(); }}
+                  className="flex-1 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded-xl font-bold transition-colors shadow-lg shadow-emerald-900/30 flex items-center justify-center gap-2"
+                >
+                  <CheckCircle size={15} /> Yes, {confirmState.confirmLabel}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div>
         <h1 className="text-2xl font-black text-white tracking-tight">Site & Venue Settings</h1>
@@ -403,7 +500,7 @@ export function AdminSiteSettings() {
           </div>
           <button 
             type="button" 
-            onClick={saveOperatingHours}
+            onClick={saveOperatingHoursConfirmed}
             disabled={isProcessing}
             className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-lg shadow-emerald-950 cursor-pointer"
           >
@@ -486,7 +583,7 @@ export function AdminSiteSettings() {
           </div>
           <button 
             type="button" 
-            onClick={saveOccupancyAndAdjustments}
+            onClick={saveOccupancyAndAdjustmentsConfirmed}
             disabled={isProcessing}
             className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-lg shadow-blue-950 cursor-pointer"
           >
@@ -623,7 +720,7 @@ export function AdminSiteSettings() {
           </div>
           <button 
             type="button" 
-            onClick={saveGeneralInfo}
+            onClick={saveGeneralInfoConfirmed}
             disabled={isProcessing}
             className="px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-lg shadow-amber-950 cursor-pointer"
           >
@@ -736,7 +833,7 @@ export function AdminSiteSettings() {
           </div>
           <button 
             type="button" 
-            onClick={saveLocationPin}
+            onClick={saveLocationPinConfirmed}
             disabled={isProcessing}
             className="px-4 py-2 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-lg shadow-rose-950 cursor-pointer"
           >
@@ -885,7 +982,7 @@ export function AdminSiteSettings() {
             <h3 className="text-xs text-neutral-400 font-semibold uppercase tracking-wider">Manage Slider Images</h3>
             <button 
               type="button" 
-              onClick={saveHeroImages} 
+              onClick={saveHeroImagesConfirmed} 
               disabled={isProcessing}
               className="bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors shadow-lg shadow-sky-950 cursor-pointer"
             >
@@ -945,7 +1042,7 @@ export function AdminSiteSettings() {
             <h3 className="text-xs text-neutral-400 font-semibold uppercase tracking-wider">About Us Feature Photo</h3>
             <button 
               type="button" 
-              onClick={saveAboutImage} 
+              onClick={saveAboutImageConfirmed} 
               disabled={isProcessing}
               className="bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors shadow-lg shadow-sky-950 cursor-pointer"
             >

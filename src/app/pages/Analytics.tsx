@@ -544,11 +544,6 @@ export function Analytics() {
           <StatCard label="Avg Session" value={`${overallAvgDuration} hrs`} sub="Per table booking" icon={BarChart3} color="text-purple-400" />
         </div>
 
-        <div className="rounded-xl border border-neutral-800 bg-neutral-950 p-4 text-sm text-neutral-300">
-          <p>Outstanding: {formatPHP(finances.outstandingCents / 100)} · Pending prepaid returns: {formatPHP(finances.pendingReturnCents / 100)}</p>
-          <p className="mt-1 text-xs text-neutral-500">Receipt-backed session totals by session start date; not cash collected during this date range. Refund returns and earlier reservation deposits may occur on other dates. {finances.reviewCount > 0 ? `${finances.reviewCount} history records need receipt review and are excluded from money totals.` : 'No unmatched history records in this range.'}</p>
-        </div>
-
         {/* Charts Row 1 */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Revenue Trend Over Time */}

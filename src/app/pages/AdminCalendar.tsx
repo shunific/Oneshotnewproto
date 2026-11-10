@@ -5,6 +5,16 @@ import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isBefor
 
 const todayStart = startOfDay(new Date());
 
+// Renders a stored 24h "HH:mm" value as 12-hour AM/PM for display.
+const fmt12 = (time?: string | null) => {
+  if (!time) return '';
+  const [h, m] = String(time).split(':').map(Number);
+  if (!Number.isFinite(h)) return String(time);
+  const d = new Date();
+  d.setHours(h, m || 0, 0, 0);
+  return format(d, 'h:mm a');
+};
+
 export function AdminCalendar() {
   const { closedDates, addClosedDate, removeClosedDate, updateClosedDate } = useAppContext();
   const [viewMonth, setViewMonth] = useState(new Date());
@@ -157,7 +167,7 @@ export function AdminCalendar() {
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-semibold text-rose-400">{format(new Date(c.date + 'T12:00:00'), 'EEE, MMM d yyyy')}</p>
                     <p className="text-[11px] text-neutral-500 truncate">{c.reason || 'No reason given'}</p>
-                    <p className="text-[10px] text-neutral-700">{c.isFullDay ? 'Full day' : `${c.openTime}–${c.closeTime}`}</p>
+                    <p className="text-[10px] text-neutral-700">{c.isFullDay ? 'Full day' : `${fmt12(c.openTime)}–${fmt12(c.closeTime)}`}</p>
                   </div>
                   <button onClick={() => removeClosedDate(c.id)}
                     className="p-1.5 text-neutral-600 hover:text-rose-400 hover:bg-rose-950/20 rounded-lg transition-colors flex-shrink-0">

@@ -17,6 +17,23 @@ import { supabase } from '../utils/supabase';
 const EVENT_TYPES = ['Tournament', 'League', 'Other']; 
 const todayStart = startOfDay(new Date());
 
+// Renders a stored 24h "HH:mm" value as 12-hour AM/PM for display.
+const fmt12 = (time?: string | null) => {
+  if (!time) return '';
+  const [h, m] = String(time).split(':').map(Number);
+  if (!Number.isFinite(h)) return String(time);
+  const d = new Date();
+  d.setHours(h, m || 0, 0, 0);
+  return format(d, 'h:mm a');
+};
+
+// Event durations are stored either as "Whole Day" or as a "HH:mm - HH:mm" range.
+const fmtDuration = (duration?: string | null) => {
+  if (!duration) return '';
+  if (duration === 'Whole Day') return duration;
+  return duration.split('-').map(s => fmt12(s.trim())).join(' - ');
+};
+
 type FormState = {
   title: string; dates: string[]; type: string; description: string;
   isWholeDay: boolean; startTime: string; endTime: string;
@@ -377,7 +394,7 @@ export function AdminEvents() {
       });
 
      if (conflictingEvent) { 
-      flash(`Schedule Conflict!\n\n"${conflictingEvent.title}" is already scheduled on ${d} (${conflictingEvent.duration || 'Whole Day'}). Please pick a different date or time.`, "error"); return; 
+      flash(`Schedule Conflict!\n\n"${conflictingEvent.title}" is already scheduled on ${d} (${fmtDuration(conflictingEvent.duration) || 'Whole Day'}). Please pick a different date or time.`, "error"); return; 
      }
     }
 
@@ -729,7 +746,7 @@ export function AdminEvents() {
                   </div>
                   <CardDescription className={`text-xs font-medium flex items-center gap-2 ${isPastEvent ? 'text-neutral-600' : 'text-amber-500'}`}>
                     <CalendarIcon size={12}/> {dateDisplay}
-                    {ev.duration && <><span className="text-neutral-600">·</span><Clock size={12}/> {ev.duration}</>}
+                    {ev.duration && <><span className="text-neutral-600">·</span><Clock size={12}/> {fmtDuration(ev.duration)}</>}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="flex-1 flex flex-col justify-between">
@@ -1382,7 +1399,7 @@ export function AdminEvents() {
                                 </span>
                               </div>
                               <div className="flex items-center gap-2 text-[10px] text-neutral-500">
-                                <span className="flex items-center gap-1"><Clock size={10}/> {r.timeSlot} ({r.durationHours}h)</span>
+                                <span className="flex items-center gap-1"><Clock size={10}/> {fmt12(r.timeSlot)} ({r.durationHours}h)</span>
                                 <span>·</span>
                                 <span className="font-bold text-amber-400">{r.contactNumber}</span>
                                 <span>·</span>
@@ -1552,7 +1569,7 @@ export function AdminEvents() {
                                     <p className="text-xs text-amber-500 font-semibold mb-1">Table {tId.replace('t','')}</p>
                                     {tableReservations.map((r:any) => (
                                        <div key={r.id} className="text-[10px] text-neutral-300 flex justify-between bg-neutral-950 p-1.5 rounded border border-neutral-800 mb-1">
-                                          <span>{format(new Date(r.date), 'MMM d')} - {r.timeSlot} ({r.durationHours}h)</span>
+                                          <span>{format(new Date(r.date), 'MMM d')} - {fmt12(r.timeSlot)} ({r.durationHours}h)</span>
                                           <span className="text-neutral-500">{r.customerName}</span>
                                        </div>
                                     ))}
@@ -1737,7 +1754,7 @@ export function AdminEvents() {
                                    <div className="flex flex-col text-[10px] text-rose-300/80 gap-0.5">
                                       <a href={`tel:${r.contactNumber}`} className="hover:text-white flex items-center gap-1"><span className="text-rose-500">📞</span> {r.contactNumber}</a>
                                       {r.email && <a href={`mailto:${r.email}`} className="hover:text-white flex items-center gap-1"><span className="text-rose-500">✉️</span> {r.email}</a>}
-                                      <span className="text-neutral-500 mt-1">{r.timeSlot} ({r.durationHours}h) - Table {r.tableId?.replace('t','')}</span>
+                                      <span className="text-neutral-500 mt-1">{fmt12(r.timeSlot)} ({r.durationHours}h) - Table {r.tableId?.replace('t','')}</span>
                                    </div>
                                  </div>
                                ))}

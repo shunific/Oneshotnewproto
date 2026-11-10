@@ -1577,13 +1577,7 @@ export function Reservations() {
                                 style={{ colorScheme: 'dark' }} 
                               />
                            </div>
-                           <div>
-                              <label className="block text-[10px] text-neutral-500 mb-1">Duration</label>
-                              <select value={rescheduleData.newDuration} onChange={e => setRescheduleData(prev => prev ? ({...prev, newDuration: parseInt(e.target.value)}) : null)} className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-[10px] text-neutral-100 focus:outline-none focus:border-amber-500">
-                                 {[1,2,3,4,5,6].map(h => <option key={h} value={h}>{h}h</option>)}
-                              </select>
-                           </div>
-                           <div>
+                           <div className="col-span-2">
                               <label className="block text-[10px] text-neutral-500 mb-1">Assign Table</label>
                               <select value={rescheduleData.newTableId || ''} onChange={e => setRescheduleData(prev => prev ? ({...prev, newTableId: e.target.value}) : null)} className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-[10px] text-neutral-100 focus:outline-none focus:border-amber-500">
                                  <option value="" disabled>Select a table...</option>
