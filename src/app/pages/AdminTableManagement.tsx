@@ -340,8 +340,14 @@ export function AdminTableManagement() {
                   {editingId !== t.id && (
                     <div className="relative flex-shrink-0" ref={openDropdownId === t.id ? dropdownRef : null}>
                       <button
+                        disabled={isOccupied}
                         onClick={() => setOpenDropdownId(openDropdownId === t.id ? null : t.id)}
-                        className="p-1.5 rounded-lg bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white hover:border-neutral-700 transition-colors"
+                        className={`p-1.5 rounded-lg border transition-colors ${
+                          isOccupied 
+                            ? 'bg-neutral-900/30 border-transparent text-neutral-700 cursor-not-allowed' 
+                            : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white hover:border-neutral-700'
+                        }`}
+                        title={isOccupied ? "Cannot modify a table currently in play" : "Manage table"}
                       >
                         <MoreVertical size={14} />
                       </button>

@@ -40,6 +40,7 @@ import {
   ShoppingCart, Plus, Minus, Trash2, Lock, Edit2, History, Info, RefreshCw, ArrowRightLeft,
   QrCode, FileText
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { isToday, differenceInSeconds, addMinutes, isSameDay, format } from 'date-fns';
 
 type FilterStatus = 'all' | 'available' | 'occupied' | 'reserved' | 'maintenance';
@@ -93,8 +94,10 @@ export function Tables() {
     pendingReservationMoves, reservationMoveError, heldTableIds, availableTables, recoverReservationTransfer, refreshReservationTransfers
   } = useAppContext() as any;
 
-  // 🟢 Audio alert when any table session ends
+  // 🟢 Audio alert & Toast Notifications for active tables
   const notifiedSessionsRef = useRef<Set<string>>(new Set());
+  const milestoneNotifiedRef = useRef<Set<string>>(new Set());
+
   useEffect(() => {
     const interval = setInterval(() => {
       const now = new Date();
@@ -103,8 +106,28 @@ export function Tables() {
           const endTime = addMinutes(new Date(t.session.startTime), t.session.durationMinutes);
           const secsLeft = differenceInSeconds(endTime, now);
           const sessionKey = `${t.id}-${t.session.startTime}`;
+
+          // Helper for timeline toasts (10m, 5m, 2m)
+          const checkMilestone = (mins: number) => {
+            const thresholdSecs = mins * 60;
+            const milestoneKey = `${sessionKey}-${mins}m`;
+            
+            if (secsLeft <= thresholdSecs && !milestoneNotifiedRef.current.has(milestoneKey)) {
+              milestoneNotifiedRef.current.add(milestoneKey);
+              // Only toast if we didn't just load the page way past the milestone (15s grace)
+              if (secsLeft > thresholdSecs - 15) {
+                toast(`${t.name} Timer`, { description: `${mins} minutes left on their time.`, icon: '⏳' });
+              }
+            }
+          };
+
+          checkMilestone(10);
+          checkMilestone(5);
+          checkMilestone(2);
+
           if (secsLeft <= 0 && !notifiedSessionsRef.current.has(sessionKey)) {
             notifiedSessionsRef.current.add(sessionKey);
+            toast.error(`${t.name} Time's Up!`, { description: 'Last play initiated (2-min buffer).', duration: 8000 });
             playSessionEndSound();
           }
         }
@@ -194,7 +217,7 @@ export function Tables() {
   const [isEditingMenu, setIsEditingMenu] = useState(false);
   const [editingItem, setEditingItem] = useState<any | null>(null);
   const [editingStock, setEditingStock] = useState<number | undefined>(undefined);
-  const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', price: 0, stock: 0 });
+const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', price: 0, stock: 999999 });
 
   // Assign form state
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerSource | null>(null);
@@ -275,14 +298,18 @@ export function Tables() {
       const nowMs = Date.now();
       const s = endingTable.session;
       let billTime = nowMs;
+      
       if (!s.isOpenTime && typeof s.durationMinutes === 'number' && Number.isFinite(Date.parse(s.startTime))) {
         const scheduledEnd = Date.parse(s.startTime) + s.durationMinutes * 60000;
+        
         if (nowMs > scheduledEnd) {
           const otMs = nowMs - scheduledEnd;
           if (otMs <= 120000) {
-            billTime = scheduledEnd; // 2-minute grace: 0 overtime charged
+            // Within 2-minute buffer: Stop bill exactly at scheduled end (0 overtime)
+            billTime = scheduledEnd; 
           } else {
-            billTime = nowMs - 120000; // Deduct the 2-minute grace before charging overtime
+            // Exceeded 2 minutes: Charge FULL overtime (including the 2-minute buffer)
+            billTime = nowMs; 
           }
         }
       }
@@ -748,9 +775,8 @@ export function Tables() {
     if (orderRequestInFlight.current || hasPendingOrder) return;
     setPosCart(prev => prev.map(p => {
       if (p.id === id) {
-        const itemStock = inventory.find((i: any) => i.id === id)?.stock || 0;
         const newQty = p.qty + delta;
-        if ((delta > 0 && newQty > itemStock) || newQty < 0) return p;
+      if (newQty < 0) return p;
         return { ...p, qty: newQty };
       }
       return p;
@@ -830,11 +856,11 @@ export function Tables() {
   };
 
   const startEditItem = (item: any) => {
-    setEditingItem(item);
-    setEditingStock(item.stock);
-    setNewItemForm({ name: item.name, category: item.category, price: item.price, stock: item.stock });
-    setIsEditingMenu(true);
-  };
+  setEditingItem(item);
+  setEditingStock(item.stock > 0 ? 999999 : 0);
+  setNewItemForm({ name: item.name, category: item.category, price: item.price, stock: item.stock > 0 ? 999999 : 0 });
+  setIsEditingMenu(true);
+};
 
   const filterBtns: { key: FilterStatus; label: string; count: number; color: string }[] = [
     { key: 'all',         label: 'All',         count: displayTables.length, color: 'bg-neutral-800 text-neutral-200 border-neutral-700' },
@@ -1116,10 +1142,11 @@ export function Tables() {
 
               {isEditingMenu ? (
                 <div className="space-y-4">
-                  {!showArchivedMenu && (
+                  his:
+                  {!showArchivedMenu && !editingItem && (
                     <form onSubmit={handleSaveMenuItem} className="bg-neutral-900 border border-amber-900/40 rounded-xl p-4 space-y-3">
                       <div className="flex justify-between items-center mb-1">
-                         <p className="text-[10px] text-amber-500 uppercase tracking-widest font-bold">{editingItem ? 'Edit Item' : 'Add New Item'}</p>
+                         <p className="text-[10px] text-amber-500 uppercase tracking-widest font-bold">Add New Item</p>
                          <CharCount current={newItemForm.name} max={30} />
                       </div>
                       <input type="text" maxLength={30} value={newItemForm.name} onChange={e => setNewItemForm(f => ({ ...f, name: e.target.value }))} placeholder="Item Name" required className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-amber-500" />
@@ -1130,14 +1157,9 @@ export function Tables() {
                           <option value="Extras">Extras</option>
                         </select>
                         <input type="number" value={newItemForm.price || ''} onChange={e => setNewItemForm(f => ({ ...f, price: parseFloat(e.target.value) || 0 }))} placeholder="Price ₱" required min="1" className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-amber-500" />
-                      </div>
-                      <div>
-                        <label className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold block mb-1">Add Stock</label>
-                        <input type="number" value={newItemForm.stock === 0 ? '' : newItemForm.stock} onChange={e => setNewItemForm(f => ({ ...f, stock: parseInt(e.target.value) || 0 }))} placeholder="Current Stock" min="0" className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-amber-500" />
-                      </div>
-                      <div className="flex gap-2 pt-2">
-                        {editingItem && <button type="button" onClick={() => { setEditingItem(null); setNewItemForm({ name: '', category: 'Drinks', price: 0, stock: 0 }); }} className="flex-1 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs rounded-lg transition-colors">Cancel</button>}
-                        <button type="submit" className="flex-1 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold rounded-lg transition-colors">{editingItem ? 'Save Changes' : 'Add Item'}</button>
+                        </div>
+                        <div className="flex gap-2 pt-2">
+                        <button type="submit" className="flex-1 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold rounded-lg transition-colors">Add Item</button>
                       </div>
                     </form>
                   )}
@@ -1146,10 +1168,31 @@ export function Tables() {
                     {showArchivedMenu && <p className="text-[10px] text-neutral-500 font-bold uppercase tracking-wider mb-2">Archived Items (Hidden from POS)</p>}
                     
                     {inventory.filter((i: any) => showArchivedMenu ? !i.isActive : i.isActive).map((item: any) => (
+                      editingItem?.id === item.id ? (
+                        <form key={`edit-${item.id}`} onSubmit={handleSaveMenuItem} className="bg-neutral-900 border border-amber-900/40 rounded-xl p-4 space-y-3">
+                          <div className="flex justify-between items-center mb-1">
+                             <p className="text-[10px] text-amber-500 uppercase tracking-widest font-bold">Edit Item</p>
+                             <CharCount current={newItemForm.name} max={30} />
+                          </div>
+                          <input type="text" maxLength={30} value={newItemForm.name} onChange={e => setNewItemForm(f => ({ ...f, name: e.target.value }))} placeholder="Item Name" required className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-amber-500" />
+                          <div className="grid grid-cols-2 gap-2">
+                            <select value={newItemForm.category} onChange={e => setNewItemForm(f => ({ ...f, category: e.target.value }))} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-amber-500 appearance-none">
+                              <option value="Drinks">Drinks</option>
+                              <option value="Food">Food</option>
+                              <option value="Extras">Extras</option>
+                            </select>
+                            <input type="number" value={newItemForm.price || ''} onChange={e => setNewItemForm(f => ({ ...f, price: parseFloat(e.target.value) || 0 }))} placeholder="Price ₱" required min="1" className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-amber-500" />
+                          </div>
+                          <div className="flex gap-2 pt-2">
+                            <button type="button" onClick={() => { setEditingItem(null); setNewItemForm({ name: '', category: 'Drinks', price: 0, stock: 999999 }); }} className="flex-1 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs rounded-lg transition-colors">Cancel</button>
+                            <button type="submit" className="flex-1 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold rounded-lg transition-colors">Save Changes</button>
+                          </div>
+                        </form>
+                      ) : (
                       <div key={item.id} className={`w-full flex items-center justify-between p-3 rounded-xl border ${showArchivedMenu ? 'bg-neutral-950 border-neutral-800/50 opacity-70' : 'bg-neutral-900 border-neutral-800'}`}>
                         <div className="min-w-0 pr-2">
                           <p className={`text-sm font-semibold truncate ${showArchivedMenu ? 'text-neutral-400 line-through' : 'text-neutral-200'}`} title={item.name}>{item.name}</p>
-                          <p className="text-[10px] text-neutral-500">{item.category} · Stock: {item.stock}</p>
+                          <p className="text-[10px] text-neutral-500">{item.category}</p>
                         </div>
                         <div className="flex items-center gap-2">
                           <p className={`text-sm font-black mr-2 ${showArchivedMenu ? 'text-neutral-600' : 'text-amber-400'}`}>{formatPHP(item.price)}</p>
@@ -1167,7 +1210,16 @@ export function Tables() {
                             </button>
                           ) : (
                             <>
-                              <button onClick={() => startEditItem(item)} className="p-1.5 text-neutral-500 hover:text-white bg-neutral-800 rounded-md transition-colors"><Edit2 size={12} /></button>
+                        <button 
+                          type="button"
+                          onClick={() => updateInventoryItem(item.id, { stock: item.stock > 0 ? 0 : 999999 })}
+                          className={`relative w-8 h-4 rounded-full transition-colors mr-1 cursor-pointer ${item.stock > 0 ? 'bg-emerald-500' : 'bg-neutral-700'}`}
+                          title={item.stock > 0 ? "Mark Unavailable" : "Mark Available"}
+                        >
+                          <div className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full shadow transition-transform ${item.stock > 0 ? 'translate-x-4' : 'translate-x-0'}`} />
+                        </button>
+                        
+                        <button onClick={() => startEditItem(item)} className="p-1.5 text-neutral-500 hover:text-white bg-neutral-800 rounded-md transition-colors"><Edit2 size={12} /></button>
                               {confirmArchiveId === item.id ? (
                                 <button 
                                   onClick={async () => {
@@ -1192,6 +1244,7 @@ export function Tables() {
                           )}
                         </div>
                       </div>
+                      )
                     ))}
                     {showArchivedMenu && inventory.filter((i: any) => !i.isActive).length === 0 && (
                       <p className="text-xs text-neutral-600 text-center py-4">No archived items found.</p>
@@ -1201,20 +1254,24 @@ export function Tables() {
               ) : (
                 <div className="space-y-2">
                   {inventory.filter((i: any) => i.isActive).map((item: any) => {
-                    const inCartQty = posCart.find(c => c.id === item.id)?.qty || 0;
-                    const stockRemaining = item.stock - inCartQty;
-                    const outOfStock = stockRemaining <= 0;
+                    
+                    const outOfStock = item.stock <= 0;
                     
                     return (
                       <button key={item.id} disabled={outOfStock || !posTable.session} onClick={() => handleAddToCart(item)}
                         className={`w-full flex items-center justify-between p-3 rounded-xl border text-left transition-all ${outOfStock ? 'bg-neutral-900/50 border-neutral-800/50 opacity-60 cursor-not-allowed' : 'bg-neutral-900 border-neutral-800 hover:border-emerald-600/40'}`}>
                         <div>
                           <p className={`text-sm font-semibold ${outOfStock ? 'text-neutral-500' : 'text-neutral-200'}`}>{item.name}</p>
-                          <p className="text-[10px] text-neutral-500">{item.category} · Available: {stockRemaining}</p>
+                          <p className="text-[10px] text-neutral-500 flex items-center">
+                            {item.category}
+                            {!showArchivedMenu && item.stock <= 0 && (
+                              <span className="text-rose-500 font-bold ml-1.5 uppercase tracking-wider text-[8px] px-1.5 py-0.5 bg-rose-950/40 rounded-sm">Unavailable</span>
+                            )}
+                          </p>
                         </div>
                         <div className="text-right">
                           <p className={`text-sm font-black ${outOfStock ? 'text-neutral-500' : 'text-emerald-400'}`}>{formatPHP(item.price)}</p>
-                          {outOfStock && <p className="text-[9px] text-rose-500 font-bold uppercase">Out of stock</p>}
+                          {outOfStock && <p className="text-[9px] text-rose-500 font-bold uppercase">Unavailable</p>}
                         </div>
                       </button>
                     );

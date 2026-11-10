@@ -346,9 +346,7 @@ export function AdminDashboard() {
               <PesoSign size={15} className="text-emerald-500" />
               <div>
                 <p className="text-xs font-black text-emerald-500">₱{totalRevenue.toLocaleString()}</p>
-                <p className="text-[10px] text-neutral-400">Applied ₱{(finances.appliedCents / 100).toLocaleString()} · Outstanding ₱{(finances.outstandingCents / 100).toLocaleString()}</p>
-                <p className="text-[10px] text-neutral-400">Pending returns ₱{(finances.pendingReturnCents / 100).toLocaleString()}{finances.reviewCount > 0 ? ` · ${finances.reviewCount} records need review` : ''}</p>
-                <p className="text-[10px] text-emerald-600/80 font-bold uppercase tracking-wider">Session Bills</p>
+
               </div>
             </div>
           </div>

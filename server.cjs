@@ -1364,6 +1364,32 @@ app.post('/api/inventory', (req, res) => {
   });
 });
 
+app.put('/api/inventory/:id', (req, res) => {
+  const updates = req.body;
+  const keys = Object.keys(updates);
+  if (keys.length === 0) return res.json({ message: "Nothing to update" });
+
+  const setClause = keys.map((k) => `${k} = ?`).join(', ');
+  const values = keys.map((k) => {
+    const val = updates[k];
+    if (typeof val === 'boolean') return val ? 1 : 0;
+    return val;
+  });
+  values.push(req.params.id);
+
+  db.run(`UPDATE inventory SET ${setClause} WHERE id = ?`, values, function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "Inventory item updated." });
+  });
+});
+
+app.delete('/api/inventory/:id', (req, res) => {
+  db.run(`DELETE FROM inventory WHERE id = ?`, [req.params.id], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "Inventory item deleted." });
+  });
+});
+
 const updateSettingsHandler = (req, res) => {
   const payload = req.body;
   const keys = Object.keys(payload);
