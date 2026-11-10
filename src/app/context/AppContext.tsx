@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef, useMemo } from 'react';
 import { toast } from 'sonner';
-import { supabase } from '../utils/supabase';
+import { publicSupabase } from '../utils/supabase';
 import { motion, AnimatePresence } from 'motion/react';
 import { KeyRound, CheckCircle2, Copy, Download } from 'lucide-react';
 
@@ -414,7 +414,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const checkHeartbeat = async () => {
-      const { data } = await supabase.from('system_status').select('last_seen_at').eq('id', 1).maybeSingle();
+      const { data } = await publicSupabase.from('system_status').select('last_seen_at').eq('id', 1).maybeSingle();
       if (data) {
         const lastSeen = new Date(data.last_seen_at);
         const timeDiffMs = new Date().getTime() - lastSeen.getTime();
@@ -511,11 +511,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         { data: settingsData }, { data: closedDatesData }, { data: promoData }, { data: eventsData }, { data: feedData },
         { data: cloudTablesData }
       ] = await Promise.all([
-        supabase.from('reservations').select('*'), supabase.from('announcements').select('*'), 
-        supabase.from('cms').select('*'), supabase.from('system_settings').select('*'), 
-        supabase.from('closed_dates').select('*'), supabase.from('promo_codes').select('*'), 
-        supabase.from('events').select('*'), supabase.from('feedback').select('*'),
-        supabase.from('tables').select('*')
+        publicSupabase.from('reservations').select('*'), publicSupabase.from('announcements').select('*'), 
+        publicSupabase.from('cms').select('*'), publicSupabase.from('system_settings').select('*'), 
+        publicSupabase.from('closed_dates').select('*'), publicSupabase.from('promo_codes').select('*'), 
+        publicSupabase.from('events').select('*'), publicSupabase.from('feedback').select('*'),
+        publicSupabase.from('tables').select('*')
       ]);
 
       if (resErr) {
@@ -850,14 +850,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'occupied', session: updatedSession } : t));
     addActivity('table_assigned', `Assigned ${tables.find(t=>t.id===tableId)?.name} to ${session.customerName}`);
     syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'occupied', session: updatedSession }, `Table assigned`).then(runCloudBackup).catch(()=>{});
-    supabase.from('tables').update({ status: 'occupied', sessionData: JSON.stringify(updatedSession), isActive: 1 }).eq('id', tableId).then();
+    publicSupabase.from('tables').update({ status: 'occupied', sessionData: JSON.stringify(updatedSession), isActive: 1 }).eq('id', tableId).then();
   };
 
   const freeTable = (tableId: string) => {
     setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'available', session: undefined, maintenanceReason: undefined } : t));
     addActivity('table_freed', `Freed ${tables.find(t=>t.id===tableId)?.name}`);
     syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'available', session: null }, `Table freed`).then(runCloudBackup).catch(()=>{});
-    supabase.from('tables').update({ status: 'available', sessionData: null, maintenanceReason: null, isActive: 1 }).eq('id', tableId).then();
+    publicSupabase.from('tables').update({ status: 'available', sessionData: null, maintenanceReason: null, isActive: 1 }).eq('id', tableId).then();
   };
 
   const extendSession = (tableId: string, mins: number, pay: number) => {
@@ -865,7 +865,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (t.id === tableId && t.session) {
         const updatedSession = { ...t.session, durationMinutes: (t.session.durationMinutes||0) + mins, amountPaid: t.session.amountPaid + pay };
         syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'occupied', session: updatedSession }, `Table extended`).then(runCloudBackup).catch(()=>{});
-        supabase.from('tables').update({ status: 'occupied', sessionData: JSON.stringify(updatedSession), isActive: 1 }).eq('id', tableId).then();
+        publicSupabase.from('tables').update({ status: 'occupied', sessionData: JSON.stringify(updatedSession), isActive: 1 }).eq('id', tableId).then();
         return { ...t, session: updatedSession };
       }
       return t;
@@ -892,10 +892,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
 
       syncToDB(`/api/tables/${fromTableId}`, 'PUT', { status: 'available', session: null }, `Freed for migration`).then(runCloudBackup).catch(()=>{});
-      supabase.from('tables').update({ status: 'available', sessionData: null, sessiondata: null, isActive: 1 }).eq('id', fromTableId).then();
+      publicSupabase.from('tables').update({ status: 'available', sessionData: null, sessiondata: null, isActive: 1 }).eq('id', fromTableId).then();
 
       syncToDB(`/api/tables/${toTableId}`, 'PUT', { status: 'occupied', session: sessionToMove }, `Occupied from migration`).then(runCloudBackup).catch(()=>{});
-      supabase.from('tables').update({ status: 'occupied', sessionData: JSON.stringify(sessionToMove), sessiondata: JSON.stringify(sessionToMove), isActive: 1 }).eq('id', toTableId).then();
+      publicSupabase.from('tables').update({ status: 'occupied', sessionData: JSON.stringify(sessionToMove), sessiondata: JSON.stringify(sessionToMove), isActive: 1 }).eq('id', toTableId).then();
 
       addActivity('admin_action', `Migrated session (${sessionToMove.customerName}) from ${fromTable.name} to ${toTable.name}`);
       return newTables;
@@ -905,21 +905,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const reserveTable = (tableId: string) => {
     setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'reserved' } : t));
     addActivity('table_reserved', `Reserved ${tables.find(t=>t.id===tableId)?.name}`);
-    supabase.from('tables').update({ status: 'reserved', isActive: 1 }).eq('id', tableId).then();
+    publicSupabase.from('tables').update({ status: 'reserved', isActive: 1 }).eq('id', tableId).then();
   };
   
   const setTableMaintenance = (tableId: string, reason: string) => {
     setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'maintenance', maintenanceReason: reason } : t));
     syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'maintenance', maintenanceReason: reason }, `Table maintenance set`).then(runCloudBackup).catch(()=>{});
     addActivity('admin_action', `Set ${tables.find(t=>t.id===tableId)?.name} to maintenance: ${reason}`);
-    supabase.from('tables').update({ status: 'maintenance', maintenanceReason: reason, isActive: 1 }).eq('id', tableId).then();
+    publicSupabase.from('tables').update({ status: 'maintenance', maintenanceReason: reason, isActive: 1 }).eq('id', tableId).then();
   };
 
   const setTableEvent = (tableId: string, eventName: string) => {
     setTables(prev => prev.map(t => t.id === tableId ? { ...t, status: 'event', maintenanceReason: eventName } : t));
     syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'event', maintenanceReason: eventName }, `Table marked for event`).then(runCloudBackup).catch(()=>{});
     addActivity('admin_action', `Reserved ${tables.find(t=>t.id===tableId)?.name} for event: ${eventName}`);
-    supabase.from('tables').update({ status: 'event', maintenanceReason: eventName, isActive: 1 }).eq('id', tableId).then();
+    publicSupabase.from('tables').update({ status: 'event', maintenanceReason: eventName, isActive: 1 }).eq('id', tableId).then();
   };
 
   const submitTableOrders = (tableId: string, cart: SessionOrder[]) => {
@@ -929,7 +929,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (cartItem) {
         const newStock = inv.stock - cartItem.qty;
         syncToDB(`/api/inventory/${inv.id}`, 'PUT', { stock: newStock }, `Stock updated`).then(runCloudBackup).catch(()=>{});
-        supabase.from('inventory').update({ stock: newStock }).eq('id', inv.id).then();
+        publicSupabase.from('inventory').update({ stock: newStock }).eq('id', inv.id).then();
         return { ...inv, stock: newStock };
       }
       return inv;
@@ -949,7 +949,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }));
     if (updatedTableSession) {
       syncToDB(`/api/tables/${tableId}`, 'PUT', { session: updatedTableSession }, `Orders updated`).then(runCloudBackup).catch(()=>{});
-      supabase.from('tables').update({ sessionData: JSON.stringify(updatedTableSession) }).eq('id', tableId).then();
+      publicSupabase.from('tables').update({ sessionData: JSON.stringify(updatedTableSession) }).eq('id', tableId).then();
     }
     addActivity('pos_order', `Confirmed ${cart.length} new items for ${tables.find(t=>t.id===tableId)?.name}`);
   };
@@ -960,7 +960,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (inv.id === order.id) {
         const newStock = inv.stock + order.qty;
         syncToDB(`/api/inventory/${inv.id}`, 'PUT', { stock: newStock }, `Stock restored`).then(runCloudBackup).catch(()=>{});
-        supabase.from('inventory').update({ stock: newStock }).eq('id', inv.id).then();
+        publicSupabase.from('inventory').update({ stock: newStock }).eq('id', inv.id).then();
         return { ...inv, stock: newStock };
       }
       return inv;
@@ -976,7 +976,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }));
     if (updatedTableSession) {
       syncToDB(`/api/tables/${tableId}`, 'PUT', { session: updatedTableSession }, `Order voided`).then(runCloudBackup).catch(()=>{});
-      supabase.from('tables').update({ sessionData: JSON.stringify(updatedTableSession) }).eq('id', tableId).then();
+      publicSupabase.from('tables').update({ sessionData: JSON.stringify(updatedTableSession) }).eq('id', tableId).then();
     }
     addActivity('admin_action', `Voided ${order.name} (x${order.qty}) from ${tables.find(t=>t.id===tableId)?.name}`);
   };
@@ -987,7 +987,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const newItem = { ...i, id: `q${Date.now()}`, arrivalTime: new Date(), status: 'waiting' as const, queueNumber: nextNum };
       addActivity('queue_added', `Added ${i.customerName} to queue position #${nextNum}`);
       syncToDB('/api/queue', 'POST', newItem, `Queue item added`).then(runCloudBackup).catch(()=>{});
-      supabase.from('queue').insert([{ ...newItem, arrivalTime: newItem.arrivalTime.toISOString() }]).then();
+      publicSupabase.from('queue').insert([{ ...newItem, arrivalTime: newItem.arrivalTime.toISOString() }]).then();
       return [...prev, newItem];
     });
   };
@@ -996,14 +996,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setQueue(prev => prev.filter(q => q.id !== id));
     syncToDB(`/api/queue/${id}`, 'DELETE', {}, `Queue item removed`).then(runCloudBackup).catch(()=>{});
     addActivity('queue_removed', `Removed ID: ${id} from queue`);
-    supabase.from('queue').delete().eq('id', id).then();
+    publicSupabase.from('queue').delete().eq('id', id).then();
   };
 
   const callQueueItem = (id: string) => {
     setQueue(prev => prev.map(q => q.id === id ? { ...q, status: 'called' } : q));
     addActivity('queue_called', `Called customer ID: ${id} from queue to available table`);
     syncToDB(`/api/queue/${id}`, 'PUT', { status: 'called' }, `Queue item called`).then(runCloudBackup).catch(()=>{});
-    supabase.from('queue').update({ status: 'called' }).eq('id', id).then();
+    publicSupabase.from('queue').update({ status: 'called' }).eq('id', id).then();
   };
 
   const addLostItem = (i: Omit<LostItem, 'id'>) => {
@@ -1044,7 +1044,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const startTimeStr = newItem.startTime ? new Date(newItem.startTime).toISOString() : new Date().toISOString();
     const endTimeStr = newItem.endTime ? new Date(newItem.endTime).toISOString() : new Date().toISOString();
 
-    supabase.from('session_history').insert([{
+    publicSupabase.from('session_history').insert([{
       ...newItem, 
       startTime: startTimeStr, 
       endTime: endTimeStr,
@@ -1277,7 +1277,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       createdAt: newRes.createdAt.toISOString()
     };
     
-    supabase.from('reservations').insert([supabasePayload]).then(({ error }) => {
+    publicSupabase.from('reservations').insert([supabasePayload]).then(({ error }) => {
       if (error) console.error("Supabase insert error:", error);
     });
     
@@ -1287,14 +1287,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const updateReservationStatus = (id: string, status: ReservationStatus) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, status } : r));
     syncToDB(`/api/reservations/${id}`, 'PUT', { status }, `Reservation status updated`).then(runCloudBackup).catch(()=>{});
-    supabase.from('reservations').update({ status }).eq('id', id).then();
+    publicSupabase.from('reservations').update({ status }).eq('id', id).then();
     addActivity('reservation_updated', `Reservation ${id} status updated to ${status}`); 
   };
 
   const cancelReservation = (id: string, reason: string) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, status: 'cancelled', cancellationReason: reason } : r));
     syncToDB(`/api/reservations/${id}`, 'PUT', { status: 'cancelled', cancellationReason: reason }, `Reservation cancelled`).then(runCloudBackup).catch(()=>{});
-    supabase.from('reservations').update({ 
+    publicSupabase.from('reservations').update({ 
       status: 'cancelled', 
       cancellation_reason: reason,
       cancellationreason: reason
@@ -1307,14 +1307,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const updateDownPayment = (id: string, paid: boolean) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, downPaymentPaid: paid } : r));
     syncToDB(`/api/reservations/${id}`, 'PUT', { downPaymentPaid: paid }, `Down payment updated`).then(runCloudBackup).catch(()=>{});
-    supabase.from('reservations').update({ downPaymentPaid: paid ? 1 : 0 }).eq('id', id).then();
+    publicSupabase.from('reservations').update({ downPaymentPaid: paid ? 1 : 0 }).eq('id', id).then();
     if (paid) addActivity('payment_received', `Down payment recorded for reservation ${id}`); 
   };
 
   const updateBalance = (id: string, paid: boolean) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, balancePaid: paid } : r));
     syncToDB(`/api/reservations/${id}`, 'PUT', { balancePaid: paid }, `Balance updated`).then(runCloudBackup).catch(()=>{});
-    supabase.from('reservations').update({ balancePaid: paid ? 1 : 0 }).eq('id', id).then();
+    publicSupabase.from('reservations').update({ balancePaid: paid ? 1 : 0 }).eq('id', id).then();
     if (paid) addActivity('payment_received', `Remaining balance settled for reservation ${id}`); 
   };
 
@@ -1322,14 +1322,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, refundStatus: refundStatus as any, refundMethod: method as any, refundNotes: notes } as Reservation : r));
     const payload = { refundStatus, refundMethod: method, refundNotes: notes };
     syncToDB(`/api/reservations/${id}`, 'PUT', payload, `Refund status updated`).then(runCloudBackup).catch(()=>{});
-    supabase.from('reservations').update({ refundStatus: refundStatus, refundMethod: method, refundNotes: notes }).eq('id', id).then();
+    publicSupabase.from('reservations').update({ refundStatus: refundStatus, refundMethod: method, refundNotes: notes }).eq('id', id).then();
     addActivity('reservation_updated', `Refund for ${id} marked as ${refundStatus}`); 
   };
 
   const acknowledgeRefund = (id: string) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, refundStatus: 'acknowledged' } as Reservation : r));
     syncToDB(`/api/reservations/${id}`, 'PUT', { refundStatus: 'acknowledged' }, `Refund acknowledged`).then(runCloudBackup).catch(()=>{});
-    supabase.from('reservations').update({ refundStatus: 'acknowledged' }).eq('id', id).then();
+    publicSupabase.from('reservations').update({ refundStatus: 'acknowledged' }).eq('id', id).then();
   };
 
   const updateReservation = (id: string, u: Partial<Reservation>) => {
@@ -1350,7 +1350,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (u.downPaymentPaid !== undefined) dbUpdates.downPaymentPaid = u.downPaymentPaid ? 1 : 0;
     if (u.balancePaid !== undefined) dbUpdates.balancePaid = u.balancePaid ? 1 : 0;
     
-    supabase.from('reservations').update(dbUpdates).eq('id', id).then(({error}) => {
+    publicSupabase.from('reservations').update(dbUpdates).eq('id', id).then(({error}) => {
       if (error) console.error("Supabase Reschedule/Void Error:", error);
     });
     addActivity('reservation_updated', `Reservation ${id} details were updated`);
@@ -1361,12 +1361,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setFeedback(prev => [newFeedback as Feedback, ...prev]);
     syncToDB('/api/feedback', 'POST', newFeedback, "New customer feedback").then(runCloudBackup).catch(()=>{});
     const { rating, ...supabasePayload } = newFeedback;
-    supabase.from('feedback').insert([supabasePayload]).then();
+    publicSupabase.from('feedback').insert([supabasePayload]).then();
   };
   const resolveFeedback = (id: string, notes: string) => {
     setFeedback(prev => prev.map(f => f.id === id ? { ...f, status: 'resolved', notes } : f));
     syncToDB(`/api/feedback/${id}`, 'PUT', { status: 'resolved', notes }, `Feedback resolved`).then(runCloudBackup).catch(()=>{});
-    supabase.from('feedback').update({ status: 'resolved', notes }).eq('id', id).then();
+    publicSupabase.from('feedback').update({ status: 'resolved', notes }).eq('id', id).then();
     addActivity('admin_action', `Resolved feedback message from ID: ${id}`);
   };
 
@@ -1388,7 +1388,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       start_date: i.startDate ? new Date(i.startDate).toISOString() : null,
       expires_at: i.expiresAt ? new Date(i.expiresAt).toISOString() : null
     };
-    supabase.from('promo_codes').insert([supabasePayload]).then();
+    publicSupabase.from('promo_codes').insert([supabasePayload]).then();
 
     addActivity('admin_action', `Generated promo code: ${i.code}`);
     return id;
@@ -1408,7 +1408,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (u.startDate !== undefined) supabasePayload.start_date = u.startDate ? new Date(u.startDate).toISOString() : null;
     if (u.expiresAt !== undefined) supabasePayload.expires_at = u.expiresAt ? new Date(u.expiresAt).toISOString() : null;
     if (Object.keys(supabasePayload).length > 0) {
-      supabase.from('promo_codes').update(supabasePayload).eq('id', id).then();
+      publicSupabase.from('promo_codes').update(supabasePayload).eq('id', id).then();
     }
 
     addActivity('admin_action', `Updated promo code ID: ${id}`);
@@ -1419,7 +1419,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setPromoCodes(prev => prev.map(p => p.id === id ? { ...p, isActive: !p.isActive } : p));
     if (target) {
       syncToDB(`/api/promo-codes/${id}`, 'PUT', { isActive: !target.isActive }, 'Toggled promo').then(runCloudBackup).catch(()=>{});
-      supabase.from('promo_codes').update({ is_active: !target.isActive ? 1 : 0 }).eq('id', id).then();
+      publicSupabase.from('promo_codes').update({ is_active: !target.isActive ? 1 : 0 }).eq('id', id).then();
     }
     addActivity('admin_action', `Toggled visibility for promo ID: ${id}`);
   };
@@ -1427,7 +1427,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const deletePromoCode = (id: string) => {
     setPromoCodes(prev => prev.filter(p => p.id !== id));
     syncToDB(`/api/promo-codes/${id}`, 'DELETE', {}, 'Deleted promo').then(runCloudBackup).catch(()=>{});
-    supabase.from('promo_codes').delete().eq('id', id).then();
+    publicSupabase.from('promo_codes').delete().eq('id', id).then();
     addActivity('admin_action', `Deleted promo code ID: ${id}`);
   };
   
@@ -1491,7 +1491,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         key_name: k,
         setting_value: String(v ?? '')
       }));
-      await supabase.from('system_settings').upsert(rows, { onConflict: 'key_name' });
+      await publicSupabase.from('system_settings').upsert(rows, { onConflict: 'key_name' });
     } catch (e) {
       console.warn("Direct Supabase rates sync note:", e);
     }
@@ -1514,7 +1514,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         key_name: k,
         setting_value: String(v ?? '')
       }));
-      await supabase.from('system_settings').upsert(rows, { onConflict: 'key_name' });
+      await publicSupabase.from('system_settings').upsert(rows, { onConflict: 'key_name' });
     } catch (e) {
       console.warn("Direct Supabase terms sync note:", e);
     }
@@ -1602,20 +1602,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
         keyname: k,
         settingvalue: typeof v === 'object' ? JSON.stringify(v) : String(v ?? '')
       }));
-      const { error: cmsErr } = await supabase.from('cms').upsert(cmsRows, { onConflict: 'keyname' });
+      const { error: cmsErr } = await publicSupabase.from('cms').upsert(cmsRows, { onConflict: 'keyname' });
       if (cmsErr) {
         const altRows = Object.entries(newConfig).map(([k, v]) => ({
           key_name: k,
           setting_value: typeof v === 'object' ? JSON.stringify(v) : String(v ?? '')
         }));
-        await supabase.from('cms').upsert(altRows, { onConflict: 'key_name' });
+        await publicSupabase.from('cms').upsert(altRows, { onConflict: 'key_name' });
       }
       // Dual-sync to system_settings for total redundancy
       const settingsRows = Object.entries(newConfig).map(([k, v]) => ({
         key_name: k,
         setting_value: typeof v === 'object' ? JSON.stringify(v) : String(v ?? '')
       }));
-      await supabase.from('system_settings').upsert(settingsRows, { onConflict: 'key_name' });
+      await publicSupabase.from('system_settings').upsert(settingsRows, { onConflict: 'key_name' });
     } catch (e) {
       console.warn("Direct Supabase CMS sync note:", e);
     }

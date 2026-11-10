@@ -133,7 +133,7 @@ export function HomePage() {
     sessionHistory, queue
   } = useAppContext() as any;
 
-  const [activeUser, setActiveUser] = useState<{ name: string; email: string; } | null>(null);
+  const [activeUser, setActiveUser] = useState<{ name: string; email: string; phone?: string; } | null>(null);
 
   const [dynamicWaitTime, setDynamicWaitTime] = useState<string>('Calculating...');
 
@@ -188,7 +188,8 @@ export function HomePage() {
       if (session?.user) {
         setActiveUser({ 
           name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || 'User', 
-          email: session.user.email || '' 
+          email: session.user.email || '',
+          phone: session.user.user_metadata?.phone || ''
         });
       }
     });
@@ -197,7 +198,8 @@ export function HomePage() {
       if (session?.user) {
         setActiveUser({ 
           name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || 'User', 
-          email: session.user.email || '' 
+          email: session.user.email || '',
+          phone: session.user.user_metadata?.phone || ''
         });
       } else {
         setActiveUser(null);
@@ -495,6 +497,7 @@ export function HomePage() {
     if (!checkRateLimit('register', 3, 10)) return setToastMsg({title:"Rate Limit Exceeded", desc:"Please wait before trying again.", type:"error"});
     if (!registerForm.name || !registerForm.email || !registerForm.phone || !registerForm.password) return setRegisterForm(f => ({ ...f, error: 'Please fill all required fields.' }));
     if (registerForm.password !== registerForm.confirm) return setRegisterForm(f => ({ ...f, error: 'Passwords do not match.' }));
+    if (registerForm.phone.replace(/\D/g, '').length !== 11) return setRegisterForm(f => ({ ...f, error: 'Please enter an 11-digit mobile number (e.g. 09171234567).' }));
     if (registerForm.password.length < 8) return setRegisterForm(f => ({ ...f, error: 'Password must be at least 8 characters long.' }));
     
     setRegisterForm(f => ({ ...f, loading: true, error: '' }));
@@ -813,6 +816,10 @@ export function HomePage() {
   const handleReservationSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!resForm.name || !resForm.phone || !selectedDate || !selectedTableId || !resForm.timeSlot || timeValidation !== 'valid') return;
+    if (resForm.phone.replace(/\D/g, '').length !== 11) {
+      setToastMsg({ title: 'Invalid Phone Number', desc: 'Please enter an 11-digit mobile number (e.g. 09171234567).', type: 'error' });
+      return;
+    }
     
     if (resForm.pax < minAllowedPartySize || resForm.pax > maxAllowedPartySize) {
       alert(`Party size must be between ${minAllowedPartySize} and ${maxAllowedPartySize} guests for the selected date.`);
@@ -936,7 +943,7 @@ export function HomePage() {
       }).catch(() => {});
 
       // 2. Sync to Supabase
-      await supabase.from('reservations').update({ 
+      await publicSupabase.from('reservations').update({ 
         status: 'pending-refund',
         cancellation_reason: 'Customer requested cancellation & refund',
         cancellationreason: 'Customer requested cancellation & refund'
@@ -976,7 +983,7 @@ export function HomePage() {
     const newDateStr = rescheduleData.newDate.toISOString();
     
     try {
-      const { error } = await supabase.from('reservations').update({ 
+      const { error } = await publicSupabase.from('reservations').update({ 
         date: newDateStr, 
         timeSlot: rescheduleData.timeSlot, 
         rescheduleCount: (rescheduleData.reservation.rescheduleCount || 0) + 1 
@@ -1016,6 +1023,10 @@ export function HomePage() {
   const handleFeedbackSubmit = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!feedbackForm.name || !feedbackForm.contact || !feedbackForm.type || !feedbackForm.message) return;
+    if (feedbackForm.contact.replace(/\D/g, '').length !== 11) {
+      setToastMsg({ title: 'Invalid Phone Number', desc: 'Please enter an 11-digit mobile number (e.g. 09171234567).', type: 'error' });
+      return;
+    }
     addFeedback({ 
       customerName: feedbackForm.name, 
       contactInfo: feedbackForm.contact, 
@@ -1062,7 +1073,7 @@ export function HomePage() {
     }
   };
 
-  const publicEvents = events?.filter((e: any) => e.type !== 'Holiday') || [];
+  const publicEvents = events?.filter((e: any) => e.type !== 'Holiday' && !e.isCancelled) || [];
   const upcomingEvents = publicEvents.filter((e: any) => {
     const dates = e.date ? e.date.split(',') : [];
     const sortedDates = [...dates].sort((a,b) => new Date(a).getTime() - new Date(b).getTime());
@@ -1455,7 +1466,7 @@ export function HomePage() {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
                         <label className="block text-xs text-neutral-400 mb-1.5">Contact Number <span className="text-rose-500">*</span></label>
-                        <input type="tel" inputMode="numeric" maxLength={9} value={feedbackForm.contact} onChange={e => setFeedbackForm(f => ({ ...f, contact: e.target.value.replace(/\D/g, '').slice(0, 9) }))} placeholder="9XXXXXXXX (9 digits)" required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500 outline-none" />
+                        <input type="tel" inputMode="numeric" maxLength={11} value={feedbackForm.contact} onChange={e => setFeedbackForm(f => ({ ...f, contact: e.target.value.replace(/\D/g, '').slice(0, 11) }))} placeholder="09XXXXXXXXX (11 digits)" required className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus:border-sky-500 outline-none" />
                       </div>
                       <div>
                         <label className="block text-xs text-neutral-400 mb-1.5">Reservation ID <span className="text-neutral-600">(Optional)</span></label>
@@ -1580,7 +1591,7 @@ export function HomePage() {
                       </div>
 
                       {/* STEP 2: ALL-IN-ONE TABLE BOARD */}
-                      <div className={`bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden shadow-xl flex flex-col ${isTableSelectorExpanded ? 'flex-1' : 'shrink-0'}`}>
+                      <div className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden shadow-xl shrink-0">
                         <div 
                           onClick={() => setIsTableSelectorExpanded(!isTableSelectorExpanded)}
                           className="bg-neutral-950 px-5 py-4 flex items-center justify-between border-b border-neutral-800/80 shrink-0 cursor-pointer hover:bg-neutral-900/80"
@@ -1603,7 +1614,7 @@ export function HomePage() {
 
                         <AnimatePresence>
                           {isTableSelectorExpanded && (
-                            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="p-5 bg-neutral-950/30 flex-1 overflow-y-auto hide-scrollbar">
+                            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="p-3 bg-neutral-950/30 overflow-y-auto hide-scrollbar">
                               
                               {!selectedDate && (
                                 <div className="mb-3.5 p-2.5 rounded-xl bg-emerald-950/30 border border-emerald-500/20 text-emerald-300 text-xs flex items-center gap-2">
@@ -1621,7 +1632,7 @@ export function HomePage() {
                                 </div>
                               </div>
 
-                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                              <div className="grid grid-cols-3 gap-3">
                                 {venueTables.map((table: any) => {
                                   const isSel = selectedTableId === table.id;
                                   const isOcc = table.status === 'occupied';
@@ -1630,6 +1641,7 @@ export function HomePage() {
                                   const checkIsToday = selectedDate ? isToday(selectedDate) : true;
 
                                   const eventForTable = (events || []).find((ev: any) => {
+                                    if (ev.isCancelled) return false;
                                     let evDates: any[] = [];
                                     if (Array.isArray(ev.dates)) evDates = ev.dates;
                                     else if (typeof ev.dates === 'string') {
@@ -1677,7 +1689,7 @@ export function HomePage() {
                                         }
                                         setSelectedTableId(table.id);
                                       }}
-                                      className={`relative p-3 rounded-xl border text-left flex flex-col justify-between transition-all ${
+                                      className={`relative p-4 min-h-[88px] rounded-xl border text-left flex flex-col justify-between transition-all ${
                                         isMaint 
                                           ? 'bg-neutral-900/30 border-neutral-800/40 opacity-40 cursor-not-allowed'
                                           : isEvent
@@ -1687,11 +1699,11 @@ export function HomePage() {
                                           : 'bg-neutral-900/80 border-neutral-800 hover:border-neutral-600'
                                       }`}
                                     >
-                                      <div className="flex justify-between items-center mb-1">
-                                        <span className={`text-xs font-bold ${isEvent ? 'text-purple-300' : isSel ? 'text-emerald-400' : 'text-neutral-200'}`}>{table.name}</span>
+                                      <div className="flex justify-between items-center mb-1.5">
+                                        <span className={`text-sm font-bold truncate ${isEvent ? 'text-purple-300' : isSel ? 'text-emerald-400' : 'text-neutral-200'}`}>{table.name}</span>
                                         <span className={`w-2 h-2 rounded-full ${isMaint ? 'bg-rose-500' : isEvent ? 'bg-purple-400 animate-pulse' : isOcc && checkIsToday ? 'bg-amber-400 animate-pulse' : 'bg-emerald-500'}`} />
                                       </div>
-                                      <p className={`text-[10px] font-semibold truncate ${isEvent ? 'text-purple-400' : 'text-neutral-400'}`}>
+                                      <p className={`text-[11px] font-semibold truncate ${isEvent ? 'text-purple-400' : 'text-neutral-400'}`}>
                                         {isMaint ? 'Unavailable' : isEvent ? 'EVENT (Click to view)' : isOcc && checkIsToday ? 'Playing Now' : 'Available Slot'}
                                       </p>
                                     </button>
@@ -1711,6 +1723,7 @@ export function HomePage() {
                                     const isActiveWalkIn = isToday(checkDate) && targetTable?.status === 'occupied' && targetTable.session?.startTime;
 
                                     const eventForTable = (events || []).find((ev: any) => {
+                                      if (ev.isCancelled) return false;
                                       let evDates: any[] = [];
                                       if (Array.isArray(ev.dates)) evDates = ev.dates;
                                       else if (typeof ev.dates === 'string') {
@@ -1882,10 +1895,10 @@ export function HomePage() {
                                   <input 
                                     type="tel" 
                                     inputMode="numeric" 
-                                    maxLength={9} 
+                                    maxLength={11} 
                                     value={resForm.phone} 
-                                    onChange={e => setResForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 9) }))} 
-                                    placeholder="9XXXXXXXX (9 digits)" 
+                                    onChange={e => setResForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 11) }))} 
+                                    placeholder="09XXXXXXXXX (11 digits)" 
                                     className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-100 outline-none focus:border-emerald-500" 
                                   />
                                 </div>
@@ -2423,12 +2436,26 @@ export function HomePage() {
                           <ImageWithFallback src={getEventImage(event.attachments)} alt={event.title} className="w-full h-full object-cover" />
                         </div>
                       )}
-                      <div className="flex justify-between items-start mb-2">
-                        <span className="text-[10px] bg-emerald-500/20 text-emerald-400 font-bold px-2 py-0.5 rounded">{event.type}</span>
-                        <span className="text-xs font-bold text-neutral-400">{event.date}</span>
+                      <div className="flex justify-between items-start mb-2 gap-2">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-[10px] bg-emerald-500/20 text-emerald-400 font-bold px-2 py-0.5 rounded">{event.type}</span>
+                          {event.slotsFull && (
+                            <span className="text-[10px] bg-rose-950 text-rose-400 border border-rose-800/50 font-bold px-2 py-0.5 rounded uppercase tracking-wider">Slots Full</span>
+                          )}
+                        </div>
+                        <span className="text-xs font-bold text-neutral-400 whitespace-nowrap">{event.date}</span>
                       </div>
-                      <h4 className="text-lg font-bold text-white mb-2">{event.title}</h4>
+                      <h4 className="text-lg font-bold mb-2 text-white">{event.title}</h4>
+                      {event.duration && <p className="text-[11px] text-neutral-500 font-medium mb-2 flex items-center gap-1.5"><Clock size={11} /> {event.duration}</p>}
                       <p className="text-xs text-neutral-400 leading-relaxed">{event.description}</p>
+
+                      {event.registrationLink && (
+                        <div className="mt-4 pt-4 border-t border-neutral-800">
+                          <a href={event.registrationLink} target="_blank" rel="noopener noreferrer" className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors">
+                            <ExternalLink size={13} /> Register via Google Form
+                          </a>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -3079,10 +3106,10 @@ export function HomePage() {
                         <input 
                           type={type} 
                           inputMode={key === 'phone' ? 'numeric' : undefined} 
-                          maxLength={key === 'phone' ? 9 : undefined}
-                          placeholder={key === 'phone' ? '9XXXXXXXX (9 digits)' : undefined}
+                          maxLength={key === 'phone' ? 11 : undefined}
+                          placeholder={key === 'phone' ? '09XXXXXXXXX (11 digits)' : undefined}
                           value={(registerForm as any)[key]} 
-                          onChange={e => setRegisterForm(f => ({ ...f, [key]: key === 'phone' ? e.target.value.replace(/\D/g, '').slice(0, 9) : e.target.value, error: '' }))} 
+                          onChange={e => setRegisterForm(f => ({ ...f, [key]: key === 'phone' ? e.target.value.replace(/\D/g, '').slice(0, 11) : e.target.value, error: '' }))} 
                           className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-sm text-neutral-100 focus:border-emerald-500 outline-none transition-colors" 
                         />
                       </div>
@@ -3226,57 +3253,6 @@ export function HomePage() {
           </motion.div>
         )}
       </AnimatePresence>
-
-      {/* 🟢 FLOATING ONE SHOT LOGO BUTTON WITH THEME & HELP POPUP */}
-      {/* 🟢 FLOATING ACTION BUTTONS */}
-      <div className="fixed bottom-6 right-6 z-40 flex flex-col items-end gap-3">
-        {/* Floating Help & Support Icon Button */}
-        <motion.button
-          type="button"
-          initial={{ scale: 0, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          whileHover={{ scale: 1.06 }}
-          whileTap={{ scale: 0.95 }}
-          onClick={() => setShowHelpModal(true)}
-          title="Help, Policies & Rates"
-          className={`flex items-center gap-2 px-3.5 py-2.5 rounded-full shadow-xl transition-all duration-300 border cursor-pointer ${
-            isLightMode
-              ? 'bg-white border-sky-300 text-sky-700 shadow-sky-500/15 hover:bg-sky-50 ring-1 ring-sky-200'
-              : 'bg-neutral-900 border-sky-500/40 text-sky-400 shadow-black/80 hover:bg-neutral-800 ring-1 ring-sky-500/30'
-          }`}
-        >
-          <HelpCircle size={17} className="text-sky-500 shrink-0" />
-          <span className="text-xs font-bold">Help & Policies</span>
-        </motion.button>
-
-        {/* Floating Direct Theme Toggle */}
-        <motion.button
-          type="button"
-          initial={{ scale: 0, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          whileHover={{ scale: 1.06 }}
-          whileTap={{ scale: 0.95 }}
-          onClick={toggleLightMode}
-          title={isLightMode ? "Switch to Dark Mode" : "Switch to Light Mode"}
-          className={`flex items-center gap-2 px-3.5 py-2.5 rounded-full shadow-2xl transition-all duration-300 border cursor-pointer ${
-            isLightMode
-              ? 'bg-white border-slate-300 text-slate-800 shadow-slate-300/50 hover:bg-slate-50 ring-1 ring-slate-200'
-              : 'bg-neutral-900 border-neutral-700 text-neutral-100 shadow-black/80 hover:bg-neutral-800'
-          }`}
-        >
-          {isLightMode ? (
-            <>
-              <Moon size={16} className="text-emerald-600 shrink-0" />
-              <span className="text-xs font-bold text-slate-800">Dark Mode</span>
-            </>
-          ) : (
-            <>
-              <Sun size={16} className="text-amber-400 shrink-0" />
-              <span className="text-xs font-bold text-neutral-200">Light Mode</span>
-            </>
-          )}
-        </motion.button>
-      </div>
 
       {/* 🟢 CUSTOMER HELP & SUPPORT MODAL */}
       <AnimatePresence>
