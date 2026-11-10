@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase, publicSupabase } from '../utils/supabase';
@@ -213,6 +213,20 @@ export function HomePage() {
 
   const [readAnnouncements, setReadAnnouncements] = useState<string[]>([]);
   const [showAnnouncements, setShowAnnouncements] = useState(false);
+  const notificationsRef = useRef<HTMLDivElement>(null);
+
+  // Dismiss the notifications dropdown when clicking outside of it so the
+  // panel does not block the About Us / Feedback navigation on mobile.
+  useEffect(() => {
+    if (!showAnnouncements) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (notificationsRef.current && !notificationsRef.current.contains(e.target as Node)) {
+        setShowAnnouncements(false);
+      }
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    return () => document.removeEventListener('mousedown', onPointerDown);
+  }, [showAnnouncements]);
   const [isFirstTime, setIsFirstTime] = useState(false);
   const [closureAlert, setClosureAlert] = useState<{ date: Date, reason: string } | null>(null);
   
@@ -414,13 +428,52 @@ export function HomePage() {
       }) 
     : [];
 
-  const resNotifications = userReservations.map((r: any) => ({
-    id: `notif_${r.id}_${r.status}`,
-    type: 'Reservation Update',
-    title: `Booking ${r.status.toUpperCase()}`,
-    content: `Your reservation for ${format(new Date(r.date), 'MMM d, yyyy')} is currently marked as ${r.status}.`,
-    createdAt: r.createdAt
-  }));
+  const fmt12 = (tOrMins: string | number) => {
+    try {
+      let mins: number;
+      if (typeof tOrMins === 'number') mins = tOrMins;
+      else {
+        const [hh = '0', mm = '0'] = (tOrMins || '').split(':');
+        mins = Number(hh) * 60 + Number(mm || 0);
+      }
+      const m = ((mins % (24 * 60)) + (24 * 60)) % (24 * 60);
+      let hh = Math.floor(m / 60);
+      const mm = m % 60;
+      const period = hh >= 12 ? 'PM' : 'AM';
+      hh = hh % 12;
+      if (hh === 0) hh = 12;
+      return `${hh}:${String(mm).padStart(2, '0')} ${period}`;
+    } catch (e) { return String(tOrMins); }
+  };
+
+  const resNotifications = userReservations
+    .filter((r: any) => r.status !== 'cancelled')
+    .map((r: any) => ({
+      id: `notif_${r.id}_${r.status}`,
+      type: 'Reservation Update',
+      title: `Booking ${r.status.toUpperCase()}`,
+      content: `Your reservation for ${format(new Date(r.date), 'MMM d, yyyy')} is currently marked as ${r.status}.`,
+      createdAt: r.createdAt
+    }));
+
+  // A cancellation the customer requested is distinct from a denied reschedule:
+  // both used to fall under the generic "Booking CANCELLED" notice.
+  const cancellationNotifications = userReservations
+    .filter((r: any) => r.status === 'cancelled')
+    .map((r: any) => {
+      const reason = typeof r.cancellationReason === 'string' ? r.cancellationReason : '';
+      const isRefund = r.status === 'pending-refund' || reason.toLowerCase().includes('refund');
+      const cleanReason = reason && !reason.startsWith('__RESCHEDULE_REQUEST__') && !reason.startsWith('Rescheduled:')
+        ? reason
+        : '';
+      return {
+        id: `cancel_${r.id}`,
+        type: 'Reservation Cancelled',
+        title: isRefund ? 'Cancellation & Refund' : 'Reservation Cancelled',
+        content: `Your reservation for ${format(new Date(r.date), 'MMM d, yyyy')} has been cancelled.${cleanReason ? ` Reason: ${cleanReason}` : ''}${isRefund ? ' Any applicable refund is being processed.' : ''}`,
+        createdAt: r.createdAt
+      };
+    });
 
   const refundNotifications = userReservations.filter((r: any) => r.status === 'pending-refund').map((r: any) => ({
     id: `refund_${r.id}`,
@@ -432,7 +485,7 @@ export function HomePage() {
 
   // Staff decisions on customer reschedule requests are carried on the reservation's
   // cancellation reason (see executeReschedule). Surface them as notifications.
-  const parseRescheduleDecision = (raw: any): { decision?: string; reason?: string } | null => {
+  const parseRescheduleDecision = (raw: any): { decision?: string; reason?: string; requestedDate?: string; requestedTime?: string } | null => {
     if (typeof raw !== 'string') return null;
     if (raw.startsWith('__RESCHEDULE_REQUEST__')) {
       try { return JSON.parse(raw.slice('__RESCHEDULE_REQUEST__'.length)); } catch { return null; }
@@ -448,19 +501,23 @@ export function HomePage() {
       // keep the raw payload (no `decision`) and should not notify the customer yet.
       if (!decision || (decision.decision !== 'approved' && decision.decision !== 'rejected')) return null;
       const isDeclined = decision.decision === 'rejected';
+      const requestedDate = decision.requestedDate ? new Date(decision.requestedDate) : null;
+      const requestedSchedule = requestedDate && !isNaN(requestedDate.getTime())
+        ? ` (requested ${format(requestedDate, 'MMM d, yyyy')}${decision.requestedTime ? ` at ${fmt12(decision.requestedTime)}` : ''})`
+        : '';
       return {
         id: `resched_${r.id}_${decision.decision || 'info'}`,
         type: 'Reschedule Request',
-        title: isDeclined ? 'Reschedule Declined' : 'Reschedule Approved',
+        title: isDeclined ? 'Reschedule Request Declined' : 'Reschedule Approved',
         content: isDeclined
-          ? `Your reschedule request for booking ${r.id.toUpperCase()} was declined. Your original schedule is retained.${decision.reason ? ` Note: ${decision.reason}` : ''}`
+          ? `Your reschedule request for booking ${r.id.toUpperCase()}${requestedSchedule} was rejected. Your original schedule on ${format(new Date(r.date), 'MMM d, yyyy')} at ${fmt12(r.timeSlot)} is retained.${decision.reason ? ` Reason: ${decision.reason}` : ''}`
           : `Your booking ${r.id.toUpperCase()} has been rescheduled to ${format(new Date(r.date), 'MMM d, yyyy')} at ${r.timeSlot}.${decision.reason ? ` Note: ${decision.reason}` : ''}`,
         createdAt: r.createdAt
       };
     })
     .filter(Boolean) as any[];
 
-  const allNotifications = [...activeAnnouncements, ...resNotifications, ...refundNotifications, ...rescheduleNotifications].sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  const allNotifications = [...activeAnnouncements, ...resNotifications, ...cancellationNotifications, ...refundNotifications, ...rescheduleNotifications].sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   
   const unreadNotifications = allNotifications.filter((n: any) => !readAnnouncements.includes(n.id));
   const hasUnread = isFirstTime || unreadNotifications.length > 0;
@@ -621,39 +678,31 @@ export function HomePage() {
     }
   };
 
+  const scrollToElementWhenReady = (elementId: string, navOffset = 150, attempt = 0) => {
+    const el = document.getElementById(elementId);
+    if (el) {
+      const elementPosition = el.getBoundingClientRect().top;
+      const offsetPosition = elementPosition + window.pageYOffset - navOffset;
+      window.scrollTo({ top: Math.max(0, offsetPosition), behavior: 'smooth' });
+      return;
+    }
+    // The Home/About/Feedback block is unmounted while on other tabs and only
+    // re-renders after AnimatePresence finishes the exit animation, so poll for
+    // the anchor instead of scrolling on a fixed timeout.
+    if (attempt < 90) requestAnimationFrame(() => scrollToElementWhenReady(elementId, navOffset, attempt + 1));
+  };
+
   const handleNavClick = (sectionId: string) => {
     if (sectionId === 'about') {
       setActiveSection('about');
       setAboutSubTab('about');
-      setTimeout(() => {
-        const el = document.getElementById('home-about-section') || document.getElementById('about-passion-section');
-        if (el) {
-          const navOffset = 150;
-          const elementPosition = el.getBoundingClientRect().top;
-          const offsetPosition = elementPosition + window.pageYOffset - navOffset;
-          window.scrollTo({
-            top: Math.max(0, offsetPosition),
-            behavior: 'smooth'
-          });
-        }
-      }, 60);
+      scrollToElementWhenReady('home-about-section');
       return;
     }
     if (sectionId === 'feedback') {
       setActiveSection('feedback');
       setAboutSubTab('feedback');
-      setTimeout(() => {
-        const el = document.getElementById('home-feedback-section');
-        if (el) {
-          const navOffset = 150;
-          const elementPosition = el.getBoundingClientRect().top;
-          const offsetPosition = elementPosition + window.pageYOffset - navOffset;
-          window.scrollTo({
-            top: Math.max(0, offsetPosition),
-            behavior: 'smooth'
-          });
-        }
-      }, 60);
+      scrollToElementWhenReady('home-feedback-section');
       return;
     }
     setActiveSection(sectionId as Section);
@@ -663,24 +712,6 @@ export function HomePage() {
   const handleReportProblem = (reservationId: string) => {
     setFeedbackForm(f => ({ ...f, reservationId, type: 'report' }));
     handleNavClick('feedback');
-  };
-
-  const fmt12 = (tOrMins: string | number) => {
-    try {
-      let mins: number;
-      if (typeof tOrMins === 'number') mins = tOrMins;
-      else {
-        const [hh = '0', mm = '0'] = (tOrMins || '').split(':');
-        mins = Number(hh) * 60 + Number(mm || 0);
-      }
-      const m = ((mins % (24 * 60)) + (24 * 60)) % (24 * 60);
-      let hh = Math.floor(m / 60);
-      const mm = m % 60;
-      const period = hh >= 12 ? 'PM' : 'AM';
-      hh = hh % 12;
-      if (hh === 0) hh = 12;
-      return `${hh}:${String(mm).padStart(2, '0')} ${period}`;
-    } catch (e) { return String(tOrMins); }
   };
 
   const formatEventDuration = (dur: string) => {
@@ -1206,7 +1237,7 @@ export function HomePage() {
           </button>
           
           {/* Notifications */}
-          <div className="relative">
+          <div className="relative" ref={notificationsRef}>
             <button
               onClick={() => setShowAnnouncements(!showAnnouncements)}
               className="relative p-2 text-neutral-400 hover:text-white transition-colors rounded-full hover:bg-neutral-800"
@@ -3468,16 +3499,6 @@ export function HomePage() {
         )}
       </AnimatePresence>
 
-      {/* 🟢 FLOATING REPORT AN ISSUE BUTTON */}
-      <button
-        type="button"
-        onClick={() => { setReportModalResId('GENERAL_INQUIRY'); setReportMessage(''); }}
-        title="Report an Issue"
-        className="fixed bottom-6 left-6 z-40 flex items-center gap-2.5 px-4 py-3 rounded-full font-bold text-xs shadow-2xl transition-all duration-300 backdrop-blur-md border cursor-pointer bg-amber-600/95 text-white border-amber-500/60 hover:bg-amber-500"
-      >
-        <AlertTriangle size={15} />
-        <span className="font-semibold tracking-wide">Report an Issue</span>
-      </button>
     </div>
   );
 }
