@@ -146,12 +146,37 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 const { registerAuthRoutes } = require('./server-auth.cjs');
 const { registerBackupRoutes } = require('./server-backup.cjs');
+const { createEmailService } = require('./server-email.cjs');
 
 // Auth routes own the session/role middleware; backup downloads reuse requireAdmin.
 const registerCoreRoutes = (database) => {
   const auth = registerAuthRoutes(app, database);
   registerBackupRoutes(app, database, { requireAdmin: auth.requireAdmin });
 };
+
+// Customer email notifications share one service instance, created lazily so it
+// always sees the live database handle.
+let emailService = null;
+const getEmailService = (database) => {
+  if (!emailService) emailService = createEmailService(database || db);
+  return emailService;
+};
+
+// Reservation emails read venue details from the CMS so the footer matches the site.
+const loadVenue = (database) => new Promise((resolve) => {
+  if (!database || typeof database.all !== 'function') return resolve({});
+  database.all(`SELECT keyName, settingValue FROM cms`, [], (err, rows) => {
+    if (err || !rows) return resolve({});
+    const cfg = {};
+    rows.forEach((r) => { cfg[r.keyName] = r.settingValue; });
+    resolve({
+      name: cfg.venueName || cfg.name || 'One Shot Bar & Billiards',
+      phone: cfg.phone ? String(cfg.phone).split('|')[0].trim() : '',
+      email: cfg.email || cfg.contactEmail || '',
+      address: cfg.address || '',
+    });
+  });
+});
 
 // ====================================================================
 // 🟢 SQLITE DATABASE INITIALIZATION & AUTO-MIGRATIONS
@@ -228,6 +253,7 @@ if (!sqlite3) {
       db.run(`CREATE TABLE IF NOT EXISTS lost_and_found (id TEXT PRIMARY KEY, itemName TEXT, description TEXT, foundDate DATETIME, status TEXT, image TEXT, claimedBy TEXT, claimedDate DATETIME, isArchived INTEGER DEFAULT 0)`);
       db.run(`CREATE TABLE IF NOT EXISTS watchlist (id TEXT PRIMARY KEY, name TEXT, reason TEXT, description TEXT, status TEXT, evidenceLink TEXT, dateAdded DATETIME, resolvedDate DATETIME, isArchived INTEGER DEFAULT 0)`);
       db.run(`CREATE TABLE IF NOT EXISTS activities (id TEXT PRIMARY KEY, type TEXT, description TEXT, timestamp DATETIME, metadata TEXT)`);
+      db.run(`CREATE TABLE IF NOT EXISTS email_notifications (id INTEGER PRIMARY KEY AUTOINCREMENT, reservationId TEXT, action TEXT, recipient TEXT, status TEXT, detail TEXT, createdAt DATETIME DEFAULT CURRENT_TIMESTAMP)`);
       db.run(`CREATE TABLE IF NOT EXISTS feedback (id TEXT PRIMARY KEY, customerName TEXT, contactInfo TEXT, feedbackType TEXT, comment TEXT, reservationId TEXT, tags TEXT, date DATETIME DEFAULT CURRENT_TIMESTAMP, status TEXT DEFAULT 'pending', notes TEXT)`);
       
       // 🟢 e-RECEIPTS TABLE FOR PAPERLESS CHECKOUTS
@@ -593,6 +619,117 @@ app.get('/api/announcements', (req, res) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json(rows.map(a => ({ ...a, isActive: a.isActive === 1 })));
   });
+});
+
+// ====================================================================
+// 📧 CUSTOMER EMAIL NOTIFICATION ROUTES
+// ====================================================================
+// Settings are stored in systemSettings so an administrator can enable email
+// delivery without editing files. The API key itself is never returned.
+const EMAIL_SETTING_KEYS = ['emailNotificationsEnabled', 'emailProvider', 'emailFromAddress', 'emailFromName',
+  'smtpHost', 'smtpPort', 'smtpSecure', 'smtpUser', 'resendApiKey', 'smtpPass'];
+
+app.get('/api/email/settings', (req, res) => {
+  db.all(`SELECT keyName, settingValue FROM systemSettings WHERE keyName IN (${EMAIL_SETTING_KEYS.map(() => '?').join(',')})`,
+    EMAIL_SETTING_KEYS, (err, rows) => {
+      if (err) return res.status(500).json({ error: err.message });
+      const stored = {};
+      (rows || []).forEach(r => { stored[r.keyName] = r.settingValue; });
+      res.json({
+        emailNotificationsEnabled: stored.emailNotificationsEnabled !== undefined ? stored.emailNotificationsEnabled : 'true',
+        emailProvider: stored.emailProvider || '',
+        emailFromAddress: stored.emailFromAddress || '',
+        emailFromName: stored.emailFromName || '',
+        smtpHost: stored.smtpHost || '',
+        smtpPort: stored.smtpPort || '',
+        smtpSecure: stored.smtpSecure || '',
+        smtpUser: stored.smtpUser || '',
+        // Secrets are reported as booleans only — never echo the value back.
+        hasResendApiKey: cleanEnvStr(stored.resendApiKey) !== '' || cleanEnvStr(process.env.RESEND_API_KEY) !== '',
+        hasSmtpPass: cleanEnvStr(stored.smtpPass) !== '' || cleanEnvStr(process.env.SMTP_PASS) !== '',
+        hasEnvTransport: cleanEnvStr(process.env.RESEND_API_KEY) !== '' || cleanEnvStr(process.env.SMTP_HOST) !== '',
+      });
+    });
+});
+
+app.put('/api/email/settings', (req, res) => {
+  const payload = req.body || {};
+  const allowed = EMAIL_SETTING_KEYS.filter(k => Object.prototype.hasOwnProperty.call(payload, k));
+  if (allowed.length === 0) return res.json({ message: 'No email settings to update' });
+  let index = 0; const errors = [];
+  const next = () => {
+    if (index >= allowed.length) {
+      if (errors.length) return res.status(500).json({ error: 'Some email settings failed to save.', details: errors });
+      return res.json({ message: 'Email settings updated.' });
+    }
+    const key = allowed[index];
+    // An empty secret means "leave the stored key unchanged".
+    const raw = payload[key];
+    if ((key === 'resendApiKey' || key === 'smtpPass') && cleanEnvStr(raw) === '') { index++; return next(); }
+    const value = typeof raw === 'boolean' ? String(raw) : String(raw ?? '');
+    db.run(`INSERT INTO systemSettings (keyName, settingValue) VALUES (?, ?)
+            ON CONFLICT(keyName) DO UPDATE SET settingValue = excluded.settingValue, updatedAt = CURRENT_TIMESTAMP`,
+      [key, value], (err) => {
+        if (err) errors.push({ key, error: err.message });
+        index++; next();
+      });
+  };
+  next();
+});
+
+// Send (or re-send) the notification for a specific reservation action.
+app.post('/api/email/notify-reservation', (req, res) => {
+  const { reservationId, action, force } = req.body || {};
+  if (!reservationId || !action) return res.status(400).json({ error: 'reservationId and action are required.' });
+  db.get(`SELECT * FROM reservations WHERE id = ?`, [reservationId], async (err, row) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!row) return res.status(404).json({ error: 'Reservation not found.' });
+    try {
+      const venue = await loadVenue(db);
+      const result = await getEmailService(db).notifyReservationAction({
+        action, reservation: row, venue, force: !!force,
+        extras: { reason: row.cancellationReason, newDate: row.date, newTimeSlot: row.timeSlot },
+      });
+      res.json(result);
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+});
+
+// Diagnostics: reports which transport is active and lets an admin send a probe.
+app.get('/api/email/status', async (req, res) => {
+  try {
+    const config = await getEmailService(db)._loadConfig(db);
+    res.json({
+      enabled: config.enabled,
+      provider: config.provider || null,
+      fromAddress: config.fromAddress,
+      ready: config.enabled && !!config.provider,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/email/test', async (req, res) => {
+  const to = cleanEnvStr(req.body && req.body.to);
+  if (!to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) return res.status(400).json({ error: 'A valid "to" address is required.' });
+  try {
+    const venue = await loadVenue(db);
+    const result = await getEmailService(db).notifyReservationAction({
+      action: 'confirmed',
+      reservation: {
+        id: 'TEST1234', customerName: 'Test Customer', email: to,
+        date: new Date().toISOString(), timeSlot: '19:00', durationHours: 2,
+        partySize: 4, status: 'confirmed', totalAmount: 500, downPaymentAmount: 100,
+      },
+      venue, force: true,
+    });
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.get('/api/session-history', (req, res) => {
@@ -1081,6 +1218,13 @@ app.post('/api/reservations', (req, res) => {
   [id, customerName, contactNumber, email || null, date, timeSlot, durationHours, partySize, status, totalAmount, downPaymentAmount, downPaymentPaid ? 1 : 0, balancePaid ? 1 : 0, paymentRef || null, receiptImg || null, createdAt], function(err) {
     if (err) return res.status(500).json({ error: err.message });
     res.status(201).json({ message: 'Reservation created successfully', id: id });
+    // Fire-and-forget: notify the customer their booking was received.
+    loadVenue(db).then((venue) => getEmailService(db).notifyReservationChange({
+      prev: null,
+      updates: { ...req.body, createdAt },
+      reservation: { ...req.body, id, createdAt },
+      venue,
+    })).catch((e) => console.error('📧 [Email] create hook error:', e.message));
   });
 });
 
@@ -1367,9 +1511,21 @@ app.put('/api/reservations/:id', (req, res) => {
   });
   values.push(req.params.id);
 
-  db.run(`UPDATE reservations SET ${setClause} WHERE id = ?`, values, function (err) {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json({ message: "Reservation updated." });
+  // Read the stored row first so the email hook can tell exactly what changed.
+  db.get(`SELECT * FROM reservations WHERE id = ?`, [req.params.id], (readErr, prev) => {
+    if (readErr) console.error('⚠️ [Reservations] pre-update read failed:', readErr.message);
+    db.run(`UPDATE reservations SET ${setClause} WHERE id = ?`, values, function (err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ message: "Reservation updated." });
+      if (!prev) return; // Nothing to notify about for an unknown row.
+      const merged = { ...prev, ...updates };
+      loadVenue(db).then((venue) => getEmailService(db).notifyReservationChange({
+        prev,
+        updates,
+        reservation: merged,
+        venue,
+      })).catch((e) => console.error('📧 [Email] update hook error:', e.message));
+    });
   });
 });
 

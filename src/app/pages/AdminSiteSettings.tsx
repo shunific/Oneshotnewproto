@@ -52,6 +52,23 @@ export function AdminSiteSettings() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [activeSlideIdx, setActiveSlideIdx] = useState(0);
 
+  // Email notification settings
+  const [emailForm, setEmailForm] = useState<any>({
+    emailNotificationsEnabled: "true",
+    emailProvider: "",
+    emailFromAddress: "",
+    emailFromName: "",
+    smtpHost: "",
+    smtpPort: "",
+    smtpSecure: "",
+    smtpUser: "",
+    resendApiKey: "",
+    smtpPass: "",
+  });
+  const [emailStatus, setEmailStatus] = useState<{ provider: string | null; ready: boolean; hasResendApiKey?: boolean; hasSmtpPass?: boolean } | null>(null);
+  const [emailTestTo, setEmailTestTo] = useState("");
+  const [emailBusy, setEmailBusy] = useState(false);
+
   const heroInputRef = useRef<HTMLInputElement>(null);
   const aboutInputRef = useRef<HTMLInputElement>(null);
 
@@ -140,6 +157,65 @@ export function AdminSiteSettings() {
     }, 4000);
     return () => clearInterval(interval);
   }, [form.heroImages]);
+
+  // Load email notification settings + transport status
+  const loadEmailSettings = async () => {
+    try {
+      const [settingsRes, statusRes] = await Promise.all([
+        fetch("http://localhost:3001/api/email/settings"),
+        fetch("http://localhost:3001/api/email/status"),
+      ]);
+      if (settingsRes.ok) {
+        const s = await settingsRes.json();
+        setEmailForm((prev: any) => ({ ...prev, ...s, resendApiKey: "", smtpPass: "" }));
+        setEmailStatus((prev: any) => ({ ...(prev || {}), ...s }));
+      }
+      if (statusRes.ok) {
+        const st = await statusRes.json();
+        setEmailStatus((prev: any) => ({ ...(prev || {}), ...st }));
+      }
+    } catch { /* server offline; keep defaults */ }
+  };
+
+  useEffect(() => { loadEmailSettings(); }, []);
+
+  const saveEmailSettings = async () => {
+    setEmailBusy(true);
+    try {
+      const res = await fetch("http://localhost:3001/api/email/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(emailForm),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to save email settings.");
+      flash("Email notification settings saved.", "success");
+      await loadEmailSettings();
+    } catch (err: any) {
+      flash(err.message || "Failed to save email settings.", "error");
+    } finally {
+      setEmailBusy(false);
+    }
+  };
+
+  const sendTestEmail = async () => {
+    if (!emailTestTo.trim()) { flash("Enter an address to send the test email to.", "error"); return; }
+    setEmailBusy(true);
+    try {
+      const res = await fetch("http://localhost:3001/api/email/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: emailTestTo.trim() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data.sent) flash(`Test email sent to ${emailTestTo.trim()}.`, "success");
+      else flash(`Test email not sent (${data.reason || data.error || "unknown reason"}).`, "error");
+    } catch (err: any) {
+      flash(err.message || "Failed to send test email.", "error");
+    } finally {
+      setEmailBusy(false);
+    }
+  };
 
   // Save General Info & Description
   const saveGeneralInfo = async () => {
@@ -1067,6 +1143,165 @@ export function AdminSiteSettings() {
             )}
           </div>
           <input type="file" ref={aboutInputRef} accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, "about")} />
+        </div>
+
+        {/* Customer Email Notifications */}
+        <div className="border-t border-neutral-800/80 pt-6 space-y-4">
+          <div className="flex justify-between items-center">
+            <div>
+              <h3 className="text-xs text-neutral-400 font-semibold uppercase tracking-wider flex items-center gap-2">
+                <Globe size={14} /> Customer Email Notifications
+              </h3>
+              <p className="text-[11px] text-neutral-500 mt-1">
+                Emails the customer automatically on booking received, confirmed, cancelled, rescheduled, checked-in, completed, payments and refunds.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className={`text-[10px] font-bold px-2 py-1 rounded-full border ${
+                emailStatus?.ready
+                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-800"
+                  : "bg-amber-500/10 text-amber-400 border-amber-800"
+              }`}>
+                {emailStatus?.ready ? `ACTIVE · ${emailStatus?.provider}` : "NOT CONFIGURED"}
+              </span>
+              <button
+                type="button"
+                onClick={saveEmailSettings}
+                disabled={emailBusy}
+                className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <Save size={14} /> Save Email Settings
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-[11px] text-neutral-400 font-medium">Notifications</label>
+              <select
+                value={emailForm.emailNotificationsEnabled}
+                onChange={(e) => setEmailForm((f: any) => ({ ...f, emailNotificationsEnabled: e.target.value }))}
+                className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-emerald-600"
+              >
+                <option value="true">Enabled</option>
+                <option value="false">Disabled</option>
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[11px] text-neutral-400 font-medium">Transport</label>
+              <select
+                value={emailForm.emailProvider}
+                onChange={(e) => setEmailForm((f: any) => ({ ...f, emailProvider: e.target.value }))}
+                className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-emerald-600"
+              >
+                <option value="">Auto-detect (env or filled-in)</option>
+                <option value="resend">Resend API</option>
+                <option value="smtp">SMTP server</option>
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[11px] text-neutral-400 font-medium">From address</label>
+              <input
+                type="email"
+                value={emailForm.emailFromAddress}
+                onChange={(e) => setEmailForm((f: any) => ({ ...f, emailFromAddress: e.target.value }))}
+                placeholder="notifications@yourdomain.com"
+                className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-emerald-600"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[11px] text-neutral-400 font-medium">From name</label>
+              <input
+                type="text"
+                value={emailForm.emailFromName}
+                onChange={(e) => setEmailForm((f: any) => ({ ...f, emailFromName: e.target.value }))}
+                placeholder="One Shot Bar & Billiards"
+                className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-emerald-600"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[11px] text-neutral-400 font-medium flex items-center gap-2">
+                Resend API key
+                {emailStatus?.hasResendApiKey && <span className="text-[9px] text-emerald-500 font-bold">SAVED</span>}
+              </label>
+              <input
+                type="password"
+                value={emailForm.resendApiKey}
+                onChange={(e) => setEmailForm((f: any) => ({ ...f, resendApiKey: e.target.value }))}
+                placeholder={emailStatus?.hasResendApiKey ? "•••••• (leave blank to keep)" : "re_..."}
+                className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-emerald-600"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[11px] text-neutral-400 font-medium flex items-center gap-2">
+                SMTP password
+                {emailStatus?.hasSmtpPass && <span className="text-[9px] text-emerald-500 font-bold">SAVED</span>}
+              </label>
+              <input
+                type="password"
+                value={emailForm.smtpPass}
+                onChange={(e) => setEmailForm((f: any) => ({ ...f, smtpPass: e.target.value }))}
+                placeholder={emailStatus?.hasSmtpPass ? "•••••• (leave blank to keep)" : "SMTP password"}
+                className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-emerald-600"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[11px] text-neutral-400 font-medium">SMTP host</label>
+              <input
+                type="text"
+                value={emailForm.smtpHost}
+                onChange={(e) => setEmailForm((f: any) => ({ ...f, smtpHost: e.target.value }))}
+                placeholder="smtp.gmail.com"
+                className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-emerald-600"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <label className="text-[11px] text-neutral-400 font-medium">SMTP port</label>
+                <input
+                  type="text"
+                  value={emailForm.smtpPort}
+                  onChange={(e) => setEmailForm((f: any) => ({ ...f, smtpPort: e.target.value.replace(/[^0-9]/g, "") }))}
+                  placeholder="587"
+                  className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-emerald-600"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[11px] text-neutral-400 font-medium">SMTP user</label>
+                <input
+                  type="text"
+                  value={emailForm.smtpUser}
+                  onChange={(e) => setEmailForm((f: any) => ({ ...f, smtpUser: e.target.value }))}
+                  placeholder="user@domain.com"
+                  className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-emerald-600"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-3 pt-1">
+            <div className="flex-1 space-y-1.5">
+              <label className="text-[11px] text-neutral-400 font-medium">Send a test email to</label>
+              <input
+                type="email"
+                value={emailTestTo}
+                onChange={(e) => setEmailTestTo(e.target.value)}
+                placeholder="you@example.com"
+                className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-emerald-600"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={sendTestEmail}
+              disabled={emailBusy}
+              className="bg-neutral-800 hover:bg-neutral-700 disabled:opacity-50 text-neutral-200 px-4 py-2 rounded-lg text-xs font-bold transition-colors cursor-pointer"
+            >
+              {emailBusy ? "Working..." : "Send Test"}
+            </button>
+          </div>
+          <p className="text-[10px] text-neutral-600 leading-relaxed">
+            Tip: set <code className="text-neutral-400">RESEND_API_KEY</code> (or <code className="text-neutral-400">SMTP_HOST</code>/<code className="text-neutral-400">SMTP_USER</code>/<code className="text-neutral-400">SMTP_PASS</code>) in the server environment to configure delivery without storing secrets in the app database.
+          </p>
         </div>
       </div>
     </div>
