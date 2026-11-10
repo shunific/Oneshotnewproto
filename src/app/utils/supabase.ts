@@ -15,6 +15,13 @@ const supabaseUrl =
   cleanEnv(import.meta.env.VITE_SUPABASE_URL) || 
   FALLBACK_SUPABASE_URL;
 
+// Host of the Supabase project this build actually talks to. Image URLs that
+// point anywhere else (e.g. a retired CMS project) render blank on a fresh
+// install, so config loading prefers values that live on this host.
+export const SUPABASE_HOST = supabaseUrl;
+export const isAppHostValue = (value: unknown): boolean =>
+  typeof value === 'string' && value.includes(supabaseUrl);
+
 const supabaseKey = 
   cleanEnv(import.meta.env.VITE_SUPABASE_SERVICE_KEY) || 
   cleanEnv(import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY) || 

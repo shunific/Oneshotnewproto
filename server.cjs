@@ -908,6 +908,30 @@ app.post('/api/cache-reservations', (req, res) => {
   });
 });
 
+app.post('/api/cache-feedback', (req, res) => {
+  const { feedback } = req.body;
+  if (!Array.isArray(feedback)) return res.status(400).json({ error: 'Invalid payload' });
+
+  db.serialize(() => {
+    db.run('BEGIN TRANSACTION');
+    const stmt = db.prepare(`
+      INSERT INTO feedback (id, customerName, contactInfo, feedbackType, comment, reservationId, tags, date, status, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO NOTHING
+    `);
+    feedback.forEach(f => {
+      const tagsStr = typeof f.tags === 'string' ? f.tags : JSON.stringify(f.tags || []);
+      const date = typeof f.date === 'string' ? f.date : new Date(f.date || Date.now()).toISOString();
+      stmt.run([f.id, f.customerName || 'Guest', f.contactInfo || null, f.feedbackType || null, f.comment || '', f.reservationId || null, tagsStr, date, f.status || 'pending', f.notes || null]);
+    });
+    stmt.finalize();
+    db.run('COMMIT', (err) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ message: "Successfully cached cloud feedback to local SQLite." });
+    });
+  });
+});
+
 app.post('/api/sync-to-cloud', async (req, res) => {
   let syncErrors = [];
   try {

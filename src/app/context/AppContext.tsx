@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef, useMemo } from 'react';
 import { toast } from 'sonner';
-import { publicSupabase } from '../utils/supabase';
+import { publicSupabase, isAppHostValue } from '../utils/supabase';
 import { motion, AnimatePresence } from 'motion/react';
 import { KeyRound, CheckCircle2, Copy, Download } from 'lucide-react';
 import { previewSessionBill } from '../../../session-billing.mjs';
@@ -406,7 +406,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (staffRes && staffRes.ok) setStaffUsers(await staffRes.json());
       if (historyRes && historyRes.ok) setSessionHistory(await historyRes.json()); // 🟢 Local History is King
       if (activitiesRes && activitiesRes.ok) setActivities(await activitiesRes.json());
-      if (feedRes && feedRes.ok) setFeedback(await feedRes.json());
+      let localFeedback: Feedback[] = [];
+      if (feedRes && feedRes.ok) {
+        localFeedback = await feedRes.json();
+        setFeedback(localFeedback);
+      }
       if (lostRes && lostRes.ok) setLostItems(await lostRes.json());
       if (watchRes && watchRes.ok) setWatchlist(await watchRes.json());
 
@@ -497,7 +501,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
           }
         } catch {}
       }
-      if (feedData) setFeedback((feedData as any[]).map(f => ({ ...f, tags: typeof f.tags === 'string' ? JSON.parse(f.tags || '[]') : (f.tags || []) })) as Feedback[]);
+      if (feedData) {
+        const cloudFeedback = (feedData as any[]).map(f => ({ ...f, tags: typeof f.tags === 'string' ? JSON.parse(f.tags || '[]') : (f.tags || []) })) as Feedback[];
+        // Merge cloud feedback with anything only present locally (e.g. feedback
+        // submitted on this terminal while offline) so nothing disappears.
+        const byId = new Map<string, Feedback>();
+        for (const f of cloudFeedback) byId.set(f.id, f);
+        for (const f of localFeedback) if (!byId.has(f.id)) byId.set(f.id, f);
+        setFeedback(Array.from(byId.values()));
+
+        // Cache cloud feedback to local SQLite so it survives a cloud outage and
+        // is available to the local machine on the next launch.
+        const missingLocally = cloudFeedback.filter(cf => !localFeedback.some(lf => lf.id === cf.id));
+        if (missingLocally.length > 0) {
+          fetch('/api/cache-feedback', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ feedback: missingLocally })
+          }).catch(() => {});
+        }
+      }
       if (promoData) {
         const countFromRes = (code: string) => {
           if (!resData || !code) return 0;
@@ -584,8 +607,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
         (cmsData as any[]).forEach((curr: any) => {
           const k = curr.key_name || curr.keyName || curr.keyname;
           const v = curr.settingvalue ?? curr.settingValue ?? curr.setting_value ?? curr.content_value;
-          if (k) configObj[k] = v;
+          if (!k) return;
+          // Image keys are handled below so a stale host cannot override a
+          // reachable one already loaded from system_settings.
+          if ((k === 'heroImages' || k === 'aboutImage') && !isAppHostValue(v)) return;
+          configObj[k] = v;
         }); 
+      }
+      // Image URLs must live on the Supabase project this build talks to. Older
+      // builds saved images from a retired project, which render blank after a
+      // fresh install; drop any value that still points elsewhere.
+      const imageOnAppHost = (value: any): boolean => {
+        let val = value;
+        if (typeof val === 'string') {
+          const trimmed = val.trim();
+          if (trimmed.startsWith('[')) {
+            try { val = JSON.parse(trimmed); } catch { return isAppHostValue(trimmed); }
+          } else {
+            return isAppHostValue(trimmed);
+          }
+        }
+        if (Array.isArray(val)) return val.length > 0 && val.every(v => typeof v === 'string' && isAppHostValue(v));
+        return false;
+      };
+      for (const key of ['heroImages', 'aboutImage']) {
+        if (configObj[key] !== undefined && !imageOnAppHost(configObj[key])) {
+          delete configObj[key];
+        }
       }
       setSiteConfig((prev: any) => ({ ...(prev || {}), ...configObj }));
 
@@ -652,6 +700,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     forceFullSync();
+  }, []);
+
+  // Poll cloud feedback so customer submissions from the website/other devices
+  // surface here without requiring a re-login or app restart.
+  useEffect(() => {
+    const pullFeedback = async () => {
+      try {
+        const { data, error } = await publicSupabase.from('feedback').select('*');
+        if (error || !Array.isArray(data)) return;
+        const cloudFeedback = (data as any[]).map(f => ({ ...f, tags: typeof f.tags === 'string' ? JSON.parse(f.tags || '[]') : (f.tags || []) })) as Feedback[];
+        setFeedback(prev => {
+          const byId = new Map<string, Feedback>();
+          for (const f of prev) byId.set(f.id, f);
+          for (const f of cloudFeedback) byId.set(f.id, f);
+          return Array.from(byId.values());
+        });
+      } catch {}
+    };
+    const interval = setInterval(pullFeedback, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
