@@ -767,9 +767,17 @@ export function Reservations() {
 
   const confirmRescheduleRejection = () => {
     if (!rejectTarget) return;
+    const request = parseRescheduleRequest(rejectTarget.cancellationReason);
     updateReservation(rejectTarget.id, {
       status: 'confirmed',
-      cancellationReason: `${RESCHEDULE_PREFIX}${JSON.stringify({ decision: 'rejected', reason: rejectNotes.trim() })}`,
+      // Preserve the originally requested schedule so the customer notification can
+      // show exactly what was rejected, not just that a request was declined.
+      cancellationReason: `${RESCHEDULE_PREFIX}${JSON.stringify({
+        decision: 'rejected',
+        reason: rejectNotes.trim(),
+        requestedDate: request?.requestedDate,
+        requestedTime: request?.requestedTime,
+      })}`,
     });
     addActivity('admin_action', `Declined reschedule request for reservation #${rejectTarget.id.toUpperCase()}.`);
     flash('Reschedule request declined. The customer will be notified.', 'success');
