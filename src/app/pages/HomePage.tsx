@@ -623,7 +623,7 @@ export function HomePage() {
   };
 
   const handleReportProblem = (reservationId: string) => {
-    setFeedbackForm(f => ({ ...f, reservationId, type: 'complaint' }));
+    setFeedbackForm(f => ({ ...f, reservationId, type: 'report' }));
     handleNavClick('feedback');
   };
 
@@ -1016,15 +1016,16 @@ export function HomePage() {
     e.preventDefault();
     if (!reportModalResId || !reportMessage.trim()) return;
     setIsReporting(true);
-    
-    addFeedback({ 
-      customerName: currentUser?.name || 'Guest', 
-      contactInfo: currentUser?.email || 'N/A', 
-      rating: 0, 
-      feedbackType: 'complaint', 
-      comment: reportMessage, 
-      tags: ['Priority Resolution'],
-      reservationId: reportModalResId
+
+    const isGeneralInquiry = reportModalResId === 'GENERAL_INQUIRY';
+    addFeedback({
+      customerName: currentUser?.name || 'Guest',
+      contactInfo: currentUser?.email || 'N/A',
+      rating: 0,
+      feedbackType: 'report',
+      comment: reportMessage,
+      tags: [isGeneralInquiry ? 'Help Desk Report' : 'Reservation Report'],
+      reservationId: isGeneralInquiry ? undefined : reportModalResId
     });
 
     setTimeout(() => {
@@ -1442,6 +1443,7 @@ export function HomePage() {
                           <option value="compliment">Compliment</option>
                           <option value="suggestion">Suggestion</option>
                           <option value="complaint">Concern / Complaint</option>
+                          <option value="report">Report an Issue</option>
                           <option value="lost_item">Lost Item</option>
                           <option value="other">Other</option>
                         </select>
@@ -2338,6 +2340,14 @@ export function HomePage() {
                                   </div>
                                   <span>Messenger</span>
                                 </a>
+                                <button
+                                  type="button"
+                                  onClick={() => { setReportModalResId('GENERAL_INQUIRY'); setReportMessage(''); }}
+                                  className="w-full flex items-center gap-3 text-sm font-bold text-amber-400 hover:text-amber-300 transition-colors group"
+                                >
+                                  <div className="w-8 h-8 rounded-full bg-amber-950/50 flex items-center justify-center border border-amber-900/50 group-hover:bg-amber-900/80 transition-colors"><AlertTriangle size={14} className="text-amber-500" /></div>
+                                  <span>Report an Issue</span>
+                                </button>
                               </div>
                             </div>
                           </>
@@ -2993,7 +3003,7 @@ export function HomePage() {
               <div className="flex justify-between items-start mb-2">
                 <div>
                   <h3 className="text-lg font-black text-amber-400 flex items-center gap-2"><AlertTriangle size={18} /> Report an Issue</h3>
-                  <p className="text-xs text-neutral-500 mt-1">Reservation #{reportModalResId.toUpperCase()}</p>
+                  <p className="text-xs text-neutral-500 mt-1">{reportModalResId === 'GENERAL_INQUIRY' ? 'General concern or help request' : `Reservation #${reportModalResId.toUpperCase()}`}</p>
                 </div>
                 <button onClick={() => setReportModalResId(null)} className="text-neutral-500 hover:text-white transition-colors"><X size={18} /></button>
               </div>
@@ -3082,6 +3092,21 @@ export function HomePage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* 🟢 FLOATING REPORT AN ISSUE BUTTON */}
+      <motion.button
+        type="button"
+        initial={{ scale: 0, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        whileHover={{ scale: 1.05 }}
+        whileTap={{ scale: 0.95 }}
+        onClick={() => { setReportModalResId('GENERAL_INQUIRY'); setReportMessage(''); }}
+        title="Report an Issue"
+        className="fixed bottom-24 right-6 z-40 flex items-center gap-2.5 px-4 py-3 rounded-full font-bold text-xs shadow-2xl transition-all duration-300 backdrop-blur-md border cursor-pointer bg-amber-600/95 text-white border-amber-500/60 hover:bg-amber-500"
+      >
+        <AlertTriangle size={15} />
+        <span className="font-semibold tracking-wide">Report an Issue</span>
+      </motion.button>
 
       {/* 🟢 FLOATING LIGHT/DARK MODE TOGGLE BUTTON */}
       <motion.button

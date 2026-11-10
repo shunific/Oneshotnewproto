@@ -64,7 +64,7 @@ export type Reservation = {
 };
 
 export type Feedback = {
-  id: string; customerName: string; contactInfo?: string; rating: number; feedbackType?: 'suggestion' | 'complaint' | 'lost_item' | 'compliment' | 'other'; comment: string; date: Date; reservationId?: string; tags: string[];
+  id: string; customerName: string; contactInfo?: string; rating: number; feedbackType?: 'suggestion' | 'complaint' | 'lost_item' | 'compliment' | 'other' | 'report'; comment: string; date: Date; reservationId?: string; tags: string[];
   status?: 'pending' | 'resolved'; notes?: string;
 };
 

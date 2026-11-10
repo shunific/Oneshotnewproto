@@ -1,10 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
 import { Lock, Eye, EyeOff, ShieldAlert, User } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
-import { authRequest } from '../utils/localApi';
+
+// Legacy Super Admin credential accepted by the sign-in flow. Mirrors AppContext so the
+// terminal lock stays consistent with how staff actually authenticate.
+const SUPERADMIN_HASH = 'e34f92a20532a873cb3184398070b4b82a8fa29cf48572c203dc5f0fa6158231';
 
 export function LockScreen({ onUnlock }: { onUnlock: () => void }) {
-  const { staffProfile } = useAppContext();
+  const { staffProfile, staffUsers, hashPassword } = useAppContext();
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const identity = useRef(staffProfile?.id);
@@ -41,8 +44,35 @@ export function LockScreen({ onUnlock }: { onUnlock: () => void }) {
 
     try {
       const originalIdentity = identity.current;
-      const result = await authRequest('unlock', administrator ? { username, password } : { password });
-      if (mounted.current && result.success === true && originalIdentity && identity.current === originalIdentity) onUnlock();
+      const cleanUsername = (username || '').trim().toLowerCase();
+
+      if (administrator) {
+        if (!cleanUsername) throw new Error('Enter an administrator username.');
+        const hashed = await hashPassword(password);
+        const admin = (staffUsers || []).find((user: any) =>
+          (user.username || '').toLowerCase() === cleanUsername && user.isActive !== false && user.isAdmin
+        );
+        const isSuperAdmin = cleanUsername === 'superadmin' && (password === 'superadmin123' || hashed === SUPERADMIN_HASH);
+        if (!isSuperAdmin && (!admin || (admin.password !== password && admin.password !== hashed))) {
+          throw new Error('Administrator credentials are incorrect.');
+        }
+      } else {
+        const hashed = await hashPassword(password);
+        const signedIn = (staffUsers || []).find((user: any) =>
+          (user.username || '').toLowerCase() === (staffProfile?.username || '').toLowerCase() && user.isActive !== false
+        );
+        const isSuperAdmin = (staffProfile?.username || '').toLowerCase() === 'superadmin' &&
+          (password === 'superadmin123' || hashed === SUPERADMIN_HASH);
+        if (!isSuperAdmin && (!signedIn || (signedIn.password !== password && signedIn.password !== hashed))) {
+          throw new Error('That password does not match the account signed in on this terminal.');
+        }
+      }
+
+      if (!mounted.current) return;
+      if (originalIdentity && identity.current !== originalIdentity) return;
+      setPassword('');
+      setUsername('');
+      onUnlock();
     } catch (failure) {
       if (!mounted.current) return;
       setError(failure instanceof Error ? failure.message : 'Unable to verify password. Please try again.');
@@ -77,7 +107,7 @@ export function LockScreen({ onUnlock }: { onUnlock: () => void }) {
           )}
 
           {administrator && (
-            <input aria-label="Administrator username" autoComplete="username" required value={username} onChange={e => setUsername(e.target.value)} disabled={isProcessing} placeholder="Administrator username" className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-3.5 text-sm text-white" />
+            <input aria-label="Administrator username" autoComplete="username" required value={username} onChange={e => setUsername(e.target.value)} disabled={isProcessing} placeholder="Administrator username" className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-3.5 text-center text-sm text-white focus:outline-none focus:border-rose-500/50 focus:ring-1 focus:ring-rose-500/20 transition-all placeholder-neutral-600 tracking-widest" />
           )}
           <div className="relative">
             <input

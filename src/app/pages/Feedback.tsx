@@ -2,19 +2,28 @@ import { useEffect, useRef, useState } from 'react';
 import { useAppContext } from '../context/AppContext';
 import {
   MessageSquare, ThumbsUp, Tag, AlertTriangle, Lightbulb,
-  Search, Package, User, Calendar, CheckCircle2, X
+  Search, Package, User, Calendar, CheckCircle2, X, Flag
 } from 'lucide-react';
 import { formatDistanceToNow, isToday, isYesterday, isThisWeek, isThisMonth, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
 
-type FeedbackType = 'suggestion' | 'complaint' | 'lost_item' | 'compliment' | 'other';
+type FeedbackType = 'suggestion' | 'complaint' | 'lost_item' | 'compliment' | 'other' | 'report';
 
 const TYPE_CONFIG: Record<FeedbackType, { label: string; color: string; bg: string; border: string; icon: React.ElementType }> = {
   compliment: { label: 'Compliment',        color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', icon: ThumbsUp },
   suggestion: { label: 'Suggestion',        color: 'text-blue-400',    bg: 'bg-blue-500/10',    border: 'border-blue-500/20',    icon: Lightbulb },
   complaint:  { label: 'Concern/Complaint', color: 'text-amber-400',   bg: 'bg-amber-500/10',   border: 'border-amber-500/20',   icon: AlertTriangle },
   lost_item:  { label: 'Lost Item',         color: 'text-rose-400',    bg: 'bg-rose-500/10',    border: 'border-rose-500/20',    icon: Package },
+  report:     { label: 'Reports',           color: 'text-rose-400',    bg: 'bg-rose-500/10',    border: 'border-rose-500/20',    icon: Flag },
   other:      { label: 'Other',             color: 'text-neutral-400', bg: 'bg-neutral-800',    border: 'border-neutral-700',    icon: MessageSquare },
 };
+
+// Report flows: customer reservation reports and help-button submissions.
+// Legacy entries used the complaint type with a "Priority Resolution" tag.
+const REPORT_TAGS = ['Reservation Report', 'Help Desk Report', 'Priority Resolution'];
+const isReport = (f: { feedbackType?: string; tags?: string[] }) =>
+  f.feedbackType === 'report' || (Array.isArray(f.tags) && f.tags.some(t => REPORT_TAGS.includes(t)));
+const effectiveType = (f: { feedbackType?: string; tags?: string[] }): FeedbackType =>
+  isReport(f) ? 'report' : ((f.feedbackType || 'other') as FeedbackType);
 
 export function FeedbackPage() {
   const { feedback, resolveFeedback, adminLoggedIn, staffProfile } = useAppContext();
@@ -42,7 +51,7 @@ export function FeedbackPage() {
 
   // ── Filtering Logic ──
   const filtered = feedback.filter(f => {
-    const matchType = filterType === 'all' || f.feedbackType === filterType;
+    const matchType = filterType === 'all' || effectiveType(f) === filterType;
     const matchSearch = !searchQuery ||
       f.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       f.comment.toLowerCase().includes(searchQuery.toLowerCase());
@@ -70,9 +79,10 @@ export function FeedbackPage() {
   });
 
   // ── Stats ──
-  const compliments  = feedback.filter(f => f.feedbackType === 'compliment').length;
-  const complaints   = feedback.filter(f => f.feedbackType === 'complaint').length;
-  const suggestions  = feedback.filter(f => f.feedbackType === 'suggestion').length;
+  const compliments  = feedback.filter(f => effectiveType(f) === 'compliment').length;
+  const complaints   = feedback.filter(f => effectiveType(f) === 'complaint').length;
+  const suggestions  = feedback.filter(f => effectiveType(f) === 'suggestion').length;
+  const reports      = feedback.filter(f => isReport(f)).length;
   const total        = feedback.length;
 
   const topTags = (() => {
@@ -105,9 +115,10 @@ export function FeedbackPage() {
   return (
     <div className="space-y-5 relative">
       {/* ── Stats Row ── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         {[
           { label: 'Total Messages',  value: total,       color: 'text-neutral-900 dark:text-neutral-200',  icon: MessageSquare },
+          { label: 'Reports',         value: reports,     color: 'text-rose-400',     icon: Flag },
           { label: 'Compliments',     value: compliments, color: 'text-emerald-400',  icon: ThumbsUp },
           { label: 'Concerns',        value: complaints,  color: 'text-amber-400',    icon: AlertTriangle },
           { label: 'Suggestions',     value: suggestions, color: 'text-blue-400',     icon: Lightbulb },
@@ -197,7 +208,7 @@ export function FeedbackPage() {
         )}
 
         <div className="flex gap-1.5 flex-wrap">
-          {(['all', 'compliment', 'suggestion', 'complaint', 'lost_item', 'other'] as const).map(t => {
+          {(['all', 'report', 'compliment', 'suggestion', 'complaint', 'lost_item', 'other'] as const).map(t => {
             const cfg = t !== 'all' ? TYPE_CONFIG[t] : null;
             const isActive = filterType === t;
             return (
@@ -241,9 +252,10 @@ export function FeedbackPage() {
             <p className="text-neutral-500 text-xs mt-1">Try adjusting your search or filters.</p>
           </div>
         ) : filtered.map(fb => {
-          const type = (fb.feedbackType || 'other') as FeedbackType;
+          const type = effectiveType(fb);
           const cfg = TYPE_CONFIG[type];
           const Icon = cfg.icon;
+          const report = isReport(fb);
           return (
             <div key={fb.id} className={`bg-neutral-950 border rounded-xl p-5 hover:border-neutral-700 transition-colors flex flex-col ${fb.feedbackType ? cfg.border : 'border-neutral-800'}`}>
               <div className="flex items-start justify-between gap-3">
@@ -256,6 +268,9 @@ export function FeedbackPage() {
                       <p className="text-sm font-semibold text-neutral-200">{fb.customerName}</p>
                       {fb.reservationId && (
                         <span className="text-[10px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1.5 py-0.5 rounded uppercase font-bold">Verified Booking</span>
+                      )}
+                      {report && !fb.reservationId && (
+                        <span className="text-[10px] bg-rose-500/10 text-rose-400 border border-rose-500/20 px-1.5 py-0.5 rounded uppercase font-bold">Help Desk</span>
                       )}
                     </div>
                     {fb.contactInfo && (
