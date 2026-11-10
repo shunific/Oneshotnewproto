@@ -278,7 +278,7 @@ export function HomePage() {
   const [feedbackForm, setFeedbackForm] = useState({ name: '', contact: '', type: '', customType: '', message: '', reservationId: '' });
   const [feedbackSent, setFeedbackSent] = useState(false);
 
-  const [rescheduleData, setRescheduleData] = useState<{ show: boolean, reservation: any, newDate: Date | null, timeSlot: string } | null>(null);
+  const [rescheduleData, setRescheduleData] = useState<{ show: boolean, reservation: any, newDate: Date | null, timeSlot: string, reason: string } | null>(null);
 
   const [reportModalResId, setReportModalResId] = useState<string | null>(null);
   const [reportMessage, setReportMessage] = useState('');
@@ -430,7 +430,37 @@ export function HomePage() {
     createdAt: r.createdAt
   }));
 
-  const allNotifications = [...activeAnnouncements, ...resNotifications, ...refundNotifications].sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  // Staff decisions on customer reschedule requests are carried on the reservation's
+  // cancellation reason (see executeReschedule). Surface them as notifications.
+  const parseRescheduleDecision = (raw: any): { decision?: string; reason?: string } | null => {
+    if (typeof raw !== 'string') return null;
+    if (raw.startsWith('__RESCHEDULE_REQUEST__')) {
+      try { return JSON.parse(raw.slice('__RESCHEDULE_REQUEST__'.length)); } catch { return null; }
+    }
+    if (raw.startsWith('Rescheduled:')) return { decision: 'approved', reason: raw.slice('Rescheduled:'.length).trim() };
+    return null;
+  };
+
+  const rescheduleNotifications = userReservations
+    .map((r: any) => {
+      const decision = parseRescheduleDecision(r.cancellationReason);
+      // Only surface a notification once staff has made a decision; pending requests
+      // keep the raw payload (no `decision`) and should not notify the customer yet.
+      if (!decision || (decision.decision !== 'approved' && decision.decision !== 'rejected')) return null;
+      const isDeclined = decision.decision === 'rejected';
+      return {
+        id: `resched_${r.id}_${decision.decision || 'info'}`,
+        type: 'Reschedule Request',
+        title: isDeclined ? 'Reschedule Declined' : 'Reschedule Approved',
+        content: isDeclined
+          ? `Your reschedule request for booking ${r.id.toUpperCase()} was declined. Your original schedule is retained.${decision.reason ? ` Note: ${decision.reason}` : ''}`
+          : `Your booking ${r.id.toUpperCase()} has been rescheduled to ${format(new Date(r.date), 'MMM d, yyyy')} at ${r.timeSlot}.${decision.reason ? ` Note: ${decision.reason}` : ''}`,
+        createdAt: r.createdAt
+      };
+    })
+    .filter(Boolean) as any[];
+
+  const allNotifications = [...activeAnnouncements, ...resNotifications, ...refundNotifications, ...rescheduleNotifications].sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   
   const unreadNotifications = allNotifications.filter((n: any) => !readAnnouncements.includes(n.id));
   const hasUnread = isFirstTime || unreadNotifications.length > 0;
@@ -962,11 +992,15 @@ export function HomePage() {
   };
 
   const handleRequestReschedule = async (id: string, r: any) => {
-    if (r.rescheduleCount >= 1) {
+    if ((r.rescheduleCount || 0) >= 1) {
       setToastMsg({ title: "Limit Reached", desc: "Only 1 reschedule allowed per booking.", type: "error" });
       return;
     }
-    setRescheduleData({ show: true, reservation: r, newDate: null, timeSlot: r.timeSlot });
+    if (r.status === 'pending-reschedule') {
+      setToastMsg({ title: "Already Requested", desc: "Your reschedule request is awaiting staff approval.", type: "info" });
+      return;
+    }
+    setRescheduleData({ show: true, reservation: r, newDate: null, timeSlot: r.timeSlot, reason: '' });
   };
 
   const executeReschedule = async (e: React.FormEvent) => {
@@ -979,30 +1013,46 @@ export function HomePage() {
       return;
     }
 
+    if (!rescheduleData.reason.trim()) {
+      setToastMsg({ title: "Reason Required", desc: "Please tell us why you need to reschedule.", type: "error" });
+      return;
+    }
+
     setIsReporting(true);
     const newDateStr = rescheduleData.newDate.toISOString();
-    
+    // Reuse cancellation_reason to carry the request payload (no schema change needed).
+    const marker = `__RESCHEDULE_REQUEST__${JSON.stringify({
+      requestedDate: newDateStr,
+      requestedTime: rescheduleData.timeSlot,
+      reason: rescheduleData.reason.trim(),
+    })}`;
+
     try {
-      const { error } = await publicSupabase.from('reservations').update({ 
-        date: newDateStr, 
-        timeSlot: rescheduleData.timeSlot, 
-        rescheduleCount: (rescheduleData.reservation.rescheduleCount || 0) + 1 
+      await fetch(`/api/reservations/${rescheduleData.reservation.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'pending-reschedule', cancellationReason: marker })
+      }).catch(() => {});
+
+      const { error } = await publicSupabase.from('reservations').update({
+        status: 'pending-reschedule',
+        cancellation_reason: marker,
+        cancellationreason: marker
       }).eq('id', rescheduleData.reservation.id);
 
       if (error) throw error;
 
       if (trackForm.reservationId || currentUser) {
-        setTrackedReservations(prev => prev ? prev.map(r => r.id === rescheduleData.reservation.id ? { 
-          ...r, 
-          date: newDateStr, 
-          timeSlot: rescheduleData.timeSlot, 
-          rescheduleCount: (r.rescheduleCount || 0) + 1 
+        setTrackedReservations(prev => prev ? prev.map(r => r.id === rescheduleData.reservation.id ? {
+          ...r,
+          status: 'pending-reschedule',
+          cancellationReason: marker
         } : r) : null);
       }
-      setToastMsg({ title: "Rescheduled", desc: "Booking successfully rescheduled.", type: 'success' });
+      setToastMsg({ title: "Request Submitted", desc: "Your reschedule request is pending staff approval.", type: 'success' });
       setRescheduleData(null);
     } catch (error) {
-      setToastMsg({ title: "Error", desc: "Failed to reschedule booking.", type: 'error' });
+      setToastMsg({ title: "Error", desc: "Failed to submit reschedule request.", type: 'error' });
     } finally {
       setIsReporting(false);
     }
@@ -2959,7 +3009,7 @@ export function HomePage() {
             <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className="bg-neutral-950 border border-neutral-800 rounded-3xl p-6 w-full max-w-sm shadow-2xl space-y-4">
               <div className="flex justify-between items-start mb-2">
                 <div>
-                  <h3 className="text-lg font-black text-violet-400 flex items-center gap-2"><Calendar size={18} /> Reschedule Booking</h3>
+                  <h3 className="text-lg font-black text-violet-400 flex items-center gap-2"><Calendar size={18} /> Request Reschedule</h3>
                   <p className="text-xs text-neutral-500 mt-1">Reservation #{rescheduleData.reservation.id.toUpperCase()}</p>
                 </div>
                 <button onClick={() => setRescheduleData(null)} className="text-neutral-500 hover:text-white transition-colors"><X size={18} /></button>
@@ -3004,10 +3054,24 @@ export function HomePage() {
                   />
                 </div>
                 
+                <div>
+                  <label className="block text-xs text-neutral-400 mb-1.5">Reason for rescheduling *</label>
+                  <textarea
+                    required
+                    rows={3}
+                    maxLength={300}
+                    value={rescheduleData.reason}
+                    onChange={e => setRescheduleData(prev => prev ? ({ ...prev, reason: e.target.value }) : null)}
+                    placeholder="e.g. A conflict came up. I'd like to move my booking to another time."
+                    className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-sm text-neutral-100 focus:border-violet-500 outline-none resize-none transition-colors placeholder-neutral-600"
+                  />
+                  <p className="text-[10px] text-neutral-500 mt-1">You can only request a reschedule once per booking.</p>
+                </div>
+
                 <div className="flex gap-2 pt-2">
                   <button type="button" onClick={() => setRescheduleData(null)} className="flex-1 py-3 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 font-bold rounded-xl text-xs transition-colors border border-neutral-800">Cancel</button>
-                  <button type="submit" disabled={!rescheduleData.newDate || !rescheduleData.timeSlot || isReporting} className="flex-1 py-3 bg-violet-600 hover:bg-violet-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white font-bold rounded-xl text-xs transition-colors flex items-center justify-center gap-2">
-                    {isReporting ? <><RefreshCw size={14} className="animate-spin" /> Verifying...</> : 'Confirm Reschedule'}
+                  <button type="submit" disabled={!rescheduleData.newDate || !rescheduleData.timeSlot || !rescheduleData.reason.trim() || isReporting} className="flex-1 py-3 bg-violet-600 hover:bg-violet-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white font-bold rounded-xl text-xs transition-colors flex items-center justify-center gap-2">
+                    {isReporting ? <><RefreshCw size={14} className="animate-spin" /> Submitting...</> : 'Submit Request'}
                   </button>
                 </div>
               </form>
