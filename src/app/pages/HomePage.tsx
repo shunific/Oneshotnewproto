@@ -2865,51 +2865,68 @@ export function HomePage() {
           </motion.div>
         )}
 
-        {viewingReceipt && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[110] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
-            <motion.div initial={{ scale: 0.9, y: 10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 10 }} className="w-full max-w-sm relative">
-              <div className="bg-neutral-100 text-neutral-900 rounded-2xl shadow-2xl p-6 font-mono text-xs space-y-4">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h3 className="text-2xl font-black tracking-tighter">ONE SHOT</h3>
-                    <p className="text-[10px] uppercase font-bold text-neutral-500">Official e-Receipt</p>
-                  </div>
-                  <button onClick={() => setViewingReceipt(null)} className="p-1 text-neutral-500 hover:text-black"><X size={18} /></button>
+        {viewingReceipt && (() => {
+          const receiptTableName = venueTables.find((t: any) => t.id === viewingReceipt.tableId)?.name
+            || venueTables.find((t: any) => String(t.name).toLowerCase() === String(viewingReceipt.tableId || '').toLowerCase())?.name
+            || 'N/A';
+          const fmtPHP = (amount?: number | string | null) => `₱${(Number(amount) || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
+          return (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[110] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 sm:p-8" onClick={() => setViewingReceipt(null)}>
+            <motion.div initial={{ scale: 0.9, y: 10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 10 }} onClick={e => e.stopPropagation()} className="w-full max-w-sm relative max-h-full overflow-y-auto hide-scrollbar rounded-2xl">
+              <button
+                onClick={() => setViewingReceipt(null)}
+                className="absolute top-2 right-2 z-10 p-2 text-neutral-400 hover:text-white transition-colors bg-neutral-900/80 rounded-full"
+                title="Close Receipt"
+              >
+                <X size={18} />
+              </button>
+
+              <div className="bg-neutral-100 text-neutral-900 rounded-b-xl shadow-2xl relative overflow-hidden" style={{ filter: 'drop-shadow(0 10px 15px rgba(16,185,129,0.2))' }}>
+                <div className="h-4 w-full flex space-x-1 absolute top-0 left-0 bg-black">
+                  {Array.from({ length: 30 }).map((_, i) => (
+                    <div key={i} className="w-3 h-3 bg-neutral-100 rounded-full -mt-1.5" />
+                  ))}
                 </div>
 
-                <div className="border-y border-dashed border-neutral-300 py-3 space-y-1.5 text-[11px]">
-                  <div className="flex justify-between items-center">
-                    <span>Booking ID:</span>
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-bold">{viewingReceipt.id}</span>
-                      <ReservationStatusBadge status={viewingReceipt.status} />
+                <div className="px-6 pt-10 pb-8 flex flex-col items-center font-mono">
+                  <h2 className="text-3xl font-black tracking-tighter mb-1">ONE SHOT</h2>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-neutral-500 mb-6">Bar &amp; Billiards</p>
+
+                  <div className="w-full space-y-2 text-xs font-semibold border-b-2 border-dashed border-neutral-300 pb-4 mb-4">
+                    <div className="flex justify-between"><span>Booking ID:</span><span className="font-bold text-[10px]">{String(viewingReceipt.id).toUpperCase()}</span></div>
+                    <div className="flex justify-between"><span>Date:</span><span>{format(new Date(viewingReceipt.date), 'MM/dd/yyyy')}</span></div>
+                    <div className="flex justify-between"><span>Time:</span><span>{fmt12(viewingReceipt.timeSlot)}</span></div>
+                    <div className="flex justify-between"><span>Table:</span><span>{receiptTableName}</span></div>
+                    <div className="flex justify-between"><span>Customer:</span><span>{viewingReceipt.customerName}</span></div>
+                  </div>
+
+                  <div className="w-full space-y-2 text-xs font-bold border-b-2 border-dashed border-neutral-300 pb-4 mb-4">
+                    <div className="flex justify-between"><span>Table Booked ({viewingReceipt.durationHours}h)</span><span>{fmtPHP(viewingReceipt.totalAmount)}</span></div>
+                  </div>
+
+                  <div className="w-full space-y-1.5 text-sm">
+                    <div className="flex justify-between font-black text-base"><span>TOTAL DUE</span><span>{fmtPHP(viewingReceipt.totalAmount)}</span></div>
+                    <div className="flex justify-between text-neutral-500 font-semibold text-xs"><span>Down Payment</span><span>-{fmtPHP(viewingReceipt.downPaymentAmount)}</span></div>
+                    <div className="flex justify-between text-neutral-500 font-semibold text-xs"><span>Balance Paid</span><span>-{fmtPHP(Math.max(0, Number(viewingReceipt.totalAmount || 0) - Number(viewingReceipt.downPaymentAmount || 0)))}</span></div>
+                  </div>
+
+                  <div className="w-full mt-4 pt-4 border-t-[3px] border-neutral-800 flex justify-between font-black text-xl">
+                    <span>STATUS</span>
+                    <span className="text-emerald-600">SETTLED</span>
+                  </div>
+
+                  <div className="mt-8 flex flex-col items-center">
+                    <div className="p-2 border-2 border-neutral-900 rounded-lg mb-2 opacity-80">
+                      <QrCode size={64} strokeWidth={1.5} />
                     </div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600 bg-emerald-500/10 px-3 py-1 rounded-full">Completed Booking</p>
                   </div>
-                  <div className="flex justify-between"><span>Customer:</span><span>{viewingReceipt.customerName}</span></div>
-                  <div className="flex justify-between"><span>Date:</span><span>{format(new Date(viewingReceipt.date), 'MM/dd/yyyy')}</span></div>
-                  <div className="flex justify-between"><span>Time Slot:</span><span>{fmt12(viewingReceipt.timeSlot)} ({viewingReceipt.durationHours}h)</span></div>
-                </div>
-
-                <div className="space-y-1 text-xs font-semibold">
-                  <div className="flex justify-between"><span>Table Play Total</span><span>₱{viewingReceipt.totalAmount}.00</span></div>
-                  <div className="flex justify-between text-neutral-500"><span>Down Payment Paid</span><span>-₱{viewingReceipt.downPaymentAmount}.00</span></div>
-                </div>
-
-                <div className="border-t-2 border-neutral-900 pt-2 flex justify-between font-black text-base">
-                  <span>REMAINING AT VENUE</span>
-                  <span>₱{Math.max(0, viewingReceipt.totalAmount - viewingReceipt.downPaymentAmount)}.00</span>
-                </div>
-
-                <div className="flex flex-col items-center justify-center pt-2">
-                  <div className="p-2 border border-neutral-400 rounded-lg mb-1">
-                    <QrCode size={56} className="text-neutral-800" />
-                  </div>
-                  <p className="text-[9px] text-neutral-500 uppercase tracking-widest font-bold">Screenshot for entry</p>
                 </div>
               </div>
             </motion.div>
           </motion.div>
-        )}
+          );
+        })()}
 
         {showProfileModal && currentUser && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowProfileModal(false)}>
