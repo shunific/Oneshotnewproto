@@ -51,13 +51,18 @@ const multer = require('multer');
 const { createClient } = require('@supabase/supabase-js');
 const brain = require('brain.js'); // 🧠 QUEUE AI LIBRARY
 
-// 🟢 GLOBAL CRASH GUARDS: Prevent server shutdowns from unhandled errors
-process.on('uncaughtException', (err) => {
-  console.error('⚠️ [Uncaught Exception Guard]:', err.message);
-});
-process.on('unhandledRejection', (reason) => {
-  console.error('⚠️ [Unhandled Rejection Guard]:', reason);
-});
+// 🟢 GLOBAL CRASH GUARDS
+// An unhandled error means the server can no longer be trusted, so it exits
+// immediately. The host then reports a real cause instead of waiting out its
+// startup timeout, and the process never lingers as a stalled helper. The
+// underlying error is intentionally not printed so private details cannot leak.
+const FATAL_STARTUP_MESSAGE = 'Local server stopped after an unexpected failure';
+const handleFatal = () => {
+  console.error(`❌ ${FATAL_STARTUP_MESSAGE}.`);
+  process.exit(1);
+};
+process.on('uncaughtException', handleFatal);
+process.on('unhandledRejection', handleFatal);
 
 // 🟢 SAFE JSON PARSER: Prevents malformed JSON strings from crashing requests
 const safeParseJSON = (str, fallback = null) => {
@@ -146,7 +151,17 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 const { registerAuthRoutes } = require('./server-auth.cjs');
 const { registerBackupRoutes } = require('./server-backup.cjs');
-const { createEmailService } = require('./server-email.cjs');
+// Email notifications are optional; a packaging gap must not block startup.
+let createEmailService = () => ({
+  notifyReservationAction: async () => ({ sent: false }),
+  notifyReservationChange: async () => ({ sent: false }),
+  _loadConfig: async () => ({ enabled: false }),
+});
+try {
+  ({ createEmailService } = require('./server-email.cjs'));
+} catch (err) {
+  console.warn('⚠️ Customer email module unavailable, notifications disabled:', err.message);
+}
 
 // Auth routes own the session/role middleware; backup downloads reuse requireAdmin.
 const registerCoreRoutes = (database) => {
@@ -1726,4 +1741,11 @@ const serverInstance = app.listen(PORT, () => {
       console.error('⚠️ [IPC Error]: Failed to send backend-ready:', e.message);
     }
   }
+});
+
+// A port conflict (e.g. a previous instance still running) must be fatal and
+// explicit; otherwise the process stays alive without ever signalling ready.
+serverInstance.on('error', (err) => {
+  console.error(`❌ [Startup] Unable to listen on port ${PORT}: ${err.message}`);
+  process.exit(1);
 });

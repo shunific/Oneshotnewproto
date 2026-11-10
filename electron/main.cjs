@@ -76,7 +76,7 @@ function startServer() {
   return new Promise((resolve, reject) => {
     let settled = false;
     const timer = setTimeout(() => {
-      failStartup(new Error('The owned local server did not become ready within 30 seconds.'));
+      failStartup(new Error(`The owned local server did not become ready within 30 seconds.\n\nBackend output:\n${serverStderr || 'No error log recorded.'}`));
       stopServer();
     }, 30000);
     const cleanup = () => {
