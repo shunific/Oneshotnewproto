@@ -22,6 +22,10 @@ const envCandidates = [
 ].filter(Boolean);
 
 let envLoaded = false;
+// Load every candidate file instead of stopping at the first one. dotenv never
+// overwrites an existing value, so earlier paths keep precedence while later
+// files (e.g. USER_DATA_PATH/.env) can supply keys the packaged app omits —
+// such as email transport credentials that must survive a reinstall.
 for (const cand of envCandidates) {
   try {
     if (cand && fs.existsSync(cand)) {
@@ -29,7 +33,6 @@ for (const cand of envCandidates) {
       if (!res.error) {
         console.log(`✅ [ENV]: Loaded variables from ${cand}`);
         envLoaded = true;
-        break;
       }
     }
   } catch (e) {}
