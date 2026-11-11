@@ -124,7 +124,7 @@ export function AdminAnnouncements() {
     try {
       if (editingId) await updateAnnouncement(editingId, payload);
       else await addAnnouncement(payload as any);
-      flash(editingId ? 'Announcement updated locally.' : 'Announcement saved locally.', 'success');
+      flash(editingId ? 'Announcement updated.' : 'Announcement saved locally.', 'success');
       setShowForm(false); setEditingId(null); setForm(blank);
     } catch (error) {
       if ((error as any)?.code === 'CONTENT_CREATE_RECONCILE') setShowForm(false);
@@ -152,7 +152,7 @@ export function AdminAnnouncements() {
       else if (action === 'delete') await deleteAnnouncement(id);
       else await updateAnnouncement(id, action === 'expire' ? { isActive: false, expiresAt: new Date(), startDate: null } as any : { isActive: false, expiresAt: null, startDate: null } as any);
       setDeleteConfirm(null); setClock(Date.now());
-      flash(action === 'expire' ? 'Moved to local history.' : action === 'restore' ? 'Restored locally as draft.' : action === 'delete' ? 'Deleted locally.' : 'Visibility saved locally.', 'success');
+      flash(action === 'expire' ? 'Moved to local history.' : action === 'restore' ? 'Restored locally as draft.' : action === 'delete' ? 'Deleted locally.' : 'Visibility updated', 'success');
     } catch (error) { flash(error instanceof Error ? error.message : 'Announcement action failed. Please retry.', 'error'); }
     finally { inFlight.current = false; setIsSaving(false); }
   };
