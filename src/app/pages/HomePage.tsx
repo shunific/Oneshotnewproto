@@ -17,6 +17,10 @@ import {
 import { useAppContext, HOURLY_RATE, DOWN_PAYMENT_RATE } from '../context/AppContext';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
 import { ReservationStatusBadge } from '../components/ReservationStatusBadge';
+import {
+  eventForTable as findEventForTable, isSlotBlockedByEvent,
+  isTableBlockedAllDay, formatEventWindow,
+} from '../utils/eventAvailability.js';
 
 import logoImg from 'figma:asset/40eb82831843e17a3c48a360fd80f0aaaa58ddc8.png';
 import heroImg1 from 'figma:asset/15fb8dcab89448c8f2ad20fb9946631b1c246968.png';
@@ -778,6 +782,10 @@ export function HomePage() {
       const rEnd = addMinutes(rStart, r.durationHours * 60);
       if (requestedStart < rEnd && requestedEnd > rStart) return 'table_conflict';
     }
+
+    // Timed events only block their allocated tables during the event window.
+    const requestedEndMins = slotMins + duration * 60;
+    if (isSlotBlockedByEvent(events, tableId, requestedStart, slotMins, requestedEndMins)) return 'event_blocked';
 
     if (isToday(requestedStart)) {
       const targetTable = tables.find((t: any) => t.id === tableId);
@@ -1592,45 +1600,22 @@ export function HomePage() {
                                   const isOcc = table.status === 'occupied';
                                   const isMaint = table.status === 'maintenance';
 
-                                  const eventForTable = (events || []).find((ev: any) => {
-                                    let evDates: any[] = [];
-                                    if (Array.isArray(ev.dates)) evDates = ev.dates;
-                                    else if (typeof ev.dates === 'string') {
-                                      try { evDates = JSON.parse(ev.dates); } catch { evDates = [ev.dates]; }
-                                    }
-                                    if (ev.date && !evDates.includes(ev.date)) evDates.push(ev.date);
+                                  // A timed event only reserves its tables during the event window,
+                                  // so those tables stay bookable for the rest of the day.
+                                  const tableEvent = selectedDate ? findEventForTable(events, table.id, selectedDate) : null;
+                                  const eventBlockedAllDay = selectedDate ? isTableBlockedAllDay(events, table.id, selectedDate) : false;
+                                  const isEvent = Boolean(tableEvent) || eventBlockedAllDay || table.status === 'event';
+                                  const eventLabel = tableEvent
+                                    ? `${tableEvent.title}${eventBlockedAllDay ? '' : ` · ${formatEventWindow(tableEvent)}`}`
+                                    : 'EVENT (Click to view)';
 
-                                    const evDateMatch = evDates.some((d: any) => {
-                                      try { return isSameDay(new Date(d), selectedDate); } catch { return false; }
-                                    });
-                                    if (!evDateMatch) return false;
-
-                                    let tIds: string[] = [];
-                                    const rawTIds = ev.selectedTableIds || ev.eventTableIds || ev.event_table_ids || ev.tableIds;
-                                    if (Array.isArray(rawTIds)) tIds = rawTIds;
-                                    else if (typeof rawTIds === 'string') {
-                                      try { tIds = JSON.parse(rawTIds); } catch { tIds = [rawTIds]; }
-                                    }
-                                    if (tIds.length > 0) {
-                                      return tIds.includes(table.id);
-                                    }
-                                    if (ev.allowReservations === false) return true;
-                                    return false;
-                                  }) || (reservations || []).find((r: any) => 
-                                    r.tableId === table.id && 
-                                    isSameDay(new Date(r.date || r.reservation_date || r.reservationDate), selectedDate) && 
-                                    r.status !== 'cancelled' &&
-                                    (r.customerName?.startsWith('EVENT:') || r.id?.startsWith('EVT-') || r.paymentRef === 'EVENT')
-                                  );
-                                  const isEvent = Boolean(eventForTable) || table.status === 'event';
-                                  
                                   return (
                                     <button
                                       key={table.id}
                                       type="button"
                                       disabled={isMaint}
                                       onClick={() => {
-                                        if (isEvent) {
+                                        if (isEvent && eventBlockedAllDay) {
                                           setActiveSection('events');
                                           window.scrollTo({ top: 0, behavior: 'smooth' });
                                           return;
@@ -1638,12 +1623,12 @@ export function HomePage() {
                                         setSelectedTableId(table.id);
                                       }}
                                       className={`relative p-3 rounded-xl border text-left flex flex-col justify-between transition-all ${
-                                        isMaint 
+                                        isMaint
                                           ? 'bg-neutral-900/30 border-neutral-800/40 opacity-40 cursor-not-allowed'
                                           : isEvent
                                           ? 'bg-purple-950/40 border-purple-500/70 shadow-lg shadow-purple-950/40 hover:scale-[1.02] cursor-pointer'
-                                          : isSel 
-                                          ? 'bg-emerald-950/40 border-emerald-500 shadow-lg shadow-emerald-900/30 scale-[1.02]' 
+                                          : isSel
+                                          ? 'bg-emerald-950/40 border-emerald-500 shadow-lg shadow-emerald-900/30 scale-[1.02]'
                                           : 'bg-neutral-900/80 border-neutral-800 hover:border-neutral-600'
                                       }`}
                                     >
@@ -1652,7 +1637,7 @@ export function HomePage() {
                                         <span className={`w-2 h-2 rounded-full ${isMaint ? 'bg-rose-500' : isEvent ? 'bg-purple-400 animate-pulse' : isOcc && isToday(selectedDate) ? 'bg-amber-400 animate-pulse' : 'bg-emerald-500'}`} />
                                       </div>
                                       <p className={`text-[10px] font-semibold truncate ${isEvent ? 'text-purple-400' : 'text-neutral-400'}`}>
-                                        {isMaint ? 'Unavailable' : isEvent ? 'EVENT (Click to view)' : isOcc && isToday(selectedDate) ? 'Playing Now' : 'Available Slot'}
+                                        {isMaint ? 'Unavailable' : isEvent ? eventLabel : isOcc && isToday(selectedDate) ? 'Playing Now' : 'Available Slot'}
                                       </p>
                                     </button>
                                   );
@@ -1669,36 +1654,16 @@ export function HomePage() {
                                     const targetTable = tables.find((t: any) => t.id === selectedTableId);
                                     const isActiveWalkIn = isToday(selectedDate) && targetTable?.status === 'occupied' && targetTable.session?.startTime;
 
-                                    const eventForTable = (events || []).find((ev: any) => {
-                                      let evDates: any[] = [];
-                                      if (Array.isArray(ev.dates)) evDates = ev.dates;
-                                      else if (typeof ev.dates === 'string') {
-                                        try { evDates = JSON.parse(ev.dates); } catch { evDates = [ev.dates]; }
-                                      }
-                                      if (ev.date && !evDates.includes(ev.date)) evDates.push(ev.date);
-
-                                      const evDateMatch = evDates.some((d: any) => {
-                                        try { return isSameDay(new Date(d), selectedDate); } catch { return false; }
-                                      });
-                                      if (!evDateMatch) return false;
-
-                                      let tIds: string[] = [];
-                                      const rawTIds = ev.selectedTableIds || ev.eventTableIds || ev.event_table_ids || ev.tableIds;
-                                      if (Array.isArray(rawTIds)) tIds = rawTIds;
-                                      else if (typeof rawTIds === 'string') {
-                                        try { tIds = JSON.parse(rawTIds); } catch { tIds = [rawTIds]; }
-                                      }
-                                      if (tIds.length > 0) {
-                                        return tIds.includes(selectedTableId);
-                                      }
-                                      if (ev.allowReservations === false) return true;
-                                      return false;
-                                    }) || (reservations || []).find((r: any) => 
-                                      r.tableId === selectedTableId && 
-                                      isSameDay(new Date(r.date || r.reservation_date || r.reservationDate), selectedDate) && 
-                                      r.status !== 'cancelled' && 
+                                    const tableEvent = selectedDate ? findEventForTable(events, selectedTableId, selectedDate) : null;
+                                    const eventBlockedAllDay = selectedDate ? isTableBlockedAllDay(events, selectedTableId, selectedDate) : false;
+                                    const eventReservation = (reservations || []).find((r: any) =>
+                                      r.tableId === selectedTableId &&
+                                      isSameDay(new Date(r.date || r.reservation_date || r.reservationDate), selectedDate) &&
+                                      r.status !== 'cancelled' &&
                                       (r.customerName?.startsWith('EVENT:') || r.id?.startsWith('EVT-') || r.paymentRef === 'EVENT')
                                     );
+                                    const eventForTable = tableEvent || eventReservation;
+                                    const eventWindowLabel = tableEvent && !eventBlockedAllDay ? ` · ${formatEventWindow(tableEvent)}` : '';
                                     
                                     const tableRes = reservations.filter((r: any) => 
                                       r.tableId === selectedTableId && 
@@ -1721,7 +1686,7 @@ export function HomePage() {
                                             className="flex items-center gap-3 bg-purple-950/40 p-2.5 rounded-lg border border-purple-800/60 cursor-pointer hover:bg-purple-900/50 transition-colors"
                                           >
                                             <div className="w-2 h-2 rounded-full bg-purple-400 animate-pulse shadow-[0_0_8px_rgba(168,85,247,0.6)]" />
-                                            <span className="text-purple-200 text-xs font-bold">EVENT: {eventForTable.title}</span>
+                                            <span className="text-purple-200 text-xs font-bold">EVENT: {eventForTable.title || eventForTable.customerName?.replace(/^EVENT:\s*/, '')}{eventWindowLabel}</span>
                                             <span className="text-purple-400 text-[10px] font-bold ml-auto flex items-center gap-1">View Details &rarr;</span>
                                           </div>
                                         )}
