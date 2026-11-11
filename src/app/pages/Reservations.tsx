@@ -1101,11 +1101,21 @@ export function Reservations() {
       {viewMode === 'list' && (
         <div className="bg-neutral-950 border border-neutral-800 rounded-xl overflow-hidden pb-32">
           <div className="overflow-x-auto min-h-[300px]">
-            <table className="w-full">
+            <table className="w-full table-fixed">
+              <colgroup>
+                <col className="w-[20%]" />
+                <col className="w-[14%]" />
+                <col className="w-[6%]" />
+                <col className="w-[6%]" />
+                <col className="w-[13%]" />
+                <col className="w-[15%]" />
+                <col className="w-[11%]" />
+                <col className="w-[15%]" />
+              </colgroup>
               <thead>
                 <tr className="border-b border-neutral-800 bg-neutral-900/50">
                   {['Customer', 'Date & Time', 'Duration', 'Party', 'Table', 'Status', 'Payment', 'Actions'].map(h => (
-                    <th key={h} className="text-left text-[10px] text-neutral-500 uppercase tracking-wider font-semibold px-4 py-3">{h}</th>
+                    <th key={h} className="text-left text-[10px] text-neutral-500 uppercase tracking-wider font-semibold px-3 py-3">{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -1133,32 +1143,35 @@ export function Reservations() {
 
                   return (
                     <tr key={r.id} onClick={() => setSelectedId(r.id)} className="hover:bg-neutral-900/60 transition-colors cursor-pointer relative">
-                      <td className="px-4 py-3">
-                        <p className="text-sm font-semibold text-neutral-200 flex items-center gap-2">{r.customerName}<span className="text-[9px] font-mono text-neutral-500 bg-neutral-800 px-1.5 py-0.5 rounded tracking-widest">{r.id}</span></p>
-                        <p className="text-xs text-neutral-500">{r.contactNumber}</p>
+                      <td className="px-3 py-3 min-w-0">
+                        <p className="text-sm font-semibold text-neutral-200 flex items-center gap-2 min-w-0">
+                          <span className="truncate" title={r.customerName}>{r.customerName}</span>
+                          <span className="text-[9px] font-mono text-neutral-500 bg-neutral-800 px-1.5 py-0.5 rounded tracking-widest flex-shrink-0">{r.id}</span>
+                        </p>
+                        <p className="text-xs text-neutral-500 truncate" title={r.contactNumber}>{r.contactNumber}</p>
                       </td>
-                      <td className="px-4 py-3"><p className="text-sm text-neutral-300 font-medium">{formatDateTime(r.date, r.timeSlot)}</p></td>
-                      <td className="px-4 py-3"><span className="text-sm text-neutral-400">{r.durationHours}h</span></td>
-                      <td className="px-4 py-3"><span className="text-sm text-neutral-400">{r.partySize} pax</span></td>
-                      <td className="px-4 py-3"><span className="text-sm text-neutral-400">{getTableName(r.tableId)}</span></td>
-                      <td className="px-4 py-3">
+                      <td className="px-3 py-3 min-w-0"><p className="text-sm text-neutral-300 font-medium truncate" title={formatDateTime(r.date, r.timeSlot)}>{formatDateTime(r.date, r.timeSlot)}</p></td>
+                      <td className="px-3 py-3"><span className="text-sm text-neutral-400">{r.durationHours}h</span></td>
+                      <td className="px-3 py-3"><span className="text-sm text-neutral-400">{r.partySize} pax</span></td>
+                      <td className="px-3 py-3 min-w-0"><span className="text-sm text-neutral-400 block truncate" title={getTableName(r.tableId)}>{getTableName(r.tableId)}</span></td>
+                      <td className="px-3 py-3">
                         <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${cfg.color}`}>
                           <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />{cfg.label}
                         </span>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-3 py-3">
                         <div className="space-y-0.5">
                           <div className="flex items-center gap-1">
                             {r.downPaymentPaid ? <CheckCircle size={11} className="text-emerald-400" /> : <XCircle size={11} className="text-neutral-600" />}
-                            <span className="text-[10px] text-neutral-500">DP {formatPHP(r.downPaymentAmount)}</span>
+                            <span className="text-[10px] text-neutral-500 whitespace-nowrap">DP {formatPHP(r.downPaymentAmount)}</span>
                           </div>
                           <div className="flex items-center gap-1">
                             {r.balancePaid ? <CheckCircle size={11} className="text-emerald-400" /> : <XCircle size={11} className="text-neutral-600" />}
-                            <span className="text-[10px] text-neutral-500">Bal {formatPHP(Number(r.totalAmount || 0) - Number(r.downPaymentAmount || 0))}</span>
+                            <span className="text-[10px] text-neutral-500 whitespace-nowrap">Bal {formatPHP(Number(r.totalAmount || 0) - Number(r.downPaymentAmount || 0))}</span>
                           </div>
                         </div>
                       </td>
-                      <td className="px-4 py-3 relative">
+                      <td className="px-3 py-3 relative">
                         <div className="flex justify-end" onClick={e => e.stopPropagation()}>
                           {r.paymentRef === 'EVENT' ? (
                             <span className="text-[10px] font-bold text-neutral-600 uppercase tracking-widest px-3 py-1.5">System Locked</span>
