@@ -10,7 +10,7 @@
     "dev": "npm run build && concurrently --kill-others-on-fail=false \"cross-env NODE_ENV=development PORT=3001 node server.cjs || true\" \"vite --port 3000 --host 0.0.0.0\"",
     "build": "vite build",
     "postinstall": "electron-builder install-app-deps",
-    "rebuild": "electron-rebuild -f -w sqlite3",
+    "rebuild": "electron-rebuild -w sqlite3",
     "electron:dev": "cross-env NODE_ENV=development concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "electron:build": "cross-env ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npm run rebuild && vite build && electron-builder",
     "electron:build:mac": "cross-env ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npm run rebuild && vite build && electron-builder --mac",

@@ -261,7 +261,7 @@ export type AppContextType = {
   assignTable: (id: string, s: Session) => void; freeTable: (id: string) => void; reserveTable: (id: string) => void; extendSession: (id: string, mins: number, pay: number) => void; migrateSession: (fromTableId: string, toTableId: string) => void; setTableMaintenance: (id: string, reason: string) => void; setTableEvent: (id: string, eventName: string) => void; addTable: (n: string) => void; updateTable: (id: string, n: string) => void; toggleTableActive: (id: string) => void; deleteTable: (id: string) => void;
   checkoutTable: (id: string, payload: any) => Promise<any>; seatQueueCustomer: (queueId: string, tableId: string, session: any) => Promise<any>; retryPendingOrder: (tableId: string, expectedSessionStartTime: string) => Promise<void>;
   addInventoryItem: (i: Omit<InventoryItem, 'id'>) => void; updateInventoryItem: (id: string, i: Partial<InventoryItem>) => void; deleteInventoryItem: (id: string) => void; submitTableOrders: (tableId: string, cart: SessionOrder[]) => void; voidTableOrder: (tableId: string, orderIndex: number, order: SessionOrder) => void;
-  addToQueue: (i: Omit<QueueItem, 'id'|'arrivalTime'|'status'|'queueNumber'>) => void; removeFromQueue: (id: string) => void; callQueueItem: (id: string) => void;
+  addToQueue: (i: Omit<QueueItem, 'id'|'arrivalTime'|'status'|'queueNumber'>) => void; removeFromQueue: (id: string) => void; callQueueItem: (id: string) => Promise<{ replayed: boolean }>;
   addReservation: (i: Omit<Reservation, 'id'|'createdAt'>) => string; updateReservationStatus: (id: string, s: ReservationStatus) => void; updateReservation: (id: string, u: Partial<Reservation>) => void; cancelReservation: (id: string, r: string) => void; updateDownPayment: (id: string, p: boolean) => void; updateBalance: (id: string, p: boolean) => void;
   addFeedback: (i: Omit<Feedback, 'id'|'date'>) => void; resolveFeedback: (id: string, notes: string) => void; addActivity: (t: ActivityType, d: string, m?: Record<string, any>) => void;  
   addPromoCode: (i: Omit<PromoCode, 'id'|'createdAt'|'usageCount'>) => string; updatePromoCode: (id: string, u: Partial<Omit<PromoCode, 'id'|'createdAt'|'usageCount'>>) => void; togglePromoCode: (id: string) => void; deletePromoCode: (id: string) => void; applyPromoCode: (c: string) => PromoCode | null;
@@ -1195,11 +1195,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
     publicSupabase.from('queue').delete().eq('id', id).then();
   };
 
-  const callQueueItem = (id: string) => {
+  const callQueueItem = async (id: string) => {
     setQueue(prev => prev.map(q => q.id === id ? { ...q, status: 'called' } : q));
     addActivity('queue_called', `Called customer ID: ${id} from queue to available table`);
-    syncToDB(`/api/queue/${id}`, 'PUT', { status: 'called' }, `Queue item called`).then(runCloudBackup).catch(()=>{});
+    // Persist locally first so the status change survives even when the cloud is
+    // unreachable; the cloud mirror is best-effort and must not block the call.
+    try {
+      await syncToDB(`/api/queue/${id}`, 'PUT', { status: 'called' }, `Queue item called`);
+    } catch (error) {
+      console.error('Queue call could not be saved locally:', error);
+    }
+    runCloudBackup();
     publicSupabase.from('queue').update({ status: 'called' }).eq('id', id).then();
+    return { replayed: false };
   };
 
   const addLostItem = (i: Omit<LostItem, 'id'>) => {
