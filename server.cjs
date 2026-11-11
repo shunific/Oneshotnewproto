@@ -1705,6 +1705,19 @@ app.post('/api/debug/reset', async (req, res) => {
 // ====================================================================
 const serverInstance = app.listen(PORT, () => {
   console.log(`\n🎱 One Shot Edge Server is running on http://localhost:${PORT}`);
+  // One-line diagnostic so a missing credential is obvious from the log alone.
+  Promise.resolve()
+    .then(() => getEmailService(db)._loadConfig(db))
+    .then((cfg) => {
+      if (!cfg.enabled) {
+        console.log('📧 [Email]: automatic customer emails are disabled (EMAIL_NOTIFICATIONS_ENABLED).');
+      } else if (!cfg.provider) {
+        console.log('📧 [Email]: no transport configured — customer emails will be logged as skipped. Set RESEND_API_KEY or SMTP_* in the app environment.');
+      } else {
+        console.log(`📧 [Email]: automatic customer emails enabled via ${cfg.provider} (from: ${cfg.fromAddress}).`);
+      }
+    })
+    .catch(() => {});
   if (typeof process.send === 'function') {
     try {
       process.send({ type: 'backend-ready', port: Number(PORT) });
