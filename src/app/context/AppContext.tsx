@@ -15,11 +15,12 @@ export type SessionOrder = {
   qty: number;
 };
 export type SessionHistoryItem = {
-  id: string; customerName: string; tableId: string; tableName: string; startTime: Date; endTime: Date; durationMinutes: number; totalAmount: number; amountPaid: number; orders: SessionOrder[];
+  id: string; customerName: string; tableId: string; tableName: string; startTime: Date; endTime: Date; durationMinutes: number; totalAmount: number; amountPaid: number; orders: SessionOrder[]; partySize?: number;
 };
 
 export type Session = {
   customerName: string;
+  partySize?: number;
   startTime: Date;
   durationMinutes: number | null; 
   isOpenTime: boolean; 
@@ -1039,6 +1040,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       totalAmount: total,
       amountPaid: totalPaid,
       orders,
+      partySize: Number(session.partySize) > 0 ? Number(session.partySize) : 2,
     });
 
     freeTable(tableId);
@@ -1260,16 +1262,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const valid = staffUsers.find(su => (su.username || '').toLowerCase() === cleanU && (su.password === hashedP || su.password === p || isSuperPw) && su.isActive); 
     if (valid || isSuperPw) { 
       const activeUser = valid || { id: 'admin_001', fullName: 'System Superadmin', username: 'superadmin', role: 'manager', isAdmin: true, phone: '', avatarImg: '' };
+      const grantsAdmin = Boolean(activeUser.isAdmin) || cleanU === 'superadmin';
       setStaffLoggedIn(true); 
       sessionStorage.setItem('oneshot_staff_auth', 'true');
-      if (activeUser.isAdmin || cleanU === 'superadmin') {
+      if (grantsAdmin) {
         setAdminLoggedIn(true);
         sessionStorage.setItem('oneshot_admin_auth', 'true');
       }
       const expiryTime = new Date().getTime() + (12 * 60 * 60 * 1000);
       sessionStorage.setItem('oneshot_auth_expiry', expiryTime.toString());
       sessionStorage.removeItem('oneshot_is_locked'); 
-      updateStaffProfile({ id: activeUser.id, fullName: activeUser.fullName, username: activeUser.username, role: activeUser.role, isAdmin: true, phone: activeUser.phone || '', avatarImg: activeUser.avatarImg || '' });
+      updateStaffProfile({ id: activeUser.id, fullName: activeUser.fullName, username: activeUser.username, role: activeUser.role, isAdmin: grantsAdmin, phone: activeUser.phone || '', avatarImg: activeUser.avatarImg || '' });
       await forceFullSync();
       return true; 
     }

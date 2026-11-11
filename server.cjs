@@ -979,6 +979,36 @@ if (error) {
       }), 'id'),
       
       syncTable('queue', 'queue', r => ({ id: r.id, customerName: r.customerName, contactNumber: r.contactNumber, partySize: r.partySize, status: r.status, queueNumber: r.queueNumber, notes: r.notes, arrivalTime: r.arrivalTime || new Date().toISOString() }), 'id'),
+
+      // Reservations live in Supabase and are the source of truth online; the local
+      // SQLite mirror keeps them editable offline. Pushing them on every "Save
+      // current data" keeps the customer-facing status in step with staff edits
+      // (check-in, completion, cancellation) made while disconnected.
+      syncTable('reservations', 'reservations', r => ({
+        id: r.id,
+        customerName: r.customerName,
+        contactNumber: r.contactNumber,
+        email: r.email || null,
+        date: sanitizeDate(r.date),
+        timeSlot: r.timeSlot,
+        durationHours: r.durationHours,
+        partySize: r.partySize,
+        tableId: r.tableId || null,
+        status: r.status,
+        totalAmount: r.totalAmount,
+        downPaymentAmount: r.downPaymentAmount,
+        downPaymentPaid: r.downPaymentPaid ? 1 : 0,
+        balancePaid: r.balancePaid ? 1 : 0,
+        paymentRef: r.paymentRef || null,
+        receiptImg: r.receiptImg || null,
+        cancellationReason: r.cancellationReason || null,
+        refundStatus: r.refundStatus || null,
+        refundMethod: r.refundMethod || null,
+        refundNotes: r.refundNotes || null,
+        promoCode: r.promoCode || null,
+        discountAmount: r.discountAmount || null,
+        createdAt: r.createdAt || new Date().toISOString()
+      }), 'id'),
       syncTable('promo_codes', 'promo_codes', r => ({ id: r.id, code: r.code, discount_percent: r.discount_percent, description: r.description, is_active: !!r.is_active, is_limited_uses: !!r.is_limited_uses, max_usage: r.max_usage, usage_count: r.usage_count, start_date: r.start_date || null, expires_at: r.expires_at || null }), 'id'),
       syncTable('events', 'events', r => ({ 
         id: r.id, 

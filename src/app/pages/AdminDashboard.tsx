@@ -5,8 +5,8 @@ import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'rec
 import { useAppContext } from '../context/AppContext';
 import { 
   Users, Table2, Tag, Megaphone, CalendarX2, DollarSign, 
-  TrendingUp, Bell, BarChart3, CloudRain, Sun, Cloud, MapPin, 
-  Database, RefreshCw, CalendarDays, ArrowRight, ShieldCheck,
+  TrendingUp, BarChart3, CloudRain, Sun, Cloud, MapPin, 
+  Database, RefreshCw, CalendarDays, ArrowRight,
   Wifi, WifiOff, Download, CheckCircle2, CheckCircle, AlertTriangle, X
 } from 'lucide-react';
 import { useNavigate } from 'react-router';
@@ -18,7 +18,7 @@ export function AdminDashboard() {
     staffUsers, tables, promoCodes, announcements, closedDates, 
     rates, reservations, feedback, weather, updateWeatherLocation, 
     activities, sessionHistory,
-    queue, watchlist, availableTables, reservationMoveError, pendingReservationMoves=[], pendingQueueOperations=[], queueOperationError
+    queue, watchlist, availableTables, reservationMoveError
   } = useAppContext() as any;
   
   const navigate = useNavigate();
@@ -143,46 +143,6 @@ export function AdminDashboard() {
       setIsEditingWeather(false);
     }
   };
-
-  const getDynamicAlerts = () => {
-    const alerts = [];
-    if(reservationMoveError||pendingReservationMoves.length||pendingQueueOperations.length||queueOperationError){
-      alerts.push({id:'alert_recovery',title:'Recovery needs attention',
-        desc:reservationMoveError||queueOperationError||'Confirm pending table transfers or queue actions before making further assignments.',
-        style:{box:'bg-amber-950/20 border-amber-900/30',dot:'bg-amber-500',title:'text-amber-400',btn:'text-amber-400'},
-        action:{label:'Open recovery',onClick:()=>navigate('/staff/tables')}});
-    }
-    const todayRes = pendingReservations.filter((r: any) => isToday(new Date(r.date)));
-    if (tables.length > 0 && todayRes.length > (tables.length * 2)) {
-      alerts.push({
-         id: 'alert_res', title: 'High Booking Volume',
-         desc: `There are ${todayRes.length} reservations scheduled for today. Consider limiting walk-ins.`,
-         style: { box: 'bg-emerald-950/20 border-emerald-900/30', dot: 'bg-emerald-500', title: 'text-emerald-400', btn: 'bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/30 border-emerald-500/20' },
-         action: { label: 'Adjust Limits', onClick: () => navigate('/admin/policy-rates') }
-       });
-    }
-
-    const recentVoids = activities.filter((a: any) => a.type === 'admin_action' && a.description.includes('Voided') && new Date(a.timestamp).getTime() > Date.now() - 86400000);
-    if (recentVoids.length > 5) {
-       alerts.push({
-         id: 'alert_voids', title: 'Unusual POS Activity',
-         desc: `Detected ${recentVoids.length} voided transactions in the last 24 hours. Please review the system logs.`,
-         style: { box: 'bg-rose-950/20 border-rose-900/30', dot: 'bg-rose-500', title: 'text-rose-400', btn: 'bg-rose-600/20 text-rose-400 hover:bg-rose-600/30 border-rose-500/20' },
-         action: { label: 'View Logs', onClick: () => navigate('/admin/activity') }
-       });
-    }
-
-    if (weather?.isRaining) {
-      alerts.push({
-         id: 'alert_weather', title: 'Inclement Weather Detected',
-         desc: 'Rain is forecasted. Predictive models suggest a 30% increase in indoor walk-in traffic.',
-         style: { box: 'bg-blue-950/20 border-blue-900/30', dot: 'bg-blue-500', title: 'text-blue-400', btn: '' },
-       });
-    }
-    return alerts;
-  };
-
-  const dynamicAlerts = getDynamicAlerts();
 
   // ── Reporting Analytics Overview ──
   const analytics7Days = useMemo(() => {
@@ -487,34 +447,7 @@ export function AdminDashboard() {
       </div>
 
       {/* ── Dynamic Layout Bottom Half ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5 flex flex-col h-[400px]">
-          <h3 className="text-sm font-bold text-neutral-200 mb-4 flex items-center gap-2"><Bell size={15} className="text-sky-400" /> System Intelligence Alerts</h3>
-          <div className="space-y-3 overflow-y-auto pr-2 flex-1">
-            {dynamicAlerts.length === 0 ? (
-              <div className="text-center py-10 opacity-50">
-                <ShieldCheck size={32} className="mx-auto mb-3 text-emerald-500" />
-                <p className="text-xs text-neutral-400">No dashboard alerts. Release checks are tracked separately.</p>
-              </div>
-            ) : (
-              dynamicAlerts.map(alert => (
-                <div key={alert.id} className={`p-3.5 rounded-xl border flex flex-col ${alert.style.box}`}>
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <div className={`w-2 h-2 rounded-full ${alert.style.dot} flex-shrink-0`} />
-                    <p className={`text-xs font-bold ${alert.style.title}`}>{alert.title}</p>
-                  </div>
-                  <p className="text-[11px] text-neutral-400 leading-relaxed mb-3">{alert.desc}</p>
-                  {alert.action && (
-                    <button onClick={alert.action.onClick} className={`align-self-start self-start text-[10px] font-bold px-3 py-1.5 rounded-lg transition-colors border ${alert.style.btn}`}>
-                      {alert.action.label}
-                    </button>
-                  )}
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5 flex flex-col h-[400px]">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-sm font-bold text-neutral-200 flex items-center gap-2"><CalendarDays size={15} className="text-purple-400" /> Incoming Bookings</h3>

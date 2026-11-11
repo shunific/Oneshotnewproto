@@ -223,6 +223,7 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
   // Assign form state
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerSource | null>(null);
   const [customerName,     setCustomerName]      = useState('');
+  const [partySize,        setPartySize]         = useState('1');
   const [durationMinutes,  setDurationMinutes]   = useState<number | 'open'>(60);
   const [amountPaid,       setAmountPaid]        = useState('');
   const [paymentOption,    setPaymentOption]     = useState<'payNow' | 'payLater'>('payNow');
@@ -530,6 +531,7 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
 
   const pickCustomer = (c: CustomerSource) => {
     setSelectedCustomer(c); setCustomerName(c.name);
+    setPartySize(String(c.partySize || 1));
     const availData = getAvailableDurations(assigningTableId);
     if (c.kind === 'reservation') {
       const mins = c.durationHours * 60;
@@ -585,6 +587,7 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
           setAssigningTableId(targetTableId);
           setSelectedCustomer(customer as any);
           setCustomerName(customer.name);
+          setPartySize(String((customer as any).partySize || 1));
           setPaymentOption('payNow');
           
           if (customer.kind === 'reservation') {
@@ -618,10 +621,12 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
     
     const credit = !isOpenTime && paymentOption === 'payNow' ? (amountPaid.trim() ? Number(amountPaid) : autoPayment) : 0;
     if (!Number.isFinite(credit) || credit < 0) throw new Error('Enter a valid amount received.');
+    const parsedPartySize = Math.max(1, Math.min(99, parseInt(partySize, 10) || 1));
     const proposal = {
       durationMinutes:isOpenTime?null:(durationMinutes as number),isOpenTime,
       hourlyRate:effectiveHourly,overtimeRate:effectiveOvertime,pricingVersion:1,
       amountPaid:credit,paymentStatus:isOpenTime?'payLater':paymentOption,
+      partySize:parsedPartySize,
       ...(isOpenTime ? {latestEndTime:currentOpenLimit()} : {})
     };
     let result;
@@ -638,6 +643,7 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
     setAssigningTableId(null);
     setSelectedCustomer(null);
     setCustomerName('');
+    setPartySize('1');
     setDurationMinutes(60);
     setAmountPaid('');
     setPaymentOption('payNow');
@@ -1448,6 +1454,25 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
                           {selectedCustomer.kind === 'queue' ? 'Assigned from walk-in queue' : `Assigned from today's reservation · ${(selectedCustomer as any).timeSlot}`}
                         </p>
                       )}
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold flex items-center gap-1.5">
+                        <Users size={11} /> Party Size
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={99}
+                        step="1"
+                        onWheel={e => e.currentTarget.blur()}
+                        value={partySize}
+                        onChange={e => setPartySize(e.target.value.replace(/\D/g, '').slice(0, 2))}
+                        onBlur={() => { const n = Math.max(1, Math.min(99, parseInt(partySize, 10) || 1)); setPartySize(String(n)); }}
+                        className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                        placeholder="1"
+                      />
+                      <p className="text-[10px] text-neutral-600">Number of guests seated at this table.</p>
                     </div>
 
                     <div className="space-y-1.5">
