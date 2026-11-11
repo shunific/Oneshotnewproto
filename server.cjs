@@ -637,62 +637,14 @@ app.get('/api/announcements', (req, res) => {
 });
 
 // ====================================================================
-// 📧 CUSTOMER EMAIL NOTIFICATION ROUTES
+// 📧 CUSTOMER EMAIL NOTIFICATIONS
 // ====================================================================
-// Settings are stored in systemSettings so an administrator can enable email
-// delivery without editing files. The API key itself is never returned.
-const EMAIL_SETTING_KEYS = ['emailNotificationsEnabled', 'emailProvider', 'emailFromAddress', 'emailFromName',
-  'smtpHost', 'smtpPort', 'smtpSecure', 'smtpUser', 'resendApiKey', 'smtpPass'];
-
-app.get('/api/email/settings', (req, res) => {
-  db.all(`SELECT keyName, settingValue FROM systemSettings WHERE keyName IN (${EMAIL_SETTING_KEYS.map(() => '?').join(',')})`,
-    EMAIL_SETTING_KEYS, (err, rows) => {
-      if (err) return res.status(500).json({ error: err.message });
-      const stored = {};
-      (rows || []).forEach(r => { stored[r.keyName] = r.settingValue; });
-      res.json({
-        emailNotificationsEnabled: stored.emailNotificationsEnabled !== undefined ? stored.emailNotificationsEnabled : 'true',
-        emailProvider: stored.emailProvider || '',
-        emailFromAddress: stored.emailFromAddress || '',
-        emailFromName: stored.emailFromName || '',
-        smtpHost: stored.smtpHost || '',
-        smtpPort: stored.smtpPort || '',
-        smtpSecure: stored.smtpSecure || '',
-        smtpUser: stored.smtpUser || '',
-        // Secrets are reported as booleans only — never echo the value back.
-        hasResendApiKey: cleanEnvStr(stored.resendApiKey) !== '' || cleanEnvStr(process.env.RESEND_API_KEY) !== '',
-        hasSmtpPass: cleanEnvStr(stored.smtpPass) !== '' || cleanEnvStr(process.env.SMTP_PASS) !== '',
-        hasEnvTransport: cleanEnvStr(process.env.RESEND_API_KEY) !== '' || cleanEnvStr(process.env.SMTP_HOST) !== '',
-      });
-    });
-});
-
-app.put('/api/email/settings', (req, res) => {
-  const payload = req.body || {};
-  const allowed = EMAIL_SETTING_KEYS.filter(k => Object.prototype.hasOwnProperty.call(payload, k));
-  if (allowed.length === 0) return res.json({ message: 'No email settings to update' });
-  let index = 0; const errors = [];
-  const next = () => {
-    if (index >= allowed.length) {
-      if (errors.length) return res.status(500).json({ error: 'Some email settings failed to save.', details: errors });
-      return res.json({ message: 'Email settings updated.' });
-    }
-    const key = allowed[index];
-    // An empty secret means "leave the stored key unchanged".
-    const raw = payload[key];
-    if ((key === 'resendApiKey' || key === 'smtpPass') && cleanEnvStr(raw) === '') { index++; return next(); }
-    const value = typeof raw === 'boolean' ? String(raw) : String(raw ?? '');
-    db.run(`INSERT INTO systemSettings (keyName, settingValue) VALUES (?, ?)
-            ON CONFLICT(keyName) DO UPDATE SET settingValue = excluded.settingValue, updatedAt = CURRENT_TIMESTAMP`,
-      [key, value], (err) => {
-        if (err) errors.push({ key, error: err.message });
-        index++; next();
-      });
-  };
-  next();
-});
-
-// Send (or re-send) the notification for a specific reservation action.
+// Delivery is fully automatic: the transport is discovered from the server
+// environment (RESEND_API_KEY, or SMTP_HOST/SMTP_USER/SMTP_PASS) and, for
+// developer-provisioned installations, legacy read-only rows in
+// systemSettings. There is intentionally no API or UI that lets an app user
+// edit these values.
+// Sends (or re-sends) the notification for a specific reservation action.
 app.post('/api/email/notify-reservation', (req, res) => {
   const { reservationId, action, force } = req.body || {};
   if (!reservationId || !action) return res.status(400).json({ error: 'reservationId and action are required.' });
@@ -710,41 +662,6 @@ app.post('/api/email/notify-reservation', (req, res) => {
       res.status(500).json({ error: e.message });
     }
   });
-});
-
-// Diagnostics: reports which transport is active and lets an admin send a probe.
-app.get('/api/email/status', async (req, res) => {
-  try {
-    const config = await getEmailService(db)._loadConfig(db);
-    res.json({
-      enabled: config.enabled,
-      provider: config.provider || null,
-      fromAddress: config.fromAddress,
-      ready: config.enabled && !!config.provider,
-    });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.post('/api/email/test', async (req, res) => {
-  const to = cleanEnvStr(req.body && req.body.to);
-  if (!to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) return res.status(400).json({ error: 'A valid "to" address is required.' });
-  try {
-    const venue = await loadVenue(db);
-    const result = await getEmailService(db).notifyReservationAction({
-      action: 'confirmed',
-      reservation: {
-        id: 'TEST1234', customerName: 'Test Customer', email: to,
-        date: new Date().toISOString(), timeSlot: '19:00', durationHours: 2,
-        partySize: 4, status: 'confirmed', totalAmount: 500, downPaymentAmount: 100,
-      },
-      venue, force: true,
-    });
-    res.json(result);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
 });
 
 app.get('/api/session-history', (req, res) => {
@@ -891,34 +808,86 @@ app.put('/api/cms', (req, res) => {
   processNextKey();
 });
 
+// Bookings created on the customer website never touch this server's
+// /api/reservations route, so the cache sync is the only place their emails
+// can be triggered. Compare the previous cache with the incoming rows and
+// notify for genuinely new or changed reservations.
+const CACHE_EMAIL_FIELDS = ['status', 'date', 'timeSlot', 'durationHours', 'partySize', 'tableId',
+  'totalAmount', 'downPaymentAmount', 'downPaymentPaid', 'balancePaid', 'cancellationReason',
+  'refundStatus', 'refundMethod', 'refundNotes'];
+const isTruthyFlag = (value) => value === true || value === 1 || value === '1' || value === 'true';
+const normalizeCacheField = (key, value) => {
+  if (key === 'downPaymentPaid' || key === 'balancePaid') return isTruthyFlag(value) ? '1' : '0';
+  if (key === 'date') {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString();
+  }
+  return String(value ?? '');
+};
+const cacheRowSignature = (row) =>
+  CACHE_EMAIL_FIELDS.map((key) => `${key}=${normalizeCacheField(key, row && row[key])}`).join('|');
+
+const notifyCachedReservationChanges = (previousRows, incomingRows) => {
+  try {
+    const previous = new Map((previousRows || []).map((row) => [String(row.id), row]));
+    const changed = [];
+    for (const row of incomingRows) {
+      const prev = previous.get(String(row.id)) || null;
+      if (prev && cacheRowSignature(prev) === cacheRowSignature(row)) continue;
+      // A cache that starts empty (fresh install) must not email historical
+      // bookings; only recently created reservations count as "new".
+      if (!prev) {
+        const created = new Date(row.createdAt || row.created_at || 0).getTime();
+        if (!Number.isFinite(created) || Date.now() - created > 30 * 60 * 1000) continue;
+      }
+      changed.push({ prev, row });
+    }
+    if (changed.length === 0) return;
+    loadVenue(db).then((venue) => {
+      for (const { prev, row } of changed) {
+        const updates = { ...row, createdAt: row.createdAt || row.created_at || new Date().toISOString() };
+        getEmailService(db).notifyReservationChange({ prev, updates, reservation: updates, venue })
+          .catch((error) => console.error('📧 [Email] cache-sync hook error:', error.message));
+      }
+    }).catch((error) => console.error('📧 [Email] cache-sync venue error:', error.message));
+  } catch (error) {
+    console.error('📧 [Email] cache-sync comparison error:', error.message);
+  }
+};
+
 app.post('/api/cache-reservations', (req, res) => {
   const { reservations } = req.body;
   if (!Array.isArray(reservations)) return res.status(400).json({ error: 'Invalid payload' });
 
-  db.serialize(() => {
-    db.run('BEGIN TRANSACTION');
-    const stmt = db.prepare(`
-      INSERT OR REPLACE INTO reservations (id, customerName, contactNumber, email, date, timeSlot, durationHours, partySize, tableId, status, totalAmount, downPaymentAmount, downPaymentPaid, balancePaid, paymentRef, receiptImg, cancellationReason, refundStatus, refundMethod, refundNotes, createdAt, promoCode, discountAmount) 
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    reservations.forEach(r => {
-      stmt.run([r.id, r.customerName, r.contactNumber, r.email||null, typeof r.date === 'string' ? r.date : new Date(r.date).toISOString(), r.timeSlot, r.durationHours, r.partySize, r.tableId||null, r.status, r.totalAmount, r.downPaymentAmount, r.downPaymentPaid?1:0, r.balancePaid?1:0, r.paymentRef||null, r.receiptImg||null, r.cancellationReason||null, r.refundStatus||null, r.refundMethod||null, r.refundNotes||null, typeof r.createdAt === 'string' ? r.createdAt : new Date(r.createdAt).toISOString(), r.promoCode||null, r.discountAmount||0]);
-    });
-    stmt.finalize();
-    db.run('COMMIT', (err) => {
-      if (err) return res.status(500).json({ error: err.message });
-      
-      // 🟢 Recalculate local promo_codes usage count from cached reservations
-      db.run(`
-        UPDATE promo_codes 
-        SET usage_count = (
-          SELECT COUNT(*) FROM reservations 
-          WHERE UPPER(TRIM(reservations.promoCode)) = UPPER(TRIM(promo_codes.code))
-        )
-        WHERE code IN (SELECT DISTINCT promoCode FROM reservations WHERE promoCode IS NOT NULL)
+  db.all(`SELECT * FROM reservations`, [], (snapshotErr, previousRows) => {
+    if (snapshotErr) return res.status(500).json({ error: snapshotErr.message });
+
+    db.serialize(() => {
+      db.run('BEGIN TRANSACTION');
+      const stmt = db.prepare(`
+        INSERT OR REPLACE INTO reservations (id, customerName, contactNumber, email, date, timeSlot, durationHours, partySize, tableId, status, totalAmount, downPaymentAmount, downPaymentPaid, balancePaid, paymentRef, receiptImg, cancellationReason, refundStatus, refundMethod, refundNotes, createdAt, promoCode, discountAmount) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
-      
-      res.json({ message: "Successfully cached cloud reservations to local SQLite." });
+      reservations.forEach(r => {
+        stmt.run([r.id, r.customerName, r.contactNumber, r.email||null, typeof r.date === 'string' ? r.date : new Date(r.date).toISOString(), r.timeSlot, r.durationHours, r.partySize, r.tableId||null, r.status, r.totalAmount, r.downPaymentAmount, r.downPaymentPaid?1:0, r.balancePaid?1:0, r.paymentRef||null, r.receiptImg||null, r.cancellationReason||null, r.refundStatus||null, r.refundMethod||null, r.refundNotes||null, typeof r.createdAt === 'string' ? r.createdAt : new Date(r.createdAt).toISOString(), r.promoCode||null, r.discountAmount||0]);
+      });
+      stmt.finalize();
+      db.run('COMMIT', (err) => {
+        if (err) return res.status(500).json({ error: err.message });
+
+        // 🟢 Recalculate local promo_codes usage count from cached reservations
+        db.run(`
+          UPDATE promo_codes 
+          SET usage_count = (
+            SELECT COUNT(*) FROM reservations 
+            WHERE UPPER(TRIM(reservations.promoCode)) = UPPER(TRIM(promo_codes.code))
+          )
+          WHERE code IN (SELECT DISTINCT promoCode FROM reservations WHERE promoCode IS NOT NULL)
+        `);
+
+        res.json({ message: "Successfully cached cloud reservations to local SQLite." });
+        notifyCachedReservationChanges(previousRows, reservations);
+      });
     });
   });
 });

@@ -22,7 +22,11 @@ const supabaseUrl =
 // install, so config loading prefers values that live on this host.
 export const SUPABASE_HOST = supabaseUrl;
 export const isAppHostValue = (value: unknown): boolean =>
-  typeof value === 'string' && value.includes(supabaseUrl);
+  typeof value === 'string' && (
+    value.includes(supabaseUrl) ||
+    value.startsWith('/api/images/') ||
+    value.startsWith('data:image/')
+  );
 
 const supabaseKey = 
   cleanEnv(import.meta.env.VITE_SUPABASE_SERVICE_KEY) || 

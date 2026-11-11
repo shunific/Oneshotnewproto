@@ -68,6 +68,113 @@ export type Feedback = {
   status?: 'pending' | 'resolved'; notes?: string;
 };
 
+// Supabase stores legacy rows in lower-case columns and newer rows in
+// camelCase ones (PostgREST column folding), so every cloud row is normalised
+// before it reaches the UI. Missing optional values never crash a list view.
+const parseFeedbackTags = (value: unknown): string[] => {
+  if (Array.isArray(value)) return value.filter((tag): tag is string => typeof tag === 'string');
+  if (typeof value !== 'string' || !value.trim()) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter((tag): tag is string => typeof tag === 'string') : [];
+  } catch {
+    return [];
+  }
+};
+
+const normalizeFeedbackRow = (raw: any): Feedback => {
+  const source = raw || {};
+  const pick = (...keys: string[]) => {
+    for (const key of keys) {
+      const value = source[key];
+      if (value !== undefined && value !== null && value !== '') return value;
+    }
+    return undefined;
+  };
+  const rawDate = pick('date', 'createdAt', 'createdat', 'created_at');
+  const parsedDate = rawDate ? new Date(rawDate) : new Date();
+  return {
+    id: String(pick('id', 'feedbackId', 'feedbackid', 'feedback_id') || `f${Date.now()}`),
+    customerName: String(pick('customerName', 'customername', 'customer_name') || 'Guest'),
+    contactInfo: pick('contactInfo', 'contactinfo', 'contact_info') ? String(pick('contactInfo', 'contactinfo', 'contact_info')) : '',
+    rating: Number(pick('rating') || 0) || 0,
+    feedbackType: (pick('feedbackType', 'feedbacktype', 'feedback_type') || 'other') as Feedback['feedbackType'],
+    comment: String(pick('comment', 'message') || ''),
+    date: Number.isNaN(parsedDate.getTime()) ? new Date() : parsedDate,
+    reservationId: pick('reservationId', 'reservationid', 'reservation_id') ? String(pick('reservationId', 'reservationid', 'reservation_id')) : undefined,
+    tags: parseFeedbackTags(pick('tags')),
+    status: (pick('status') === 'resolved' ? 'resolved' : 'pending') as Feedback['status'],
+    notes: pick('notes') ? String(pick('notes')) : undefined,
+  };
+};
+
+const mergeFeedbackRows = (...groups: any[][]): Feedback[] => {
+  const byId = new Map<string, Feedback>();
+  for (const group of groups) {
+    for (const row of group || []) {
+      const item = normalizeFeedbackRow(row);
+      const existing = byId.get(item.id);
+      // Prefer the most recently-known state (cloud rows win on ties).
+      if (!existing || new Date(item.date).getTime() >= new Date(existing.date).getTime()) {
+        byId.set(item.id, item);
+      }
+    }
+  }
+  return Array.from(byId.values()).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+};
+
+// Supabase reservations carry either camelCase or snake_case/lowercase column
+// names depending on when the row was written. Normalise once so every
+// consumer (booking lists, cache mirroring, email hooks) sees the same shape.
+const mapCloudReservation = (r: any) => ({
+  id: r.id,
+  customerName: r.customerName || r.customer_name || r.customername,
+  contactNumber: r.contactNumber || r.contact_number || r.contactnumber,
+  email: r.email,
+  date: new Date(r.date),
+  timeSlot: r.timeSlot || r.time_slot || r.timeslot,
+  durationHours: r.durationHours || r.duration_hours || r.durationhours,
+  partySize: r.partySize || r.party_size || r.partysize,
+  tableId: r.tableId || r.table_id || r.tableid,
+  status: r.status,
+  totalAmount: r.totalAmount || r.total_amount || r.totalamount,
+  downPaymentAmount: r.downPaymentAmount || r.down_payment_amount || r.downpaymentamount,
+  downPaymentPaid: !!r.downPaymentPaid || !!r.down_payment_paid || !!r.downpaymentpaid,
+  balancePaid: !!r.balancePaid || !!r.balance_paid || !!r.balancepaid,
+  createdAt: new Date(r.createdAt || r.created_at || r.createdat),
+  cancellationReason: r.cancellationReason || r.cancellation_reason || r.cancellationreason,
+  refundStatus: r.refundStatus || r.refund_status || r.refundstatus,
+  refundMethod: r.refundMethod || r.refund_method || r.refundmethod,
+  refundNotes: r.refundNotes || r.refund_notes || r.refundnotes,
+  paymentRef: r.paymentRef || r.payment_ref || r.paymentref,
+  receiptImg: r.receiptImg || r.receipt_img_url || r.receiptimg,
+  promoCode: r.promoCode || r.promocode || r.promo_code || null,
+  discountAmount: r.discountAmount || r.discountamount || r.discount_amount || 0,
+  rescheduleCount: Number(r.rescheduleCount ?? r.reschedule_count ?? 0) || 0
+});
+
+// Mirrors cloud bookings into local SQLite. The server compares the incoming
+// rows with what it already had cached, which is what lets it email the
+// customer for bookings made on the website (those never hit the local API).
+const cacheCloudReservations = (rows: any[]) => {
+  if (!Array.isArray(rows) || rows.length === 0) return;
+  fetch('/api/cache-reservations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reservations: rows })
+  }).catch(() => {});
+};
+
+const SITE_CACHE_KEY = 'oneshot_site_config_cache';
+const readSiteCache = (): any => {
+  try {
+    const cached = JSON.parse(localStorage.getItem(SITE_CACHE_KEY) || 'null');
+    return cached && typeof cached === 'object' ? cached : null;
+  } catch {
+    return null;
+  }
+};
+
 export type ActivityType =
   | 'table_assigned' | 'table_freed' | 'table_reserved' | 'session_extended'
   | 'queue_added' | 'queue_removed' | 'queue_called'
@@ -351,7 +458,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const [siteConfig, setSiteConfig] = useState<any>(null);
+  // Restore the last known site configuration immediately so a freshly opened
+  // window (or an offline launch) never renders the site with blank imagery
+  // while the cloud request is still in flight.
+  const [siteConfig, setSiteConfig] = useState<any>(() => readSiteCache());
+  useEffect(() => {
+    if (!siteConfig || typeof siteConfig !== 'object' || Object.keys(siteConfig).length === 0) return;
+    try { localStorage.setItem(SITE_CACHE_KEY, JSON.stringify(siteConfig)); } catch {}
+  }, [siteConfig]);
   const updateWeatherLocation = useCallback((lat: string, lon: string, name: string) => { setWeatherConfig({ lat, lon, name }); }, []);
   const [lostItems, setLostItems] = useState<LostItem[]>([]);
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
@@ -408,7 +522,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (activitiesRes && activitiesRes.ok) setActivities(await activitiesRes.json());
       let localFeedback: Feedback[] = [];
       if (feedRes && feedRes.ok) {
-        localFeedback = await feedRes.json();
+        localFeedback = mergeFeedbackRows(await feedRes.json());
         setFeedback(localFeedback);
       }
       if (lostRes && lostRes.ok) setLostItems(await lostRes.json());
@@ -502,22 +616,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
         } catch {}
       }
       if (feedData) {
-        const cloudFeedback = (feedData as any[]).map(f => ({ ...f, tags: typeof f.tags === 'string' ? JSON.parse(f.tags || '[]') : (f.tags || []) })) as Feedback[];
+        const cloudFeedback = mergeFeedbackRows(feedData as any[]);
         // Merge cloud feedback with anything only present locally (e.g. feedback
         // submitted on this terminal while offline) so nothing disappears.
-        const byId = new Map<string, Feedback>();
-        for (const f of cloudFeedback) byId.set(f.id, f);
-        for (const f of localFeedback) if (!byId.has(f.id)) byId.set(f.id, f);
-        setFeedback(Array.from(byId.values()));
+        setFeedback(mergeFeedbackRows(cloudFeedback, localFeedback));
 
-        // Cache cloud feedback to local SQLite so it survives a cloud outage and
-        // is available to the local machine on the next launch.
-        const missingLocally = cloudFeedback.filter(cf => !localFeedback.some(lf => lf.id === cf.id));
-        if (missingLocally.length > 0) {
+        // Mirror the complete cloud feedback list into local SQLite so website
+        // submissions survive a cloud outage and show on the next launch.
+        if (cloudFeedback.length > 0) {
           fetch('/api/cache-feedback', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ feedback: missingLocally })
+            body: JSON.stringify({ feedback: cloudFeedback })
           }).catch(() => {});
         }
       }
@@ -638,17 +748,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setSiteConfig((prev: any) => ({ ...(prev || {}), ...configObj }));
 
       if (resData && (resData as any[]).length > 0) {
-        const mappedRes = (resData as any[]).map(r => ({
-          id: r.id, customerName: r.customerName || r.customer_name, contactNumber: r.contactNumber || r.contact_number, email: r.email, date: new Date(r.date), timeSlot: r.timeSlot || r.time_slot, durationHours: r.durationHours || r.duration_hours, partySize: r.partySize || r.party_size, tableId: r.tableId || r.table_id, status: r.status, totalAmount: r.totalAmount || r.total_amount, downPaymentAmount: r.downPaymentAmount || r.down_payment_amount, downPaymentPaid: !!r.downPaymentPaid || !!r.down_payment_paid, balancePaid: !!r.balancePaid || !!r.balance_paid, createdAt: new Date(r.createdAt || r.created_at), cancellationReason: r.cancellationReason || r.cancellation_reason, refundStatus: r.refundStatus || r.refund_status, refundMethod: r.refundMethod || r.refund_method, refundNotes: r.refundNotes || r.refund_notes, paymentRef: r.paymentRef || r.payment_ref, receiptImg: r.receiptImg || r.receipt_img_url, promoCode: r.promoCode || r.promocode || r.promo_code || null, discountAmount: r.discountAmount || r.discountamount || r.discount_amount || 0, rescheduleCount: Number(r.rescheduleCount ?? r.reschedule_count ?? 0) || 0
-        }));
+        const mappedRes = (resData as any[]).map(mapCloudReservation);
         setReservations(mappedRes);
 
         // 3. CACHE RESERVATIONS TO LOCAL SQLITE FOR OFFLINE FALLBACK
-        fetch('/api/cache-reservations', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ reservations: mappedRes })
-        }).catch(() => {});
+        cacheCloudReservations(mappedRes);
       } else {
         // Fallback to local reservations from SQLite if Supabase returns 0 rows (e.g. user auth change)
         try {
@@ -702,24 +806,64 @@ export function AppProvider({ children }: { children: ReactNode }) {
     forceFullSync();
   }, []);
 
-  // Poll cloud feedback so customer submissions from the website/other devices
-  // surface here without requiring a re-login or app restart.
+  // Pull cloud feedback + bookings continuously so website submissions and
+  // reservations from other devices appear without a re-login or restart.
+  // Cached bookings are mirrored into local SQLite, which also lets the server
+  // detect newly synced bookings and email the customer automatically.
   useEffect(() => {
-    const pullFeedback = async () => {
+    let cancelled = false;
+    const pullCloud = async () => {
+      if (cancelled || document.visibilityState === 'hidden') return;
       try {
-        const { data, error } = await publicSupabase.from('feedback').select('*');
-        if (error || !Array.isArray(data)) return;
-        const cloudFeedback = (data as any[]).map(f => ({ ...f, tags: typeof f.tags === 'string' ? JSON.parse(f.tags || '[]') : (f.tags || []) })) as Feedback[];
-        setFeedback(prev => {
-          const byId = new Map<string, Feedback>();
-          for (const f of prev) byId.set(f.id, f);
-          for (const f of cloudFeedback) byId.set(f.id, f);
-          return Array.from(byId.values());
-        });
+        const [{ data: feedData, error: feedError }, { data: resData, error: resError }] = await Promise.all([
+          publicSupabase.from('feedback').select('*'),
+          publicSupabase.from('reservations').select('*')
+        ]);
+        if (cancelled) return;
+        if (!feedError && Array.isArray(feedData)) {
+          const cloudFeedback = mergeFeedbackRows(feedData as any[]);
+          setFeedback(prev => mergeFeedbackRows(prev, cloudFeedback));
+          if (cloudFeedback.length > 0) {
+            fetch('/api/cache-feedback', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ feedback: cloudFeedback })
+            }).catch(() => {});
+          }
+        }
+        if (!resError && Array.isArray(resData) && resData.length > 0) {
+          const mapped = (resData as any[]).map(mapCloudReservation);
+          setReservations(prev => JSON.stringify(prev) === JSON.stringify(mapped) ? prev : mapped);
+          cacheCloudReservations(mapped);
+        }
       } catch {}
     };
-    const interval = setInterval(pullFeedback, 30000);
-    return () => clearInterval(interval);
+    const interval = setInterval(pullCloud, 30000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
+
+  // Re-sync everything (CMS images, settings, reservations) when the window is
+  // focused again or the network comes back, instead of relying on the single
+  // startup fetch. Throttled so tab flicking does not hammer Supabase.
+  const forceFullSyncRef = useRef(forceFullSync);
+  forceFullSyncRef.current = forceFullSync;
+  useEffect(() => {
+    let lastRun = 0;
+    const resync = () => {
+      const now = Date.now();
+      if (now - lastRun < 60000) return;
+      lastRun = now;
+      forceFullSyncRef.current().catch(() => {});
+    };
+    const onVisibility = () => { if (document.visibilityState === 'visible') resync(); };
+    window.addEventListener('focus', resync);
+    window.addEventListener('online', resync);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('focus', resync);
+      window.removeEventListener('online', resync);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, []);
 
   useEffect(() => {

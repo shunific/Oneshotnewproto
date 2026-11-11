@@ -4,6 +4,9 @@ import { motion, AnimatePresence } from 'motion/react';
 import { ShieldCheck, User, Lock, Eye, EyeOff, AlertTriangle, ArrowLeft, KeyRound, CheckCircle, TerminalSquare, X, Copy, Download } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import logoImg from 'figma:asset/40eb82831843e17a3c48a360fd80f0aaaa58ddc8.png';
+import heroFallbackImg from 'figma:asset/15fb8dcab89448c8f2ad20fb9946631b1c246968.png';
+import venueFallbackImg from 'figma:asset/622002b1a57eb609a09cacd650764fb95c911672.png';
+import playerFallbackImg from 'figma:asset/759b04149309a4f38a99d59a2ef822b4e59fd5d3.png';
 
 type FormView = 'login' | 'reset' | 'force-change' | 'recovery-pin' | 'god-mode';
 
@@ -58,12 +61,11 @@ export function OfflineLogin() {
     parsedImages = typeof siteConfig?.heroImages === 'string' ? JSON.parse(siteConfig.heroImages) : siteConfig?.heroImages;
   } catch (e) {}
 
-  const sliderImages = Array.isArray(parsedImages) && parsedImages.length > 0 
-    ? parsedImages 
-    : [
-        'https://images.unsplash.com/photo-1595079676339-1534801ad6cb?q=80&w=2000&auto=format&fit=crop',
-        'https://images.unsplash.com/photo-1514933651103-005eec06c04b?q=80&w=2000&auto=format&fit=crop',
-      ];
+  // Bundled images are shipped with the app, so the login screen never renders
+  // a blank slider on a fresh install or while the device is offline.
+  const sliderImages = Array.isArray(parsedImages) && parsedImages.length > 0
+    ? parsedImages.filter((img: any) => typeof img === 'string' && img.trim() !== '')
+    : [heroFallbackImg, venueFallbackImg, playerFallbackImg];
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentSlide((prev) => (prev + 1) % sliderImages.length), 5000);
@@ -562,7 +564,17 @@ export function OfflineLogin() {
         <div className="absolute inset-0 bg-gradient-to-t from-neutral-950/80 via-transparent to-neutral-950/30 z-10" />
         {sliderImages.map((img: string, index: number) => (
           <div key={index} className={`absolute inset-0 transition-opacity duration-1000 ease-in-out ${index === currentSlide ? 'opacity-100 scale-100' : 'opacity-0 scale-105'}`}>
-            <img src={img} alt={`Slide ${index + 1}`} className="w-full h-full object-cover object-center" />
+            <img
+              src={img}
+              alt={`Slide ${index + 1}`}
+              className="w-full h-full object-cover object-center"
+              onError={(event) => {
+                const target = event.currentTarget;
+                if (target.dataset.fallbackApplied === '1') return;
+                target.dataset.fallbackApplied = '1';
+                target.src = [heroFallbackImg, venueFallbackImg, playerFallbackImg][index % 3];
+              }}
+            />
           </div>
         ))}
       </div>

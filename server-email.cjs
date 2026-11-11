@@ -10,7 +10,8 @@
 // keeps working out of the box until a key is supplied.
 //
 // Configuration is read from the environment first, then from the local
-// systemSettings table so an administrator can enable it from the UI.
+// systemSettings table for developer-provisioned installs. There is no UI or
+// writable API for these values: delivery is automatic once a transport exists.
 // ====================================================================
 const run = (db, sql, values = []) => new Promise((resolve, reject) =>
   db.run(sql, values, function (error) { error ? reject(error) : resolve(this.changes); }));

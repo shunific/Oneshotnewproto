@@ -20,6 +20,7 @@ import { ReservationStatusBadge } from '../components/ReservationStatusBadge';
 
 import logoImg from 'figma:asset/40eb82831843e17a3c48a360fd80f0aaaa58ddc8.png';
 import heroImg1 from 'figma:asset/15fb8dcab89448c8f2ad20fb9946631b1c246968.png';
+import venueFallbackImg from 'figma:asset/622002b1a57eb609a09cacd650764fb95c911672.png';
 
 const DAYS_OF_WEEK = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -330,7 +331,7 @@ export function HomePage() {
 
   const cmsAboutImage = siteConfig?.aboutImage 
     ? (siteConfig.aboutImage.startsWith('http') ? siteConfig.aboutImage : `http://localhost:3001${siteConfig.aboutImage}`)
-    : "https://images.unsplash.com/photo-1761335633357-04fab36b333f?q=80";
+    : venueFallbackImg;
 
   // 🟢 DYNAMIC CMS CONTENT (Pulls from Site Settings, fallback to defaults)
   const getCfg = (keys: string[], fallback: string = '') => {
@@ -1236,6 +1237,7 @@ export function HomePage() {
                     <ImageWithFallback 
                       src={(heroSlides[heroSlideIdx] || heroSlides[0]).src} 
                       alt={(heroSlides[heroSlideIdx] || heroSlides[0]).alt} 
+                      fallbackSrc={heroImg1}
                       className="w-full h-full object-cover" 
                     />
                   </motion.div>
@@ -1372,7 +1374,7 @@ export function HomePage() {
                   </div>
 
                   <div className="lg:col-span-5 rounded-2xl overflow-hidden min-h-[380px] lg:h-full border border-neutral-800 shadow-xl bg-neutral-900 flex">
-                     <ImageWithFallback src={cms.aboutImage} alt="One Shot Facility" className="w-full h-full object-cover min-h-[380px]" />
+                     <ImageWithFallback src={cms.aboutImage} alt="One Shot Facility" fallbackSrc={venueFallbackImg} className="w-full h-full object-cover min-h-[380px]" />
                   </div>
                 </div>
                 

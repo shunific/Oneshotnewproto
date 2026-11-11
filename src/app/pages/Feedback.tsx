@@ -53,8 +53,8 @@ export function FeedbackPage() {
   const filtered = feedback.filter(f => {
     const matchType = filterType === 'all' || effectiveType(f) === filterType;
     const matchSearch = !searchQuery ||
-      f.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      f.comment.toLowerCase().includes(searchQuery.toLowerCase());
+      String(f.customerName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      String(f.comment || '').toLowerCase().includes(searchQuery.toLowerCase());
       
     let matchDate = true;
     const fDate = new Date(f.date);
@@ -265,7 +265,7 @@ export function FeedbackPage() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-sm font-semibold text-neutral-200">{fb.customerName}</p>
+                      <p className="text-sm font-semibold text-neutral-200">{fb.customerName || 'Guest'}</p>
                       {fb.reservationId && (
                         <span className="text-[10px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1.5 py-0.5 rounded uppercase font-bold">Verified Booking</span>
                       )}
@@ -291,7 +291,7 @@ export function FeedbackPage() {
                 </div>
               </div>
 
-              <p className="text-sm text-neutral-300 mt-4 leading-relaxed">"{fb.comment}"</p>
+              <p className="text-sm text-neutral-300 mt-4 leading-relaxed">"{fb.comment || '(No message provided)'}"</p>
 
               {fb.tags && fb.tags.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 mt-4 pt-4 border-t border-neutral-800/50">
