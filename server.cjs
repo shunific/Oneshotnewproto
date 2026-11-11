@@ -1712,7 +1712,10 @@ const serverInstance = app.listen(PORT, () => {
       if (!cfg.enabled) {
         console.log('📧 [Email]: automatic customer emails are disabled (EMAIL_NOTIFICATIONS_ENABLED).');
       } else if (!cfg.provider) {
-        console.log('📧 [Email]: no transport configured — customer emails will be logged as skipped. Set RESEND_API_KEY or SMTP_* in the app environment.');
+        const hint = cfg.smtpHost && cfg.smtpUser && !cfg.smtpPass
+          ? 'SMTP host/user set but the app password is missing'
+          : 'no transport configured';
+        console.log(`📧 [Email]: ${hint} — customer emails will be logged as skipped. Set RESEND_API_KEY or SMTP_* in the app environment.`);
       } else {
         console.log(`📧 [Email]: automatic customer emails enabled via ${cfg.provider} (from: ${cfg.fromAddress}).`);
       }

@@ -251,11 +251,17 @@ async function loadConfig(db) {
 
   const pick = (envVal, key) => clean(envVal) || clean(settings[key]);
 
+  // A host alone is not enough for a login-based relay: without the password we
+  // would hammer Gmail with doomed logins (which can lock the mailbox), so treat
+  // it as unconfigured and skip cleanly instead.
+  const smtpReady = !!pick(process.env.SMTP_HOST, 'smtpHost')
+    && (!pick(process.env.SMTP_USER, 'smtpUser') || !!pick(process.env.SMTP_PASS, 'smtpPass'));
+
   const provider = (() => {
     const explicit = pick(process.env.EMAIL_PROVIDER, 'emailProvider').toLowerCase();
     if (explicit) return explicit;
     if (pick(process.env.RESEND_API_KEY, 'resendApiKey')) return 'resend';
-    if (pick(process.env.SMTP_HOST, 'smtpHost')) return 'smtp';
+    if (smtpReady) return 'smtp';
     return '';
   })();
 
