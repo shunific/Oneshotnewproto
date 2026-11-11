@@ -595,13 +595,26 @@ export function HomePage() {
     });
     
     if (error) {
-      const isRateLimit = error.message.toLowerCase().includes('rate limit') || (error as any).status === 429;
+      const message = (error.message || '').toLowerCase();
+      const isDuplicate = message.includes('already registered') || message.includes('already exists') || message.includes('user already');
+      const isRateLimit = message.includes('rate limit') || (error as any).status === 429;
       setRegisterForm(f => ({ 
         ...f, 
-        error: isRateLimit 
+        error: isDuplicate
+          ? 'An account with this email already exists. Please sign in instead.'
+          : isRateLimit 
           ? 'Email rate limit reached for confirmation emails. If you already created an account, please Sign In, or use "Continue with Google".'
           : error.message, 
         loading: false 
+      }));
+    } else if (data?.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+      // Supabase hides duplicate sign-ups when email confirmation is enabled: it
+      // returns a 200 with an empty identities array instead of an error, so we
+      // surface the collision here rather than silently "creating" the account.
+      setRegisterForm(f => ({
+        ...f,
+        error: 'An account with this email already exists. Please sign in instead.',
+        loading: false
       }));
     } else {
       // Check if session was granted automatically
@@ -2197,6 +2210,20 @@ export function HomePage() {
                                         <span className="text-[10px] text-neutral-400 font-semibold">{receiptPreview ? 'Change Image' : 'Upload JPG/PNG'}</span>
                                       </label>
                                     </div>
+                                    {receiptPreview && (
+                                      <div className="mt-2 relative rounded-lg overflow-hidden border border-neutral-800 bg-neutral-950">
+                                        <img src={receiptPreview} alt="Selected payment receipt preview" className="w-full max-h-40 object-contain" />
+                                        <button
+                                          type="button"
+                                          onClick={() => { setReceiptPreview(null); setReceiptFile(null); }}
+                                          className="absolute top-1.5 right-1.5 bg-black/70 hover:bg-black text-neutral-300 hover:text-white rounded-full p-1 transition-colors"
+                                          aria-label="Remove selected receipt image"
+                                        >
+                                          <X size={12} />
+                                        </button>
+                                        <p className="text-[10px] text-emerald-400 font-semibold px-2 py-1.5 flex items-center gap-1"><CheckCircle size={10} /> Receipt attached</p>
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
                               ) : (
