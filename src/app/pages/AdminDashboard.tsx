@@ -538,8 +538,7 @@ export function AdminDashboard() {
                         <span>{dateLabel}, {r.timeSlot}</span><span>·</span><span>{r.partySize} pax</span>
                       </div>
                     </div>
-                    <button onClick={() => navigate('/admin/reservations')} className="opacity-0 group-hover:opacity-100 p-1.5 text-neutral-500 hover:text-emerald-400 transition-all"><ArrowRight size={14} /></button>
-                  </div>
+<button onClick={() => navigate('/staff/reservations')} className="opacity-0 group-hover:opacity-100 p-1.5 text-neutral-500 hover:text-emerald-400 transition-all"><ArrowRight size={14} /></button>                  </div>
                 );
               })
             )}
@@ -549,8 +548,7 @@ export function AdminDashboard() {
         <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5 flex flex-col h-[400px]">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-sm font-bold text-neutral-200 flex items-center gap-2"><TrendingUp size={15} className="text-emerald-400" /> Recent Feedback</h3>
-            <button onClick={() => navigate('/admin/feedback')} className="text-[10px] text-neutral-500 hover:text-emerald-400 transition-colors font-medium">View All</button>
-          </div>
+          <button onClick={() => navigate('/staff/feedback')} className="text-[10px] text-neutral-500 hover:text-emerald-400 transition-colors font-medium">View All</button>             </div>
           <div className="space-y-2 overflow-y-auto pr-2 flex-1">
             {feedback.length === 0 ? <p className="text-xs text-neutral-500 italic text-center py-6">No recent feedback</p> : feedback.slice(0, 6).map((f: any) => (
               <div key={f.id} className="flex items-start gap-3 py-3 border-b border-neutral-800/50 last:border-0">

@@ -39,7 +39,18 @@ export function OverviewDashboard() {
     staffUsers, promoCodes, announcements, closedDates, rates, 
     staffProfile,availableTables,heldTableIds,reservationMoveError
   } = useAppContext() as any;
-  const navigate = useNavigate();
+  
+  const routeTo = (pathName: string) => {
+    if (staffProfile?.isAdmin || staffProfile?.username?.toLowerCase() === 'superadmin') {
+      // If the feature has a dedicated admin page, route there. Otherwise, route to the shared staff page.
+      const adminOnlyPaths = ['tables', 'settings']; 
+      if (adminOnlyPaths.includes(pathName)) {
+        navigate(`/admin/${pathName}`);
+        return;
+      }
+    }
+    navigate(`/staff/${pathName}`);
+  };
 
   // ── Connectivity & Local Backup State ─────────────────────────
   const [isSyncing, setIsSyncing] = useState(false);
@@ -421,7 +432,7 @@ export function OverviewDashboard() {
             <h2 className="text-sm font-semibold text-neutral-300 flex items-center gap-2">
               <Calendar size={15} className="text-neutral-500" /> Upcoming Reservations
             </h2>
-            <button onClick={() => navigate('/staff/reservations')} className="text-xs text-emerald-500 hover:text-emerald-400 flex items-center gap-1 font-semibold">
+            <button onClick={() => navigate(staffProfile?.isAdmin ? '/admin/reservations' : '/staff/reservations')} className="text-xs text-emerald-500 hover:text-emerald-400 flex items-center gap-1 font-semibold">
               View All <ChevronRight size={12} />
             </button>
           </div>
@@ -435,8 +446,8 @@ export function OverviewDashboard() {
               {upcomingReservations.map((r: any) => (
                 <div 
                   key={r.id} 
-                  onClick={() => navigate('/staff/reservations')} // <-- ADDED: Navigate to reservations manager
-                  className="flex items-center gap-3 bg-neutral-900 hover:bg-neutral-800 rounded-lg px-3 py-2.5 border border-neutral-800/60 cursor-pointer transition-colors" // <-- ADDED: hover styles and cursor pointer
+                  onClick={() => navigate(staffProfile?.isAdmin ? '/admin/reservations' : '/staff/reservations')} 
+                  className="flex items-center gap-3 bg-neutral-900 hover:bg-neutral-800 rounded-lg px-3 py-2.5 border border-neutral-800/60 cursor-pointer transition-colors"
                 >
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-neutral-200 truncate">{r.customerName}</p>
@@ -460,7 +471,7 @@ export function OverviewDashboard() {
               <Users size={15} className="text-neutral-500" /> Walk-in Queue
               {waiting > 0 && <span className="bg-amber-500 text-black text-[10px] font-black rounded-full w-4 h-4 flex items-center justify-center">{waiting}</span>}
             </h2>
-            <button onClick={() => navigate('/staff/queue')} className="text-xs text-emerald-500 hover:text-emerald-400 flex items-center gap-1 font-semibold">
+            <button onClick={() => navigate(staffProfile?.isAdmin ? '/admin/queue' : '/staff/queue')} className="text-xs text-emerald-500 hover:text-emerald-400 flex items-center gap-1 font-semibold">
               Manage <ChevronRight size={12} />
             </button>
           </div>
@@ -507,7 +518,7 @@ export function OverviewDashboard() {
               <ShieldAlert size={15} className="text-rose-500" /> Security Watchlist
               {activeWatchlist.length > 0 && <span className="bg-rose-500 text-white text-[10px] font-black rounded-full px-2 py-0.5 flex items-center justify-center">{activeWatchlist.length}</span>}
             </h2>
-            <button onClick={() => navigate('/staff/watchlist')} className="text-xs text-rose-500 hover:text-rose-400 flex items-center gap-1 font-semibold">
+           <button onClick={() => navigate(staffProfile?.isAdmin ? '/admin/watchlist' : '/staff/watchlist')} className="text-xs text-rose-500 hover:text-rose-400 flex items-center gap-1 font-semibold">
               Manage <ChevronRight size={12} />
             </button>
           </div>

@@ -53,13 +53,18 @@ export default function AdminPolicyRatesEditor() {
   const handleReloadSavedSettings = async () => {
     setIsLoading(true);
     try {
-      const response = await localFetch('http://localhost:3001/api/settings/policy');
-      if (response.ok) {
-        const saved = await response.json();
-        if (saved?.settings?.rates) setRatesForm(saved.settings.rates);
-        if (saved?.settings?.terms) setTermsForm(saved.settings.terms);
-        if (saved?.revision) setPolicyRevision(saved.revision);
-        if (saved?.settings) setPolicyBaseline(saved.settings);
+      const [ratesRes, termsRes] = await Promise.all([
+        localFetch('http://localhost:3001/api/settings/rates').catch(() => null),
+        localFetch('http://localhost:3001/api/settings/terms').catch(() => null)
+      ]);
+      
+      if (ratesRes?.ok && termsRes?.ok) {
+        const savedRates = await ratesRes.json();
+        const savedTerms = await termsRes.json();
+        setRatesForm(savedRates);
+        setTermsForm(savedTerms);
+        setPolicyRevision('rev_default');
+        setPolicyBaseline({ rates: savedRates, terms: savedTerms });
       } else {
         if (rates) setRatesForm(prev => ({ ...prev, ...rates }));
         if (reservationTerms) setTermsForm(prev => ({ ...prev, ...reservationTerms }));
@@ -85,14 +90,20 @@ export default function AdminPolicyRatesEditor() {
     setIsLoading(true);
     void (async () => {
       try {
-        const response = await localFetch('http://localhost:3001/api/settings/policy');
-        if (response.ok) {
-          const saved = await response.json();
-          if (active && saved?.settings?.rates && saved?.settings?.terms) {
-            setRatesForm(saved.settings.rates);
-            setTermsForm(saved.settings.terms);
-            setPolicyRevision(saved.revision || 'rev_default');
-            setPolicyBaseline(saved.settings);
+        const [ratesRes, termsRes] = await Promise.all([
+          localFetch('http://localhost:3001/api/settings/rates').catch(() => null),
+          localFetch('http://localhost:3001/api/settings/terms').catch(() => null)
+        ]);
+        
+        if (ratesRes?.ok && termsRes?.ok) {
+          const savedRates = await ratesRes.json();
+          const savedTerms = await termsRes.json();
+          
+          if (active && Object.keys(savedRates).length > 0) {
+            setRatesForm(savedRates);
+            setTermsForm(savedTerms);
+            setPolicyRevision('rev_default');
+            setPolicyBaseline({ rates: savedRates, terms: savedTerms });
             setPolicyLoadError('');
             setPolicyWarning(false);
             return;
