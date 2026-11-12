@@ -106,6 +106,7 @@ export default function AdminPolicyRatesEditor() {
             setPolicyBaseline({ rates: savedRates, terms: savedTerms });
             setPolicyLoadError('');
             setPolicyWarning(false);
+            setIsLoading(false);
             return;
           }
         }

@@ -1653,7 +1653,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const rawPin = u.recoveryPin;
     const recoveryPin = (typeof rawPin === 'string' && rawPin !== '0000' && /^\d{4,12}$/.test(rawPin.trim()))
       ? rawPin.trim()
-      : Math.floor(1000 + Math.random() * 9000).toString();
+      : '';
     const newUser = { ...u, id, recoveryPin, createdAt: new Date() };
     setStaffUsers(prev => [...prev, newUser]);
     syncToDB('/api/staff', 'POST', newUser, `Added staff user`).then(runCloudBackup).catch(()=>{});

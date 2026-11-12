@@ -2,7 +2,7 @@ import { localFetch } from '../utils/localApi';
 import { EmployeeProfileEditor } from '../components/EmployeeProfileEditor';
 import { useState, useEffect, useRef } from 'react';
 import { useAppContext, StaffUser } from '../context/AppContext';
-import { Plus, X, User, Phone, CheckCircle, Eye, EyeOff, Trash2, History, Activity, RefreshCw, MoreVertical, ShieldAlert, KeyRound, Copy, Download, ShieldCheck } from 'lucide-react';
+import { Plus, X, User, Phone, CheckCircle, Eye, EyeOff, Trash2, History, Activity, RefreshCw, MoreVertical, ShieldAlert } from 'lucide-react';
 
 const ROLES: { value: StaffUser['role']; label: string; color: string; icon: React.ReactNode }[] = [
   { value: 'manager', label: 'Manager', color: 'bg-amber-500/10 text-amber-400 border-amber-500/20', icon: <User size={11} /> },
@@ -31,10 +31,6 @@ export function AdminUsers() {
   // 🟢 State for active dropdown menu
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement | null>(null);
-
-  const [createdAccount, setCreatedAccount] = useState<{ username: string; fullName: string; pin: string; role: string } | null>(null);
-  const [viewingPinUser, setViewingPinUser] = useState<{ fullName: string; username: string; pin: string } | null>(null);
-  const [pinCopied, setPinCopied] = useState(false);
 
   const [toast, setToast]           = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
 
@@ -86,13 +82,11 @@ export function AdminUsers() {
     if (isUsernameTaken) { flash("Error: That username is already taken. Please choose another.", "error"); return; }
 
     const { confirmPassword, ...accountFields } = form;
-    const generatedPin = Math.floor(1000 + Math.random() * 9000).toString();
     const payload = {
       ...accountFields,
       password: form.password,
       isActive: true,
       isFirstLogin: 1,
-      recoveryPin: generatedPin,
     };
 
     setLoadingMsg('SAVING NEW USER...');
@@ -101,13 +95,7 @@ export function AdminUsers() {
       await addStaffUser(payload as any);
       setShowForm(false);
       setForm(blankForm);
-      setCreatedAccount({
-        username: payload.username,
-        fullName: payload.fullName,
-        pin: generatedPin,
-        role: payload.role || 'cashier',
-      });
-      flash(`User created successfully! Recovery PIN: ${generatedPin}`, "success");
+      flash(`User created successfully! ${payload.fullName} can set up their recovery PIN at first login.`, "success");
     } catch {
       flash('Staff account was not saved. Your form is preserved; please try again.', 'error');
     } finally {
@@ -411,20 +399,6 @@ export function AdminUsers() {
                             </button>
 
                             <button
-                              onClick={() => {
-                                setOpenDropdownId(null);
-                                const pin = (typeof u.recoveryPin === 'string' && u.recoveryPin && u.recoveryPin !== '0000' && !u.recoveryPin.startsWith('scrypt'))
-                                  ? u.recoveryPin
-                                  : '8492';
-                                setViewingPinUser({ fullName: u.fullName, username: u.username, pin });
-                              }}
-                              className="w-full px-4 py-2.5 text-left text-xs text-neutral-300 hover:bg-neutral-900 transition-colors flex items-center gap-2"
-                            >
-                              <KeyRound size={13} className="text-emerald-400" />
-                              <span>View Recovery PIN</span>
-                            </button>
-
-                            <button
                               disabled={isSelf || isSuperAdmin}
                               onClick={() => handleArchive(u.id, u.fullName, u.username)}
                               className={`w-full px-4 py-2.5 text-left text-xs transition-colors flex items-center gap-2 border-t border-neutral-800/60 ${
@@ -612,121 +586,6 @@ export function AdminUsers() {
         </div>
       )}
 
-      {/* 🟢 NEW: Account Created PIN Modal */}
-      {createdAccount && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="bg-neutral-950 border border-emerald-900/50 rounded-2xl w-full max-w-md p-6 shadow-2xl text-center">
-            <div className="w-14 h-14 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mx-auto mb-4 text-emerald-400">
-              <ShieldCheck size={28} />
-            </div>
-            <h3 className="text-lg font-bold text-white mb-1">Staff Account Created</h3>
-            <p className="text-xs text-neutral-400 mb-5">
-              Account created for <strong className="text-neutral-200">{createdAccount.fullName}</strong> (@{createdAccount.username}). Securely provide them with their unique 4-digit Offline Recovery PIN.
-            </p>
-
-            <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 mb-5">
-              <p className="text-[10px] uppercase tracking-widest text-neutral-500 mb-1">Generated Recovery PIN</p>
-              <p className="text-4xl font-mono font-bold text-emerald-400 tracking-[0.3em]">{createdAccount.pin}</p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 mb-5">
-              <button
-                type="button"
-                onClick={() => {
-                  navigator.clipboard.writeText(createdAccount.pin);
-                  setPinCopied(true);
-                  setTimeout(() => setPinCopied(false), 2000);
-                }}
-                className="py-2.5 px-3 bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 rounded-xl text-xs font-bold text-neutral-200 transition-colors flex items-center justify-center gap-2"
-              >
-                {pinCopied ? <CheckCircle size={14} className="text-emerald-400" /> : <Copy size={14} />}
-                {pinCopied ? 'Copied!' : 'Copy PIN'}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const element = document.createElement("a");
-                  const file = new Blob([`One Shot Bar & Billiards\nStaff: ${createdAccount.fullName} (@${createdAccount.username})\nRecovery PIN: ${createdAccount.pin}\nKeep this confidential.\n`], {type: 'text/plain'});
-                  element.href = URL.createObjectURL(file);
-                  element.download = `${createdAccount.username}_recovery_pin.txt`;
-                  document.body.appendChild(element);
-                  element.click();
-                }}
-                className="py-2.5 px-3 bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 rounded-xl text-xs font-bold text-neutral-200 transition-colors flex items-center justify-center gap-2"
-              >
-                <Download size={14} />
-                Save .txt
-              </button>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setCreatedAccount(null)}
-              className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold uppercase tracking-wider rounded-xl transition-colors"
-            >
-              Done & Close
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* 🟢 NEW: View Recovery PIN Modal */}
-      {viewingPinUser && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="bg-neutral-950 border border-amber-900/50 rounded-2xl w-full max-w-sm p-6 shadow-2xl text-center">
-            <div className="w-12 h-12 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mx-auto mb-3 text-amber-400">
-              <KeyRound size={24} />
-            </div>
-            <h3 className="text-base font-bold text-white mb-1">Staff Recovery PIN</h3>
-            <p className="text-xs text-neutral-400 mb-4">
-              {viewingPinUser.fullName} (@{viewingPinUser.username})
-            </p>
-
-            <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 mb-4">
-              <p className="text-[10px] uppercase tracking-widest text-neutral-500 mb-1">Offline Recovery PIN</p>
-              <p className="text-3xl font-mono font-bold text-amber-400 tracking-[0.3em]">{viewingPinUser.pin}</p>
-            </div>
-
-            <div className="flex gap-2 mb-4">
-              <button
-                type="button"
-                onClick={() => {
-                  navigator.clipboard.writeText(viewingPinUser.pin);
-                  setPinCopied(true);
-                  setTimeout(() => setPinCopied(false), 2000);
-                }}
-                className="flex-1 py-2.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 rounded-xl text-xs font-bold text-neutral-200 transition-colors flex items-center justify-center gap-2"
-              >
-                {pinCopied ? <CheckCircle size={14} className="text-emerald-400" /> : <Copy size={14} />}
-                {pinCopied ? 'Copied' : 'Copy'}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const element = document.createElement("a");
-                  const file = new Blob([`One Shot Bar & Billiards\nStaff: ${viewingPinUser.fullName} (@${viewingPinUser.username})\nRecovery PIN: ${viewingPinUser.pin}\nKeep this confidential.\n`], {type: 'text/plain'});
-                  element.href = URL.createObjectURL(file);
-                  element.download = `${viewingPinUser.username}_recovery_pin.txt`;
-                  document.body.appendChild(element);
-                  element.click();
-                }}
-                className="flex-1 py-2.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 rounded-xl text-xs font-bold text-neutral-200 transition-colors flex items-center justify-center gap-2"
-              >
-                <Download size={14} />
-                Save .txt
-              </button>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setViewingPinUser(null)}
-              className="w-full py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-bold rounded-xl transition-colors"
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
