@@ -853,11 +853,20 @@ const normalizeCacheField = (key, value) => {
 const cacheRowSignature = (row) =>
   CACHE_EMAIL_FIELDS.map((key) => `${key}=${normalizeCacheField(key, row && row[key])}`).join('|');
 
+// Event markers are admin bookkeeping rows, never real customers, so caching
+// them must not try to email anyone.
+const isEventMarkerReservation = (row) => {
+  if (!row) return false;
+  const name = String(row.customerName || '');
+  return row.paymentRef === 'EVENT' || name.startsWith('EVENT:') || String(row.id || '').startsWith('EVT-');
+};
+
 const notifyCachedReservationChanges = (previousRows, incomingRows) => {
   try {
     const previous = new Map((previousRows || []).map((row) => [String(row.id), row]));
     const changed = [];
     for (const row of incomingRows) {
+      if (isEventMarkerReservation(row)) continue;
       const prev = previous.get(String(row.id)) || null;
       if (prev && cacheRowSignature(prev) === cacheRowSignature(row)) continue;
       // A cache that starts empty (fresh install) must not email historical
@@ -942,6 +951,10 @@ app.post('/api/cache-feedback', (req, res) => {
   });
 });
 
+// Event → table blocking is derived in server-event-blocks.cjs so the sync
+// endpoint and maintenance scripts share one implementation.
+const { EVENT_ASSIGNMENT_KEY, buildEventTableBlocking } = require('./server-event-blocks.cjs');
+
 app.post('/api/sync-to-cloud', async (req, res) => {
   let syncErrors = [];
   try {
@@ -978,6 +991,51 @@ if (error) {
         });
       });
     };
+
+    // Rebuild the public event → table blocking snapshot. Kept out of the
+    // Promise.all so it always runs after local events have been pushed.
+    const syncEventTableBlocks = () => new Promise((resolve) => {
+      db.all('SELECT * FROM events', [], async (err, rows) => {
+        if (err) {
+          syncErrors.push(`events blocking: ${err.message}`);
+          return resolve();
+        }
+        try {
+          const { map, reservations } = buildEventTableBlocking(rows);
+
+          const { error: mapErr } = await supabase
+            .from('cms')
+            .upsert([{ keyname: EVENT_ASSIGNMENT_KEY, settingvalue: JSON.stringify(map) }], { onConflict: 'keyname' });
+          if (mapErr) {
+            console.error('❌ event table map sync failed:', mapErr.message);
+            syncErrors.push(`event table map: ${mapErr.message}`);
+          }
+
+          // Event marker rows are regenerated from scratch so edited or
+          // cancelled events cannot keep a table blocked online.
+          const { error: clearErr } = await supabase.from('reservations').delete().eq('paymentRef', 'EVENT');
+          if (clearErr) {
+            console.error('❌ event reservation cleanup failed:', clearErr.message);
+            syncErrors.push(`event reservation cleanup: ${clearErr.message}`);
+          }
+
+          if (reservations.length > 0) {
+            const { error: blockErr } = await supabase.from('reservations').upsert(reservations, { onConflict: 'id' });
+            if (blockErr) {
+              console.error('❌ event table blocks sync failed:', blockErr.message);
+              syncErrors.push(`event table blocks: ${blockErr.message}`);
+            }
+          }
+
+          if (!mapErr && !clearErr) {
+            console.log(`✅ event table blocks synced: ${Object.keys(map).length} event(s), ${reservations.length} blocked table day(s)`);
+          }
+        } catch (e) {
+          syncErrors.push(`events blocking: ${e.message}`);
+        }
+        resolve();
+      });
+    });
 
    await Promise.all([
       syncTable("cms", "cms", r => {
@@ -1082,6 +1140,8 @@ if (error) {
         id: r.id, receipt_no: r.receipt_no, reservation_id: r.reservation_id, customer_name: r.customer_name, customer_email: r.customer_email, customer_phone: r.customer_phone, table_id: r.table_id, table_name: r.table_name, play_start_time: r.play_start_time, play_end_time: r.play_end_time, duration_minutes: r.duration_minutes, table_rate: r.table_rate, table_charge: r.table_charge, overtime_charge: r.overtime_charge, fnb_charge: r.fnb_charge, subtotal: r.subtotal, discount_amount: r.discount_amount, total_amount: r.total_amount, amount_paid: r.amount_paid, balance_due: r.balance_due, payment_method: r.payment_method, payment_status: r.payment_status, created_at: r.created_at || new Date().toISOString()
       }), 'id')
     ]);
+
+    await syncEventTableBlocks();
 
     if (syncErrors.length > 0) {
       res.status(500).json({ error: 'Supabase rejected some tables', details: syncErrors.join(' | ') });

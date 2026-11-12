@@ -503,7 +503,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const forceFullSync = async () => {
     try {
       // 1. FETCH FLOOR DATA (Local Machine is Absolute Source of Truth for physical operations)
-      const [tablesRes, invRes, queueRes, staffRes, historyRes, activitiesRes, feedRes, lostRes, watchRes] = await Promise.all([
+      const [tablesRes, invRes, queueRes, staffRes, historyRes, activitiesRes, feedRes, lostRes, watchRes, eventsRes] = await Promise.all([
         fetch('/api/tables').catch(() => fetch('http://localhost:3001/api/tables')).catch(() => null),
         fetch('/api/inventory').catch(() => fetch('http://localhost:3001/api/inventory')).catch(() => null),
         fetch('/api/queue').catch(() => fetch('http://localhost:3001/api/queue')).catch(() => null),
@@ -512,8 +512,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
         fetch('/api/activities').catch(() => fetch('http://localhost:3001/api/activities')).catch(() => null),
         fetch('/api/feedback').catch(() => fetch('http://localhost:3001/api/feedback')).catch(() => null),
         fetch('/api/lost-and-found').catch(() => fetch('http://localhost:3001/api/lost-and-found')).catch(() => null),
-        fetch('/api/watchlist').catch(() => fetch('http://localhost:3001/api/watchlist')).catch(() => null)
+        fetch('/api/watchlist').catch(() => fetch('http://localhost:3001/api/watchlist')).catch(() => null),
+        fetch('/api/events').catch(() => fetch('http://localhost:3001/api/events')).catch(() => null)
       ]);
+
+      // Local SQLite is the source of truth for event setup (Supabase's events
+      // table has no per-table columns), so keep its table assignments around
+      // when the cloud copy is merged in below.
+      const localEventsById = new Map<string, any>();
+      if (eventsRes && eventsRes.ok) {
+        try {
+          const rows = await eventsRes.json();
+          if (Array.isArray(rows)) rows.forEach((row: any) => localEventsById.set(String(row.id), row));
+        } catch {}
+      }
 
       if (tablesRes && tablesRes.ok) setTables(await tablesRes.json());
       if (invRes && invRes.ok) setInventory(await invRes.json());
@@ -674,13 +686,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
             try { parsedTableIds = JSON.parse(rawTIds); } catch { parsedTableIds = [rawTIds]; }
           }
 
+          // The cloud row cannot carry table ids, so restore them from the
+          // local database instead of silently wiping the event's setup.
+          if (parsedTableIds.length === 0) {
+            const localRow = localEventsById.get(String(e.id));
+            const localIds = localRow?.eventTableIds;
+            if (Array.isArray(localIds)) parsedTableIds = localIds.map(String);
+            else if (typeof localIds === 'string' && localIds.trim()) {
+              try { const parsed = JSON.parse(localIds); if (Array.isArray(parsed)) parsedTableIds = parsed.map(String); } catch {}
+            }
+          }
+
+          const rawAllowRes = e.allowReservations ?? e.allowreservations ?? e.allow_reservations;
+          const rawCaterWalkIns = e.caterWalkIns ?? e.caterwalkins ?? e.cater_walk_ins;
+          const truthyFlag = (v: any) => !(v === false || v === 0 || v === '0' || v === 'false');
+
           return { 
             ...e, 
             dates: parsedDates,
             eventTableIds: parsedTableIds,
             slotsFull: !!e.slotsFull, 
-            allowReservations: e.allowReservations !== false, 
-            caterWalkIns: e.caterWalkIns !== false, 
+            allowReservations: truthyFlag(rawAllowRes), 
+            caterWalkIns: truthyFlag(rawCaterWalkIns), 
             walkInTableCount: e.walkInTableCount ?? 10, 
             attachments: e.attachments ? (Array.isArray(e.attachments) ? e.attachments : [e.attachments]) : [] 
           };
