@@ -159,7 +159,7 @@ function buildEmail({ action, reservation, venue = {}, extras = {} }) {
     ...rows.map(([k, v]) => `${k}: ${v}`),
   ];
   if (callout) textLines.push('', callout.replace(/<[^>]+>/g, ''));
-  textLines.push('', `${venueName}${venue.phone ? ' · ' + venue.phone : ''}`);
+  textLines.push('', [venueName, venue.phone, venue.email].filter(Boolean).join(' · '));
   const text = textLines.join('\n');
 
   const subject = `${venueName}: ${meta.heading} (${bookingId})`;

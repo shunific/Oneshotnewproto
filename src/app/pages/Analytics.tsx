@@ -2,7 +2,7 @@ import { exportCsv } from '../utils/csvExport.js';
 import { sessionFinancials, summarizeSessionFinancials } from '../utils/sessionFinancials.js';
 import { useState, useMemo } from 'react';
 import {
-  AreaChart, Area, BarChart, Bar, LineChart, Line,
+  AreaChart, Area, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell
 } from 'recharts';
 import { useAppContext } from '../context/AppContext';
@@ -113,13 +113,6 @@ export function Analytics() {
       return [];
     }
   }, [filteredHistory, dateRange]);
-
-  // 2. Revenue by Day of Week
-  const revenueByDayOfWeek = useMemo(() => {
-    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
-    return days.map((day, index) => ({ day, revenue: summarizeSessionFinancials(filteredHistory.filter((h: any) => new Date(h.startTime || h.endTime).getDay() === index)).billedCents / 100 }));
-  }, [filteredHistory]);
 
   // 3. Session Length Distribution
   const sessionDist = useMemo(() => {
@@ -600,7 +593,7 @@ export function Analytics() {
         </div>
 
         {/* Charts Row 2 */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4">
           {/* Peak Hours */}
           <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">
@@ -621,25 +614,6 @@ export function Analytics() {
                 <Tooltip content={<CustomTooltip />} />
                 <Line key="line-peak-occupancy" type="monotone" dataKey="sessions" name="Session Starts" stroke="#f59e0b" strokeWidth={2} dot={false} />
               </LineChart>
-            </ResponsiveContainer>
-          </div>
-
-          {/* Revenue by Day of Week */}
-          <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="text-sm font-semibold text-neutral-300">Session Bills by Day</h3>
-                <p className="text-xs text-neutral-600 mt-0.5">Which days of the week perform best?</p>
-              </div>
-            </div>
-            <ResponsiveContainer width="100%" height={180}>
-              <BarChart data={revenueByDayOfWeek} barSize={20}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#262626" />
-                <XAxis dataKey="day" tick={{ fontSize: 11, fill: '#737373' }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 11, fill: '#737373' }} axisLine={false} tickLine={false} tickFormatter={v => `₱${(v / 1000).toFixed(0)}k`} />
-                <Tooltip content={<CustomTooltip />} />
-                <Bar key="bar-monthly-revenue" dataKey="revenue" name="Billed" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-              </BarChart>
             </ResponsiveContainer>
           </div>
         </div>

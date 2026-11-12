@@ -187,11 +187,34 @@ const loadVenue = (database) => new Promise((resolve) => {
     if (err || !rows) return resolve({});
     const cfg = {};
     rows.forEach((r) => { cfg[r.keyName] = r.settingValue; });
+
+    // Site Settings writes contactNumber/contactEmail; older rows only have
+    // phone/email. Prefer the values the app actually displays so emailed
+    // contact details can never drift from what staff see in the UI.
+    const pickValue = (...keys) => {
+      for (const key of keys) {
+        const value = cfg[key];
+        if (value !== undefined && value !== null && String(value).trim() !== '') return String(value);
+      }
+      return '';
+    };
+
+    const name = pickValue('venueName', 'name') || 'One Shot Bar & Billiards';
+    const phone = (pickValue('contactNumber', 'contactPhone', 'contactnumber', 'phone').split('|')[0] || '').trim();
+    const email = pickValue('contactEmail', 'contactemail', 'email').trim();
+    const address = pickValue('address', 'venueAddress').trim();
+    // Some setups reuse the address field for the venue name ("One Shot Bar
+    // and Billiards"); printing that above the hotline only adds noise, so
+    // drop it when it is just the venue name spelled differently.
+    const nameKey = name.toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]/g, '').replace(/and/g, '');
+    const addressKey = address.toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]/g, '').replace(/and/g, '');
+    const addressIsName = !!address && (addressKey === nameKey || nameKey.includes(addressKey) || addressKey.includes(nameKey));
+
     resolve({
-      name: cfg.venueName || cfg.name || 'One Shot Bar & Billiards',
-      phone: cfg.phone ? String(cfg.phone).split('|')[0].trim() : '',
-      email: cfg.email || cfg.contactEmail || '',
-      address: cfg.address || '',
+      name,
+      phone,
+      email,
+      address: addressIsName ? '' : address,
     });
   });
 });
