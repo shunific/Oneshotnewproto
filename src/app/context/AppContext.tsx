@@ -246,6 +246,15 @@ export function selectCanonicalTables<T extends { id?: any; name?: any }>(rows: 
   return [...byNumber.entries()].sort((a, b) => a[0] - b[0]).map(([, row]) => row);
 }
 
+// The customer site is also deployed statically (Vercel). The POS API only
+// exists on the venue's machine, so asking the static host for /api/* answers
+// with 405 and floods the console. Only talk to it when served locally.
+export function isServedFromLocalMachine(): boolean {
+  if (typeof window === 'undefined') return false;
+  const { hostname, protocol } = window.location;
+  return protocol === 'file:' || hostname === '' || hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
+}
+
 export function AppProvider({ children }: { children: ReactNode }) {
   const [isInitializing, setIsInitializing] = useState(true);
 
@@ -611,6 +620,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
           };
         }) as PromoCode[]);
       }
+      // Supabase's events table has no per-table columns, so the local machine
+      // publishes each event's reserved table ids as JSON in `cms`.
+      let eventTableMap: Record<string, string[]> = {};
+      const rawEventMapRow = ((cmsData as any[]) || []).find((r: any) =>
+        (r.keyname || r.key_name || r.keyName) === 'eventTableAssignments'
+      );
+      if (rawEventMapRow) {
+        const rawMapValue = rawEventMapRow.settingvalue ?? rawEventMapRow.setting_value ?? rawEventMapRow.settingValue;
+        try {
+          const parsedMap = typeof rawMapValue === 'string' ? JSON.parse(rawMapValue) : rawMapValue;
+          if (parsedMap && typeof parsedMap === 'object' && !Array.isArray(parsedMap)) {
+            Object.entries(parsedMap).forEach(([eventId, value]) => {
+              if (Array.isArray(value)) eventTableMap[String(eventId)] = value.map(String);
+            });
+          }
+        } catch {}
+      }
+
       if (eventsData && (eventsData as any[]).length > 0) {
         setEvents((eventsData as any[]).map(e => {
           let parsedDates: string[] = [];
@@ -625,6 +652,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
           if (Array.isArray(rawTIds)) parsedTableIds = rawTIds;
           else if (typeof rawTIds === 'string') {
             try { parsedTableIds = JSON.parse(rawTIds); } catch { parsedTableIds = [rawTIds]; }
+          }
+          if (parsedTableIds.length === 0) {
+            const mappedIds = eventTableMap[String(e.id)];
+            if (mappedIds && mappedIds.length > 0) parsedTableIds = mappedIds;
           }
 
           const rawCancelled = e.iscancelled ?? e.is_cancelled ?? e.isCancelled;
@@ -703,11 +734,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setReservations(mappedRes);
 
         // 3. CACHE RESERVATIONS TO LOCAL SQLITE FOR OFFLINE FALLBACK
-        fetch('/api/cache-reservations', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ reservations: mappedRes })
-        }).catch(() => {});
+        // Only the local POS serves this endpoint; skip it on the static
+        // deployment instead of letting it 405 on every sync.
+        if (isServedFromLocalMachine()) {
+          fetch('http://localhost:3001/api/cache-reservations', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reservations: mappedRes })
+          }).catch(() => {});
+        }
       } else {
         // Fallback to local reservations from SQLite if Supabase returns 0 rows (e.g. user auth change)
         const localRes = await fetchLocalJson('/api/reservations');
