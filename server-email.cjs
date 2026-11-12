@@ -273,6 +273,7 @@ async function loadConfig(db) {
     provider,
     resendApiKey: pick(process.env.RESEND_API_KEY, 'resendApiKey'),
     fromAddress: pick(process.env.EMAIL_FROM, 'emailFromAddress') || 'notifications@oneshot.local',
+    replyTo: pick(process.env.EMAIL_REPLY_TO, 'emailReplyTo'),
     fromName: pick(process.env.EMAIL_FROM_NAME, 'emailFromName') || 'One Shot Bar & Billiards',
     smtpHost: pick(process.env.SMTP_HOST, 'smtpHost'),
     smtpPort: Number(pick(process.env.SMTP_PORT, 'smtpPort')) || 587,
@@ -300,6 +301,7 @@ async function sendViaResend(config, message) {
       subject: message.subject,
       html: message.html,
       text: message.text,
+      ...(message.replyTo ? { reply_to: message.replyTo } : {}),
     }),
   });
   if (!res.ok) {
@@ -325,6 +327,7 @@ async function sendViaSmtp(config, message) {
   await transport.sendMail({
     from: fromHeader(config),
     to: message.to,
+    replyTo: message.replyTo,
     subject: message.subject,
     html: message.html,
     text: message.text,
@@ -395,7 +398,7 @@ function createEmailService(db, { logger = console } = {}) {
         return { sent: false, reason: 'duplicate' };
       }
 
-      const message = { to: recipient, ...buildEmail({ action, reservation, venue, extras }) };
+      const message = { to: recipient, replyTo: config.replyTo || undefined, ...buildEmail({ action, reservation, venue, extras }) };
       try {
         await deliver(message, config);
         logger.log(`📧 [Email]: sent "${action}" to ${recipient} for ${reservation.id} via ${config.provider}.`);
