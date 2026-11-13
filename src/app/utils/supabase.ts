@@ -20,8 +20,6 @@ const supabaseUrl =
 // stays server-side only (server.cjs / Electron main process).
 const supabaseKey = 
   cleanEnv(import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY) || 
-  cleanEnv(import.meta.env.VITE_SUPABASE_ANON_KEY) || 
-  cleanEnv(import.meta.env.VITE_SUPABASE_KEY) || 
   FALLBACK_SUPABASE_KEY;
 
 export const supabase = createClient(supabaseUrl, supabaseKey);
