@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 
 
 const FALLBACK_SUPABASE_URL = 'https://olywhyaozjlkjrnsdydg.supabase.co';
-const FALLBACK_SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9seXdoeWFvempsa2pybnNkeWRnIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4OTg5NjAxNCwiZXhwIjoyMTA1NDcyMDE0fQ.9M87B5oO8bKLtkaH5MIpzZ1KzvhE3qr6y5GApWzStn4';
+const FALLBACK_SUPABASE_KEY = 'sb_publishable_ILVifxDQ3V9lj8W8H9WBpw_a5solIfb';
 
 function cleanEnv(val: any): string {
   if (typeof val !== 'string') return '';
@@ -28,8 +28,10 @@ export const isAppHostValue = (value: unknown): boolean =>
     value.startsWith('data:image/')
   );
 
+// Browser code must use a publishable key. Supabase rejects secret keys from
+// browsers, so the service key stays server-side only (server.cjs / Electron
+// main process) and is never bundled into the renderer.
 const supabaseKey = 
-  cleanEnv(import.meta.env.VITE_SUPABASE_SERVICE_KEY) || 
   cleanEnv(import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY) || 
   cleanEnv(import.meta.env.VITE_SUPABASE_ANON_KEY) || 
   cleanEnv(import.meta.env.VITE_SUPABASE_KEY) || 
@@ -45,8 +47,8 @@ if (import.meta.env.DEV) {
 // Public data client: never attaches a user session. Staff login is local, but
 // if a customer Supabase session exists in this browser the default client
 // would run cloud reads as the `authenticated` role and RLS would filter out
-// website feedback and reservations. This client always uses the anon/service
-// role so local machine data stays complete.
+// website feedback and reservations. This client always uses the anon role so
+// local machine data stays complete.
 // (Also cached to prevent HMR warnings)
 export const publicSupabase = (window as any).publicSupabaseClient || createClient(supabaseUrl, supabaseKey, {
   auth: {

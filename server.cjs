@@ -98,7 +98,7 @@ const PORT = (String(rawPort) === '3000' && process.env.NODE_ENV === 'developmen
 
 // 🟢 SUPABASE CONFIGURATION
 const FALLBACK_SUPABASE_URL = 'https://olywhyaozjlkjrnsdydg.supabase.co';
-const FALLBACK_SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9seXdoeWFvempsa2pybnNkeWRnIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4OTg5NjAxNCwiZXhwIjoyMTA1NDcyMDE0fQ.9M87B5oO8bKLtkaH5MIpzZ1KzvhE3qr6y5GApWzStn4';
+const FALLBACK_SUPABASE_KEY = 'sb_secret_2FWfeHFnTxZ0vw3XTZ6iyw_VDXB1QSk';
 
 const SUPABASE_URL = 
   cleanEnvStr(process.env.SUPABASE_URL) || 
@@ -1065,31 +1065,36 @@ if (error) {
       // SQLite mirror keeps them editable offline. Pushing them on every "Save
       // current data" keeps the customer-facing status in step with staff edits
       // (check-in, completion, cancellation) made while disconnected.
-      syncTable('reservations', 'reservations', r => ({
+      syncTable('reservations', 'reservations', r => {
+        // EVENT rows are generated snapshots of the event→table map and are
+        // rebuilt by syncEventTableBlocks below; never push stale local copies.
+        if (r.paymentRef === 'EVENT') return null;
+        return {
         id: r.id,
-        customerName: r.customerName,
-        contactNumber: r.contactNumber,
+        customerName: r.customerName || '',
+        contactNumber: r.contactNumber || '',
         email: r.email || null,
         date: sanitizeDate(r.date),
-        timeSlot: r.timeSlot,
-        durationHours: r.durationHours,
-        partySize: r.partySize,
+        timeSlot: r.timeSlot || '',
+        durationHours: r.durationHours ?? 1,
+        partySize: r.partySize ?? 1,
         tableId: r.tableId || null,
-        status: r.status,
-        totalAmount: r.totalAmount,
-        downPaymentAmount: r.downPaymentAmount,
+        status: r.status || 'pending',
+        totalAmount: r.totalAmount ?? 0,
+        downPaymentAmount: r.downPaymentAmount ?? 0,
         downPaymentPaid: r.downPaymentPaid ? 1 : 0,
         balancePaid: r.balancePaid ? 1 : 0,
         paymentRef: r.paymentRef || null,
         receiptImg: r.receiptImg || null,
-        cancellationReason: r.cancellationReason || null,
+        cancellation_reason: r.cancellationReason || null,
         refundStatus: r.refundStatus || null,
         refundMethod: r.refundMethod || null,
         refundNotes: r.refundNotes || null,
         promoCode: r.promoCode || null,
         discountAmount: r.discountAmount || null,
         createdAt: r.createdAt || new Date().toISOString()
-      }), 'id'),
+        };
+      }, 'id'),
       syncTable('promo_codes', 'promo_codes', r => ({ id: r.id, code: r.code, discount_percent: r.discount_percent, description: r.description, is_active: !!r.is_active, is_limited_uses: !!r.is_limited_uses, max_usage: r.max_usage, usage_count: r.usage_count, start_date: r.start_date || null, expires_at: r.expires_at || null }), 'id'),
       syncTable('events', 'events', r => ({ 
         id: r.id, 
