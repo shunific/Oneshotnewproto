@@ -2,7 +2,7 @@
 import { createClient } from '@supabase/supabase-js';
 
 const FALLBACK_SUPABASE_URL = 'https://olywhyaozjlkjrnsdydg.supabase.co';
-const FALLBACK_SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9seXdoeWFvempsa2pybnNkeWRnIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4OTg5NjAxNCwiZXhwIjoyMTA1NDcyMDE0fQ.9M87B5oO8bKLtkaH5MIpzZ1KzvhE3qr6y5GApWzStn4';
+const FALLBACK_SUPABASE_KEY = 'sb_publishable_ILVifxDQ3V9lj8W8H9WBpw_a5solIfb';
 
 function cleanEnv(val: any): string {
   if (typeof val !== 'string') return '';
@@ -15,16 +15,14 @@ const supabaseUrl =
   cleanEnv(import.meta.env.VITE_SUPABASE_URL) || 
   FALLBACK_SUPABASE_URL;
 
-// Prefer a service-role key: reservation/event writes are performed directly
-// from the browser, and public/anon RLS policies silently ignore those updates
-// (PostgREST returns 200 with zero affected rows). The built-in fallback is a
-// service key, so it must come before any public/anon environment key.
+// Browser code must use a publishable key. Supabase rejects secret keys from
+// browsers ("Forbidden use of secret API key in browser"), so the service key
+// stays server-side only (server.cjs / Electron main process).
 const supabaseKey = 
-  cleanEnv(import.meta.env.VITE_SUPABASE_SERVICE_KEY) || 
-  FALLBACK_SUPABASE_KEY ||
   cleanEnv(import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY) || 
   cleanEnv(import.meta.env.VITE_SUPABASE_ANON_KEY) || 
-  cleanEnv(import.meta.env.VITE_SUPABASE_KEY);
+  cleanEnv(import.meta.env.VITE_SUPABASE_KEY) || 
+  FALLBACK_SUPABASE_KEY;
 
 export const supabase = createClient(supabaseUrl, supabaseKey);
 
