@@ -58,7 +58,7 @@ function startServer() {
       USER_DATA_PATH: userDataPath,
       NODE_ENV: isDev ? 'development' : 'production',
       SUPABASE_URL: process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || 'https://olywhyaozjlkjrnsdydg.supabase.co',
-      SUPABASE_SERVICE_KEY: process.env.SUPABASE_SERVICE_KEY || process.env.VITE_SUPABASE_SERVICE_KEY || 'sb_secret_2FWfeHFnTxZ0vw3XTZ6iyw_VDXB1QSk'
+      SUPABASE_SERVICE_KEY: process.env.SUPABASE_SERVICE_KEY || process.env.VITE_SUPABASE_SERVICE_KEY || 'sb_publishable_ILVifxDQ3V9lj8W8H9WBpw_a5solIfb'
     }
   });
 

@@ -98,7 +98,7 @@ const PORT = (String(rawPort) === '3000' && process.env.NODE_ENV === 'developmen
 
 // 🟢 SUPABASE CONFIGURATION
 const FALLBACK_SUPABASE_URL = 'https://olywhyaozjlkjrnsdydg.supabase.co';
-const FALLBACK_SUPABASE_KEY = 'sb_secret_2FWfeHFnTxZ0vw3XTZ6iyw_VDXB1QSk';
+const FALLBACK_SUPABASE_KEY = 'sb_publishable_ILVifxDQ3V9lj8W8H9WBpw_a5solIfb';
 
 const SUPABASE_URL = 
   cleanEnvStr(process.env.SUPABASE_URL) || 
