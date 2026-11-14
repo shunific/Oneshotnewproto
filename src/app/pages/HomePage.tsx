@@ -134,7 +134,7 @@ export function HomePage() {
     siteConfig, announcements, tables, reservations, events, 
     closedDates, reservationTerms, rates, addReservation, cancelReservation, 
     updateReservation, updateReservationStatus, addFeedback, applyPromoCode,
-    sessionHistory, queue
+    queue
   } = useAppContext() as any;
 
   const [activeUser, setActiveUser] = useState<{ name: string; email: string; phone?: string; } | null>(null);
@@ -821,17 +821,36 @@ export function HomePage() {
 
   const maxAllowedDuration = getMaxDuration();
 
+  // STRICTLY 1 hour advance notice
+  const ADVANCE_NOTICE_MINS = 60;
+
   const minAllowedTime = useMemo(() => {
     if (!selectedDate || !isToday(selectedDate)) return '';
-    const now = new Date();
-    const advanceHours = typeof reservationTerms?.advanceBookingHours === 'number' 
-      ? reservationTerms.advanceBookingHours 
-      : (parseInt(String(reservationTerms?.advanceBookingHours)) || 1);
-    const earliest = addMinutes(now, advanceHours * 60);
+    const earliest = addMinutes(new Date(), ADVANCE_NOTICE_MINS);
     const h = String(earliest.getHours()).padStart(2, '0');
     const m = String(earliest.getMinutes()).padStart(2, '0');
     return `${h}:${m}`;
-  }, [selectedDate, reservationTerms]);
+  }, [selectedDate]);
+
+  const buildTimeSlotOptions = (date: Date | null) => {
+    const parseToMins = (t: string) => {
+      const [hh = '0', mm = '0'] = (t || '').split(':');
+      return Number(hh) * 60 + Number(mm || 0);
+    };
+    const startMins = parseToMins(rates?.reservationStartTime || '12:00');
+    let endMins = parseToMins(rates?.reservationEndTime || '02:00');
+    if (endMins <= startMins) endMins += 24 * 60;
+    const now = new Date();
+    const nowMins = now.getHours() * 60 + now.getMinutes();
+    const isTodaySelected = !!(date && isToday(date));
+    const options: { value: string; label: string; disabled: boolean }[] = [];
+    for (let mins = startMins; mins < endMins; mins += 30) {
+      const normalized = mins % (24 * 60);
+      const value = `${String(Math.floor(normalized / 60)).padStart(2, '0')}:${String(normalized % 60).padStart(2, '0')}`;
+      options.push({ value, label: fmt12(value), disabled: isTodaySelected && normalized < nowMins + ADVANCE_NOTICE_MINS });
+    }
+    return options;
+  };
 
   const validateTimeSlotHelper = (time: string, duration: number, dateObj: Date | null, tableId: string | null): string => {
     if (!time || !dateObj) return 'invalid';
@@ -848,9 +867,8 @@ export function HomePage() {
 
     if (isToday(requestedStart)) {
       const nowMins = new Date().getHours() * 60 + new Date().getMinutes();
-      const advanceNoticeMins = (Number(reservationTerms?.advanceBookingHours) || 1) * 60;
       if (slotMins <= nowMins) return 'past'; 
-      if (slotMins < nowMins + advanceNoticeMins) return 'advance';
+      if (slotMins < nowMins + 60) return 'advance';
     }
 
     const startReserveMins = parseToMins(rates?.reservationStartTime || '12:00');
@@ -1176,6 +1194,18 @@ export function HomePage() {
     }
   };
 
+  const fmtEventDates = (dateStr: string) => {
+    if (!dateStr) return '';
+    return dateStr.split(',')
+      .map(d => d.trim())
+      .filter(Boolean)
+      .map(d => {
+        const dt = new Date(d);
+        return isNaN(dt.getTime()) ? d : format(dt, 'MMMM d, yyyy');
+      })
+      .join(', ');
+  };
+
   const publicEvents = events?.filter((e: any) => e.type !== 'Holiday' && !e.isCancelled) || [];
   const upcomingEvents = publicEvents.filter((e: any) => {
     const dates = e.date ? e.date.split(',') : [];
@@ -1457,42 +1487,25 @@ export function HomePage() {
                       )}
                     </div>
                     
-                    {/* 🟢 Live Queue Dynamic Wait Time Status & AI Metrics */}
-                    {(() => {
-                      // Calculate historical metrics securely
-                      const totalHistoricalSessions = sessionHistory?.length || 0;
-                      const avgDuration = totalHistoricalSessions > 0 
-                        ? Math.round(sessionHistory.reduce((acc: number, curr: any) => acc + (curr.durationMinutes || 0), 0) / totalHistoricalSessions) 
-                        : 0;
-
-                      return (
-                        <div className="bg-gradient-to-r from-emerald-950/60 to-emerald-900/20 border border-emerald-800/50 rounded-2xl p-5 shadow-inner relative overflow-hidden group">
-                          <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl transition-all group-hover:bg-emerald-500/20" />
-                          <div className="relative z-10 flex items-start gap-4">
-                            <div className="w-10 h-10 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center flex-shrink-0 mt-1 shadow-inner">
-                              <Sparkles size={18} className="text-emerald-400 animate-pulse" />
-                            </div>
-                            <div className="flex-1">
-                              <h4 className="text-sm font-black text-emerald-400 mb-1">Smart Queue Neural Network</h4>
-                              <p className="text-xs text-emerald-100/70 leading-relaxed mb-3 pr-2">
-                                Our system tracks live table occupancy and analyzes historical data to give you real-time estimates before you walk in.
-                              </p>
-                              
-                              <div className="grid grid-cols-2 gap-2 mb-1">
-                                <div className="bg-emerald-950/80 border border-emerald-800/60 rounded-xl p-3 shadow-lg">
-                                  <span className="text-[9px] text-neutral-400 uppercase tracking-wider font-bold block mb-1">Live Wait Estimate</span>
-                                  <span className="text-sm font-black text-emerald-400 tracking-wide flex items-center gap-1.5"><Clock size={12}/> {dynamicWaitTime}</span>
-                                </div>
-                                <div className="bg-neutral-950/80 border border-neutral-800/60 rounded-xl p-3 shadow-lg">
-                                  <span className="text-[9px] text-neutral-400 uppercase tracking-wider font-bold block mb-1">Historical Avg Play</span>
-                                  <span className="text-sm font-black text-white tracking-wide">{avgDuration > 0 ? `${avgDuration} mins` : 'Gathering Data...'}</span>
-                                </div>
-                              </div>
-                            </div>
+                    {/* 🟢 Live Queue Dynamic Wait Time Status */}
+                    <div className="bg-gradient-to-r from-emerald-950/60 to-emerald-900/20 border border-emerald-800/50 rounded-2xl p-5 shadow-inner relative overflow-hidden group">
+                      <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl transition-all group-hover:bg-emerald-500/20" />
+                      <div className="relative z-10 flex items-start gap-4">
+                        <div className="w-10 h-10 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center flex-shrink-0 mt-1 shadow-inner">
+                          <Sparkles size={18} className="text-emerald-400 animate-pulse" />
+                        </div>
+                        <div className="flex-1">
+                          <h4 className="text-sm font-black text-emerald-400 mb-1">Smart Queue Neural Network</h4>
+                          <p className="text-xs text-emerald-100/70 leading-relaxed mb-3 pr-2">
+                            Our system tracks live table occupancy and analyzes historical data to give you real-time estimates before you walk in.
+                          </p>
+                          <div className="bg-emerald-950/80 border border-emerald-800/60 rounded-xl p-3 shadow-lg">
+                            <span className="text-[9px] text-neutral-400 uppercase tracking-wider font-bold block mb-1">Live Wait Estimate</span>
+                            <span className="text-sm font-black text-emerald-400 tracking-wide flex items-center gap-1.5"><Clock size={12}/> {dynamicWaitTime}</span>
                           </div>
                         </div>
-                      );
-                    })()}
+                      </div>
+                    </div>
 
                     {/* Get in Touch Card */}
                     <div className="bg-neutral-900/90 border border-neutral-800 rounded-2xl p-6 space-y-3.5 shadow-sm">
@@ -1947,7 +1960,7 @@ export function HomePage() {
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                 <div>
                                   <label className="block text-xs text-neutral-400 mb-1">Email Address</label>
-                                  <input type="email" value={resForm.email} onChange={e => setResForm(f => ({ ...f, email: e.target.value }))} placeholder="juan@email.com" className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-100 outline-none focus:border-emerald-500" />
+                                  <input type="email" value={resForm.email} maxLength={254} onKeyDown={e => { if (e.key === ' ') e.preventDefault(); }} onChange={e => setResForm(f => ({ ...f, email: e.target.value.replace(/\s/g, '') }))} placeholder="juan@email.com" className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-100 outline-none focus:border-emerald-500" />
                                 </div>
                                 <div>
                                   <label className="block text-xs text-neutral-400 mb-1">Phone Number *</label>
@@ -1982,13 +1995,10 @@ export function HomePage() {
                                   <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end">
                                     <span>Start Time *</span>
                                     {selectedDate && isToday(selectedDate) && minAllowedTime && (
-                                      <span className="text-[9px] text-amber-500 font-semibold">Min: {minAllowedTime}</span>
+                                      <span className="text-[9px] text-amber-500 font-semibold">Min: {fmt12(minAllowedTime)}</span>
                                     )}
                                   </label>
-                                  <input 
-                                    type="time" 
-                                    min={selectedDate && isToday(selectedDate) ? minAllowedTime : undefined}
-                                    style={{ colorScheme: isLightMode ? 'light' : 'dark' }} 
+                                  <select 
                                     value={resForm.timeSlot} 
                                     onChange={e => {
                                       const val = e.target.value;
@@ -2009,6 +2019,7 @@ export function HomePage() {
                                         if (minAllowedTime) {
                                           const [minH, minM] = minAllowedTime.split(':').map(Number);
                                           if (chosenMins < minH * 60 + minM) {
+                                            setToastMsg({ title: "1-Hour Advance Required", desc: "Please choose a time at least 1 hour from now.", type: 'error' });
                                             setResForm(f => ({ ...f, timeSlot: minAllowedTime }));
                                             return;
                                           }
@@ -2016,8 +2027,15 @@ export function HomePage() {
                                       }
                                       setResForm(f => ({ ...f, timeSlot: val }));
                                     }} 
-                                    className={`w-full bg-neutral-950 border rounded-xl px-3 py-2.5 text-sm text-neutral-100 text-center outline-none ${['closed', 'happyhour', 'full', 'table_conflict', 'active_conflict', 'past', 'advance'].includes(timeValidation) ? 'border-rose-500/50 text-rose-200' : 'border-neutral-800 focus:border-emerald-500'}`} 
-                                  />
+                                    className={`w-full bg-neutral-950 border rounded-xl px-3 py-2.5 text-sm text-neutral-100 text-center outline-none appearance-none cursor-pointer ${['closed', 'happyhour', 'full', 'table_conflict', 'active_conflict', 'past', 'advance'].includes(timeValidation) ? 'border-rose-500/50 text-rose-200' : 'border-neutral-800 focus:border-emerald-500'}`} 
+                                  >
+                                    <option value="" className="bg-neutral-900 text-white">Select time</option>
+                                    {buildTimeSlotOptions(selectedDate).map(opt => (
+                                      <option key={opt.value} value={opt.value} disabled={opt.disabled} className="bg-neutral-900 text-white">
+                                        {opt.label}{opt.disabled ? ' (unavailable)' : ''}
+                                      </option>
+                                    ))}
+                                  </select>
                                 </div>
                                 <div className="col-span-1">
                                   <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-center">
@@ -2524,7 +2542,7 @@ export function HomePage() {
                             <span className="text-[10px] bg-rose-950 text-rose-400 border border-rose-800/50 font-bold px-2 py-0.5 rounded uppercase tracking-wider">Slots Full</span>
                           )}
                         </div>
-                        <span className="text-xs font-bold text-neutral-400 whitespace-nowrap">{event.date}</span>
+                        <span className="text-xs font-bold text-neutral-400 whitespace-nowrap">{fmtEventDates(event.date)}</span>
                       </div>
                       <h4 className="text-lg font-bold mb-2 text-white">{event.title}</h4>
                       {event.duration && <p className="text-[11px] text-neutral-500 font-medium mb-2 flex items-center gap-1.5"><Clock size={11} /> {event.duration}</p>}
@@ -2711,7 +2729,6 @@ export function HomePage() {
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 text-sm">
                       {(() => {
-                        const advanceHours = typeof reservationTerms?.advanceBookingHours === 'number' ? reservationTerms.advanceBookingHours : parseInt(String(reservationTerms?.advanceBookingHours)) || 1;
                         const minHoursVal = typeof reservationTerms?.minHours === 'number' ? reservationTerms.minHours : parseInt(String(reservationTerms?.minHours)) || 1;
                         const maxHoursVal = typeof reservationTerms?.maxHours === 'number' ? reservationTerms.maxHours : parseInt(String(reservationTerms?.maxHours)) || 0;
                         const weekdayMin = typeof reservationTerms?.weekdayMinPartySize === 'number' ? reservationTerms.weekdayMinPartySize : parseInt(String(reservationTerms?.weekdayMinPartySize)) || 1;
@@ -2720,7 +2737,7 @@ export function HomePage() {
                         const weekendMax = typeof reservationTerms?.weekendMaxPartySize === 'number' ? reservationTerms.weekendMaxPartySize : parseInt(String(reservationTerms?.weekendMaxPartySize)) || 10;
                         
                         return [
-                          { label: 'Advance Booking Notice', value: `Requires at least ${advanceHours} hour(s) advance notice` },
+                          { label: 'Advance Booking Notice', value: 'Requires at least 1 hour advance notice' },
                           { label: 'Online Booking Hours', value: bookingHoursDisplay },
                           { label: 'Duration Limits', value: `Min: ${minHoursVal} hr${minHoursVal > 1 ? 's' : ''} · Max: ${maxHoursVal > 0 ? `${maxHoursVal} hrs` : 'Closing cut-off'}` },
                           { label: 'Arrival Grace Period', value: '15 minutes arrival buffer before slot release' },
@@ -3099,27 +3116,31 @@ export function HomePage() {
                   <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end">
                     <span>New Time Slot (Duration: {rescheduleData.reservation.durationHours}h) *</span>
                     {rescheduleData.newDate && isToday(rescheduleData.newDate) && (
-                      <span className="text-[9px] text-amber-500 font-semibold">Min: {format(new Date(), 'HH:mm')}</span>
+                      <span className="text-[9px] text-amber-500 font-semibold">Min: {fmt12(format(addMinutes(new Date(), 60), 'HH:mm'))}</span>
                     )}
                   </label>
-                  <input 
-                    type="time" 
-                    style={{ colorScheme: isLightMode ? 'light' : 'dark' }} 
+                  <select 
                     required 
-                    min={rescheduleData.newDate && isToday(rescheduleData.newDate) ? format(new Date(), 'HH:mm') : undefined}
                     value={rescheduleData.timeSlot} 
                     onChange={e => {
                       const val = e.target.value;
-                      const nowStr = format(new Date(), 'HH:mm');
-                      if (rescheduleData.newDate && isToday(rescheduleData.newDate) && val && val < nowStr) {
-                        setToastMsg({ title: "Time Has Passed", desc: "Cannot reschedule to a past time for today.", type: 'error' });
-                        setRescheduleData(prev => prev ? ({ ...prev, timeSlot: nowStr }) : null);
+                      const minTime = format(addMinutes(new Date(), 60), 'HH:mm');
+                      if (rescheduleData.newDate && isToday(rescheduleData.newDate) && val && val < minTime) {
+                        setToastMsg({ title: "1-Hour Advance Required", desc: "Cannot reschedule to a time less than 1 hour from now.", type: 'error' });
+                        setRescheduleData(prev => prev ? ({ ...prev, timeSlot: minTime }) : null);
                         return;
                       }
                       setRescheduleData(prev => prev ? ({ ...prev, timeSlot: val }) : null);
                     }} 
-                    className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-sm text-neutral-100 focus:border-violet-500 outline-none text-center transition-colors" 
-                  />
+                    className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-sm text-neutral-100 focus:border-violet-500 outline-none text-center transition-colors appearance-none cursor-pointer" 
+                  >
+                    <option value="" className="bg-neutral-900 text-white">Select time</option>
+                    {buildTimeSlotOptions(rescheduleData.newDate).map(opt => (
+                      <option key={opt.value} value={opt.value} disabled={opt.disabled} className="bg-neutral-900 text-white">
+                        {opt.label}{opt.disabled ? ' (unavailable)' : ''}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 
                 <div>
@@ -3163,11 +3184,14 @@ export function HomePage() {
                     <input 
                       type="email" 
                       placeholder="Email Address" 
+                      maxLength={254}
+                      onKeyDown={e => { if (e.key === ' ') e.preventDefault(); }}
                       value={loginForm.email} 
                       onChange={e => {
-                        setLoginForm(f => ({ ...f, email: e.target.value, error: '' }));
-                        setRegisterForm(f => ({ ...f, email: e.target.value, error: '' }));
-                        setForgotForm(f => ({ ...f, email: e.target.value, error: '' }));
+                        const email = e.target.value.replace(/\s/g, '');
+                        setLoginForm(f => ({ ...f, email, error: '' }));
+                        setRegisterForm(f => ({ ...f, email, error: '' }));
+                        setForgotForm(f => ({ ...f, email, error: '' }));
                       }} 
                       className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3.5 text-sm text-neutral-100 focus:border-emerald-500 outline-none transition-colors" 
                     />
@@ -3248,16 +3272,17 @@ export function HomePage() {
                         <input 
                           type={type} 
                           inputMode={key === 'phone' ? 'numeric' : undefined} 
-                          maxLength={key === 'phone' ? 11 : undefined}
+                          maxLength={key === 'phone' ? 11 : key === 'email' ? 254 : key === 'name' ? 100 : undefined}
+                          onKeyDown={key === 'email' ? (e => { if (e.key === ' ') e.preventDefault(); }) : undefined}
                           placeholder={key === 'phone' ? '09XXXXXXXXX (11 digits)' : undefined}
                           value={(registerForm as any)[key]} 
-                          onChange={e => setRegisterForm(f => ({ ...f, [key]: key === 'phone' ? e.target.value.replace(/\D/g, '').slice(0, 11) : e.target.value, error: '' }))} 
+                          onChange={e => setRegisterForm(f => ({ ...f, [key]: key === 'phone' ? e.target.value.replace(/\D/g, '').slice(0, 11) : key === 'email' ? e.target.value.replace(/\s/g, '') : e.target.value, error: '' }))} 
                           className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-sm text-neutral-100 focus:border-emerald-500 outline-none transition-colors" 
                         />
                       </div>
                     ))}
-                    <div><label className="block text-xs text-neutral-400 mb-1.5">Password</label><div className="relative"><input type={registerForm.showPw ? 'text' : 'password'} value={registerForm.password} onChange={e => setRegisterForm(f => ({ ...f, password: e.target.value, error: '' }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 pr-10 text-sm text-neutral-100 focus:border-emerald-500 outline-none transition-colors" /><button onClick={() => setRegisterForm(f => ({ ...f, showPw: !f.showPw }))} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300">{registerForm.showPw ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></div>
-                    <div><label className="block text-xs text-neutral-400 mb-1.5">Confirm Password</label><input type="password" value={registerForm.confirm} onChange={e => setRegisterForm(f => ({ ...f, confirm: e.target.value, error: '' }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-sm text-neutral-100 focus:border-emerald-500 outline-none transition-colors" /></div>
+                    <div><label className="block text-xs text-neutral-400 mb-1.5">Password</label><div className="relative"><input type={registerForm.showPw ? 'text' : 'password'} maxLength={128} value={registerForm.password} onChange={e => setRegisterForm(f => ({ ...f, password: e.target.value, error: '' }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 pr-10 text-sm text-neutral-100 focus:border-emerald-500 outline-none transition-colors" /><button onClick={() => setRegisterForm(f => ({ ...f, showPw: !f.showPw }))} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300">{registerForm.showPw ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></div>
+                    <div><label className="block text-xs text-neutral-400 mb-1.5">Confirm Password</label><input type="password" maxLength={128} value={registerForm.confirm} onChange={e => setRegisterForm(f => ({ ...f, confirm: e.target.value, error: '' }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-sm text-neutral-100 focus:border-emerald-500 outline-none transition-colors" /></div>
                   </div>
                   <button onClick={handleRegisterSubmit} disabled={registerForm.loading} className="w-full mt-4 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white py-3 rounded-xl text-sm font-bold shadow-lg shadow-emerald-900/30 transition-colors">
                     {registerForm.loading ? 'Creating Account...' : 'Register Account'}
@@ -3286,7 +3311,7 @@ export function HomePage() {
                       {forgotForm.error && <div className="bg-rose-950/40 border border-rose-800/50 text-rose-400 text-xs px-3 py-2 rounded-lg">{forgotForm.error}</div>}
                       <div>
                         <label className="block text-xs text-neutral-400 mb-1.5">Email Address</label>
-                        <input type="email" autoFocus value={forgotForm.email} onChange={e => setForgotForm(f => ({ ...f, email: e.target.value, error: '' }))} placeholder="juan@email.com" className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-sm text-neutral-100 focus:border-emerald-500 outline-none transition-colors" />
+                        <input type="email" autoFocus maxLength={254} onKeyDown={e => { if (e.key === ' ') e.preventDefault(); }} value={forgotForm.email} onChange={e => setForgotForm(f => ({ ...f, email: e.target.value.replace(/\s/g, ''), error: '' }))} placeholder="juan@email.com" className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-sm text-neutral-100 focus:border-emerald-500 outline-none transition-colors" />
                       </div>
                       <button onClick={handleForgotSubmit} disabled={forgotForm.loading || !forgotForm.email.includes('@')} className="w-full mt-4 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white py-3 rounded-xl text-sm font-bold shadow-lg shadow-emerald-900/30 transition-colors">
                         {forgotForm.loading ? 'Sending...' : 'Send Recovery Link'}
@@ -3483,7 +3508,7 @@ export function HomePage() {
                     <Shield size={13} /> Reservation & Cancellation Policy
                   </p>
                   <div className="space-y-1 text-neutral-300">
-                    <p>• Advance Booking Notice: <span className="font-semibold">At least {typeof reservationTerms?.advanceBookingHours === 'number' ? reservationTerms.advanceBookingHours : (parseInt(String(reservationTerms?.advanceBookingHours)) || 1)} hour(s)</span></p>
+                    <p>• Advance Booking Notice: <span className="font-semibold">At least 1 hour</span></p>
                     <p>• Cancellation Notice: <span className="font-semibold">At least {reservationTerms?.cancellationHours || 24} hour(s) before schedule</span></p>
                     <p>• Grace Period: <span className="font-semibold">15 minutes arrival buffer</span></p>
                     <p className="text-[11px] text-neutral-400 pt-1 leading-relaxed">
