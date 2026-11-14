@@ -3266,9 +3266,15 @@ export function HomePage() {
                   </div>
                   {registerForm.error && <div className="bg-rose-950/40 border border-rose-800/50 text-rose-400 text-xs px-3 py-2 rounded-lg">{registerForm.error}</div>}
                   <div className="space-y-3">
-                    {[ { key: 'name', label: 'Full Name', type: 'text' }, { key: 'email', label: 'Email Address', type: 'email' }, { key: 'phone', label: 'Contact Number', type: 'tel' }].map(({ key, label, type }) => (
+                    {[ { key: 'name', label: 'Full Name', type: 'text' }, { key: 'email', label: 'Email Address', type: 'email' }, { key: 'phone', label: 'Contact Number', type: 'tel' }].map(({ key, label, type }) => {
+                      const max = key === 'phone' ? 11 : key === 'email' ? 254 : key === 'name' ? 100 : 0;
+                      const length = String((registerForm as any)[key] || '').length;
+                      return (
                       <div key={key}>
-                        <label className="block text-xs text-neutral-400 mb-1.5">{label}</label>
+                        <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-center">
+                          <span>{label}</span>
+                          <span className={`text-[10px] font-medium ${length >= max ? 'text-amber-400' : 'text-neutral-500'}`}>{length}/{max}</span>
+                        </label>
                         <input 
                           type={type} 
                           inputMode={key === 'phone' ? 'numeric' : undefined} 
@@ -3280,9 +3286,10 @@ export function HomePage() {
                           className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-sm text-neutral-100 focus:border-emerald-500 outline-none transition-colors" 
                         />
                       </div>
-                    ))}
-                    <div><label className="block text-xs text-neutral-400 mb-1.5">Password</label><div className="relative"><input type={registerForm.showPw ? 'text' : 'password'} maxLength={128} value={registerForm.password} onChange={e => setRegisterForm(f => ({ ...f, password: e.target.value, error: '' }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 pr-10 text-sm text-neutral-100 focus:border-emerald-500 outline-none transition-colors" /><button onClick={() => setRegisterForm(f => ({ ...f, showPw: !f.showPw }))} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300">{registerForm.showPw ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></div>
-                    <div><label className="block text-xs text-neutral-400 mb-1.5">Confirm Password</label><input type="password" maxLength={128} value={registerForm.confirm} onChange={e => setRegisterForm(f => ({ ...f, confirm: e.target.value, error: '' }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-sm text-neutral-100 focus:border-emerald-500 outline-none transition-colors" /></div>
+                      );
+                    })}
+                    <div><label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-center"><span>Password</span><span className={`text-[10px] font-medium ${registerForm.password.length >= 128 ? 'text-amber-400' : 'text-neutral-500'}`}>{registerForm.password.length}/128</span></label><div className="relative"><input type={registerForm.showPw ? 'text' : 'password'} maxLength={128} value={registerForm.password} onChange={e => setRegisterForm(f => ({ ...f, password: e.target.value, error: '' }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 pr-10 text-sm text-neutral-100 focus:border-emerald-500 outline-none transition-colors" /><button onClick={() => setRegisterForm(f => ({ ...f, showPw: !f.showPw }))} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300">{registerForm.showPw ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></div>
+                    <div><label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-center"><span>Confirm Password</span><span className={`text-[10px] font-medium ${registerForm.confirm.length >= 128 ? 'text-amber-400' : 'text-neutral-500'}`}>{registerForm.confirm.length}/128</span></label><input type="password" maxLength={128} value={registerForm.confirm} onChange={e => setRegisterForm(f => ({ ...f, confirm: e.target.value, error: '' }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-sm text-neutral-100 focus:border-emerald-500 outline-none transition-colors" /></div>
                   </div>
                   <button onClick={handleRegisterSubmit} disabled={registerForm.loading} className="w-full mt-4 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white py-3 rounded-xl text-sm font-bold shadow-lg shadow-emerald-900/30 transition-colors">
                     {registerForm.loading ? 'Creating Account...' : 'Register Account'}
