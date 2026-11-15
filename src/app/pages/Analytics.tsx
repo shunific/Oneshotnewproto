@@ -23,10 +23,9 @@ const exactCents = (value: any) => typeof value === 'number' && Number.isFinite(
   && Number.isSafeInteger(Math.round(value * 100)) && Math.abs(value * 100 - Math.round(value * 100)) <= 0.000001
   ? Math.round(value * 100) : null;
 
-// Sessions written before receipts existed have no canonical snapshot to verify. Their money is
-// never counted as billed revenue, but it stays visible as a separate recorded series instead of
-// silently vanishing from the trend. An overpayment cannot be reconciled without a receipt, so it
-// remains in the review bucket rather than being drawn as cash.
+// Sessions written before receipts existed have no canonical snapshot to verify. Their recorded
+// money still counts toward the trend instead of silently vanishing from it. An overpayment cannot
+// be reconciled without a receipt, so it stays in the review bucket rather than being drawn as cash.
 const recordedLegacyBill = (record: any) => {
   if (!record || sessionFinancials(record)) return null;
   const bill = exactCents(record.totalAmount);
@@ -50,7 +49,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
         {payload.map((p: any, i: number) => (
           <p key={`tooltip-${i}`} className="text-xs font-semibold" style={{ color: p.color || p.fill }}>
             {p.name}:{' '}
-            {p.dataKey === 'revenue' || p.dataKey === 'recorded' ? `₱${p.value.toLocaleString()}` : p.value}
+            {p.dataKey === 'revenue' ? `₱${p.value.toLocaleString()}` : p.value}
 
           </p>
         ))}
@@ -120,8 +119,7 @@ export function Analytics() {
         const dayHist = filteredHistory.filter((h: any) => isSameDay(new Date(h.startTime || h.endTime), day));
         return {
           dayLabel: format(day, 'MMM dd'),
-          revenue: summarizeSessionFinancials(dayHist).billedCents / 100,
-          recorded: dayHist.reduce((total: number, h: any) => total + (recordedLegacyBill(h) ?? 0), 0) / 100,
+          revenue: (summarizeSessionFinancials(dayHist).billedCents + dayHist.reduce((total: number, h: any) => total + (recordedLegacyBill(h) ?? 0), 0)) / 100,
           sessions: dayHist.length
         };
       });
@@ -186,8 +184,17 @@ export function Analytics() {
 
   // Top KPI Calcs
   const finances = useMemo(() => summarizeSessionFinancials(filteredHistory), [filteredHistory]);
-  const totalRevenue = finances.billedCents / 100;
-  const legacyRecorded = useMemo(() => ({ count: filteredHistory.filter((h: any) => recordedLegacyBill(h) !== null).length }), [filteredHistory]);
+  const recordedHistory = useMemo(() => {
+    let count = 0, cents = 0;
+    for (const row of filteredHistory) {
+      const bill = recordedLegacyBill(row);
+      if (bill === null) continue;
+      count++;
+      cents += bill;
+    }
+    return { count, cents };
+  }, [filteredHistory]);
+  const totalRevenue = (finances.billedCents + recordedHistory.cents) / 100;
   const activeFloor = tables.filter((table: any) => table.isActive !== false && table.isActive !== 0 && table.status !== 'maintenance');
   const avgOccupancy = activeFloor.length ? Math.round(activeFloor.filter((table: any) => table.status === 'occupied').length / activeFloor.length * 100) : 0;
   const peakHour = peakHours.reduce((max, d) => d.sessions > max.sessions ? d : max, peakHours[0]) || { hour: 'N/A', sessions: 0 };
@@ -561,14 +568,8 @@ export function Analytics() {
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h3 className="text-sm font-semibold text-neutral-300">Session Billing Trend</h3>
-                <p className="text-xs text-neutral-600 mt-0.5">Receipt-backed bills by session start date</p>
+                <p className="text-xs text-neutral-600 mt-0.5">Session bills by session start date</p>
               </div>
-              {legacyRecorded.count > 0 && (
-                <div className="flex items-center gap-3 text-[10px] font-semibold text-neutral-500">
-                  <span className="flex items-center gap-1.5"><span className="w-4 h-0.5 rounded-full bg-emerald-400" /> Receipt-backed</span>
-                  <span className="flex items-center gap-1.5"><span className="w-4 border-t-2 border-dashed border-amber-400" /> Recorded, no receipt</span>
-                </div>
-              )}
             </div>
             <ResponsiveContainer width="100%" height={200}>
               <AreaChart data={revenueTrend}>
@@ -583,12 +584,11 @@ export function Analytics() {
                 <YAxis tick={{ fontSize: 11, fill: '#737373' }} axisLine={false} tickLine={false} tickFormatter={v => `₱${v}`} />
                 <Tooltip content={<CustomTooltip />} />
                 <Area key="area-weekly-revenue" type="monotone" dataKey="revenue" name="Billed" stroke="#10b981" strokeWidth={2} fill="url(#analytics-revGrad)" dot={{ fill: '#10b981', r: 3 }} />
-                <Area key="area-legacy-recorded" type="monotone" dataKey="recorded" name="Recorded, no receipt" stroke="#f59e0b" strokeWidth={2} strokeDasharray="4 4" fillOpacity={0} dot={{ fill: '#f59e0b', r: 3 }} />
               </AreaChart>
             </ResponsiveContainer>
-            {finances.reviewCount > legacyRecorded.count && (
-              <p className="text-[10px] text-amber-400/80 mt-2">
-                {finances.reviewCount - legacyRecorded.count} session bill{finances.reviewCount - legacyRecorded.count === 1 ? '' : 's'} in this range cannot be verified against a saved receipt and stay out of the chart until reviewed.
+            {finances.reviewCount > recordedHistory.count && (
+              <p className="text-[10px] text-neutral-500 mt-2">
+                {finances.reviewCount - recordedHistory.count} session bill{finances.reviewCount - recordedHistory.count === 1 ? '' : 's'} in this range cannot be verified against a saved receipt and stay out of the chart until reviewed.
               </p>
             )}
           </div>
