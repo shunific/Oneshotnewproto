@@ -279,6 +279,8 @@ export function HomePage() {
     name: '', email: '', phone: '', pax: 2, timeSlot: '', duration: 1,
     paymentMethod: 'gcash' as 'gcash' | 'cash', paymentRef: ''
   });
+  const [resTouched, setResTouched] = useState<Record<string, boolean>>({});
+  const [resAttempted, setResAttempted] = useState(false);
 
   const [reservationStep, setReservationStep] = useState<0 | 1 | 2 | 3>(0);
   const [resTab, setResTab] = useState<'new' | 'track'>('new');
@@ -629,6 +631,27 @@ export function HomePage() {
     confirm: validateRegisterField('confirm', registerForm.confirm),
   };
 
+  // Reservation Step 3 uses the same rules, except email is optional there.
+  const validateReservationField = (key: string, value: string): string => {
+    const raw = String(value || '');
+    const v = raw.trim();
+    if (key === 'name') return validateRegisterField('name', v);
+    if (key === 'email') {
+      if (!v) return '';
+      if (v.length > 254) return 'Email address cannot exceed 254 characters.';
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v)) return 'Enter a valid email address (e.g. juan@email.com).';
+      return '';
+    }
+    if (key === 'phone') return validateRegisterField('phone', v);
+    return '';
+  };
+
+  const resErrors = {
+    name: validateReservationField('name', resForm.name),
+    email: validateReservationField('email', resForm.email),
+    phone: validateReservationField('phone', resForm.phone),
+  };
+
   const handleRegisterSubmit = async () => {
     if (!checkRateLimit('register', 3, 10)) return setToastMsg({title:"Rate Limit Exceeded", desc:"Please wait before trying again.", type:"error"});
     setRegisterAttempted(true);
@@ -964,9 +987,10 @@ export function HomePage() {
 
   const handleReservationSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!resForm.name || !resForm.phone || !selectedDate || !selectedTableId || !resForm.timeSlot || timeValidation !== 'valid') return;
-    if (resForm.phone.replace(/\D/g, '').length !== 11) {
-      setToastMsg({ title: 'Invalid Phone Number', desc: 'Please enter an 11-digit mobile number (e.g. 09171234567).', type: 'error' });
+    setResAttempted(true);
+    if (!selectedDate || !selectedTableId || !resForm.timeSlot || timeValidation !== 'valid') return;
+    if (Object.values(resErrors).some(Boolean)) {
+      setToastMsg({ title: 'Please Check Your Details', desc: 'Fix the highlighted fields in Step 3.', type: 'error' });
       return;
     }
     
@@ -2003,13 +2027,15 @@ export function HomePage() {
                             <div className="shrink-0 space-y-4">
                               <div>
                                 <label className="block text-xs text-neutral-400 mb-1">Full Name *</label>
-                                <input type="text" value={resForm.name} onChange={e => setResForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Juan dela Cruz" className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-100 outline-none focus:border-emerald-500" />
+                                <input type="text" value={resForm.name} maxLength={50} onBlur={() => setResTouched(t => ({ ...t, name: true }))} onChange={e => setResForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Juan dela Cruz" className={`w-full bg-neutral-950 border rounded-xl px-4 py-2.5 text-sm text-neutral-100 outline-none focus:border-emerald-500 ${(resAttempted || resTouched.name) && resErrors.name ? 'border-rose-500/60' : 'border-neutral-800'}`} />
+                                {(resAttempted || resTouched.name) && resErrors.name && <p className="text-[10px] text-rose-400 mt-1">{resErrors.name}</p>}
                               </div>
 
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                 <div>
                                   <label className="block text-xs text-neutral-400 mb-1">Email Address</label>
-                                  <input type="email" value={resForm.email} maxLength={254} onKeyDown={e => { if (e.key === ' ') e.preventDefault(); }} onChange={e => setResForm(f => ({ ...f, email: e.target.value.replace(/\s/g, '') }))} placeholder="juan@email.com" className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-100 outline-none focus:border-emerald-500" />
+                                  <input type="email" value={resForm.email} maxLength={254} onKeyDown={e => { if (e.key === ' ') e.preventDefault(); }} onBlur={() => setResTouched(t => ({ ...t, email: true }))} onChange={e => setResForm(f => ({ ...f, email: e.target.value.replace(/\s/g, '') }))} placeholder="juan@email.com" className={`w-full bg-neutral-950 border rounded-xl px-4 py-2.5 text-sm text-neutral-100 outline-none focus:border-emerald-500 ${(resAttempted || resTouched.email) && resErrors.email ? 'border-rose-500/60' : 'border-neutral-800'}`} />
+                                  {(resAttempted || resTouched.email) && resErrors.email && <p className="text-[10px] text-rose-400 mt-1">{resErrors.email}</p>}
                                 </div>
                                 <div>
                                   <label className="block text-xs text-neutral-400 mb-1">Phone Number *</label>
@@ -2018,10 +2044,12 @@ export function HomePage() {
                                     inputMode="numeric" 
                                     maxLength={11} 
                                     value={resForm.phone} 
+                                    onBlur={() => setResTouched(t => ({ ...t, phone: true }))}
                                     onChange={e => setResForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 11) }))} 
                                     placeholder="09XXXXXXXXX (11 digits)" 
-                                    className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-100 outline-none focus:border-emerald-500" 
+                                    className={`w-full bg-neutral-950 border rounded-xl px-4 py-2.5 text-sm text-neutral-100 outline-none focus:border-emerald-500 ${(resAttempted || resTouched.phone) && resErrors.phone ? 'border-rose-500/60' : 'border-neutral-800'}`} 
                                   />
+                                  {(resAttempted || resTouched.phone) && resErrors.phone && <p className="text-[10px] text-rose-400 mt-1">{resErrors.phone}</p>}
                                 </div>
                               </div>
 
@@ -2151,8 +2179,9 @@ export function HomePage() {
                                   type="text"
                                   placeholder="Enter promo code"
                                   value={promoCodeInput}
+                                  onKeyDown={e => { if (e.key === ' ') e.preventDefault(); }}
                                   onChange={e => {
-                                    setPromoCodeInput(e.target.value.toUpperCase());
+                                    setPromoCodeInput(e.target.value.replace(/\s/g, '').toUpperCase());
                                     if (promoError) setPromoError('');
                                   }}
                                   disabled={!!appliedPromo}
