@@ -338,6 +338,8 @@ export function HomePage() {
 
   const [loginForm, setLoginForm] = useState({ email: '', password: '', showPw: false, error: '', loading: false });
   const [registerForm, setRegisterForm] = useState({ name: '', email: '', phone: '', password: '', confirm: '', showPw: false, error: '', loading: false });
+  const [registerTouched, setRegisterTouched] = useState<Record<string, boolean>>({});
+  const [registerAttempted, setRegisterAttempted] = useState(false);
   const [forgotForm, setForgotForm] = useState({ email: '', error: '', success: false, loading: false });
 
   // 🟢 DYNAMIC IMAGE HANDLING (Kept intact per your instructions)
@@ -584,12 +586,53 @@ export function HomePage() {
     }
   };
 
+  const validateRegisterField = (key: string, value: string, form = registerForm): string => {
+    const raw = String(value || '');
+    const v = raw.trim();
+    if (key === 'name') {
+      if (!v) return 'Full name is required.';
+      if (v.length < 2) return 'Full name must be at least 2 characters.';
+      if (v.length > 50) return 'Full name cannot exceed 50 characters.';
+      if (!/^[A-Za-z\u00C0-\u024F.' -]+$/.test(v)) return 'Full name can only contain letters, spaces, periods, apostrophes and hyphens.';
+      return '';
+    }
+    if (key === 'email') {
+      if (!v) return 'Email address is required.';
+      if (v.length > 254) return 'Email address cannot exceed 254 characters.';
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v)) return 'Enter a valid email address (e.g. juan@email.com).';
+      return '';
+    }
+    if (key === 'phone') {
+      if (!v) return 'Contact number is required.';
+      if (!/^09\d{9}$/.test(v)) return 'Enter an 11-digit mobile number starting with 09.';
+      return '';
+    }
+    if (key === 'password') {
+      if (!raw) return 'Password is required.';
+      if (raw.length < 8) return 'Password must be at least 8 characters.';
+      if (raw.length > 100) return 'Password cannot exceed 100 characters.';
+      return '';
+    }
+    if (key === 'confirm') {
+      if (!raw) return 'Please confirm your password.';
+      if (raw !== form.password) return 'Passwords do not match.';
+      return '';
+    }
+    return '';
+  };
+
+  const registerErrors = {
+    name: validateRegisterField('name', registerForm.name),
+    email: validateRegisterField('email', registerForm.email),
+    phone: validateRegisterField('phone', registerForm.phone),
+    password: validateRegisterField('password', registerForm.password),
+    confirm: validateRegisterField('confirm', registerForm.confirm),
+  };
+
   const handleRegisterSubmit = async () => {
     if (!checkRateLimit('register', 3, 10)) return setToastMsg({title:"Rate Limit Exceeded", desc:"Please wait before trying again.", type:"error"});
-    if (!registerForm.name || !registerForm.email || !registerForm.phone || !registerForm.password) return setRegisterForm(f => ({ ...f, error: 'Please fill all required fields.' }));
-    if (registerForm.password !== registerForm.confirm) return setRegisterForm(f => ({ ...f, error: 'Passwords do not match.' }));
-    if (registerForm.phone.replace(/\D/g, '').length !== 11) return setRegisterForm(f => ({ ...f, error: 'Please enter an 11-digit mobile number (e.g. 09171234567).' }));
-    if (registerForm.password.length < 8) return setRegisterForm(f => ({ ...f, error: 'Password must be at least 8 characters long.' }));
+    setRegisterAttempted(true);
+    if (Object.values(registerErrors).some(Boolean)) return setRegisterForm(f => ({ ...f, error: 'Please fix the highlighted fields below.' }));
     
     setRegisterForm(f => ({ ...f, loading: true, error: '' }));
     const { data, error } = await supabase.auth.signUp({
@@ -629,6 +672,8 @@ export function HomePage() {
         });
         setShowAuthModal(false);
         setRegisterForm({ name: '', email: '', phone: '', password: '', confirm: '', showPw: false, error: '', loading: false });
+        setRegisterTouched({});
+        setRegisterAttempted(false);
         setToastMsg({ title: "Welcome!", desc: `Account created successfully, ${registerForm.name}!`, type: "success" });
       } else {
         // Try password sign-in immediately in case confirmation is disabled on the project
@@ -644,11 +689,15 @@ export function HomePage() {
           });
           setShowAuthModal(false);
           setRegisterForm({ name: '', email: '', phone: '', password: '', confirm: '', showPw: false, error: '', loading: false });
+        setRegisterTouched({});
+        setRegisterAttempted(false);
           setToastMsg({ title: "Welcome!", desc: `Account created successfully, ${registerForm.name}!`, type: "success" });
         } else {
           // Email confirmation is required by Supabase Auth settings
           setShowAuthModal(false);
           setRegisterForm({ name: '', email: '', phone: '', password: '', confirm: '', showPw: false, error: '', loading: false });
+        setRegisterTouched({});
+        setRegisterAttempted(false);
           alert(`Account created! A confirmation email has been sent to ${registerForm.email}. Please click the link in your email to verify and activate your account.`);
         }
       }
@@ -3269,6 +3318,7 @@ export function HomePage() {
                     {[ { key: 'name', label: 'Full Name', type: 'text' }, { key: 'email', label: 'Email Address', type: 'email' }, { key: 'phone', label: 'Contact Number', type: 'tel' }].map(({ key, label, type }) => {
                       const max = key === 'phone' ? 11 : key === 'email' ? 254 : key === 'name' ? 50 : 0;
                       const length = String((registerForm as any)[key] || '').length;
+                      const error = (registerAttempted || registerTouched[key]) ? (registerErrors as any)[key] : '';
                       return (
                       <div key={key}>
                         <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-center">
@@ -3280,16 +3330,29 @@ export function HomePage() {
                           inputMode={key === 'phone' ? 'numeric' : undefined} 
                           maxLength={key === 'phone' ? 11 : key === 'email' ? 254 : key === 'name' ? 50 : undefined}
                           onKeyDown={key === 'email' ? (e => { if (e.key === ' ') e.preventDefault(); }) : undefined}
+                          onBlur={() => setRegisterTouched(t => ({ ...t, [key]: true }))}
                           placeholder={key === 'phone' ? '09XXXXXXXXX (11 digits)' : undefined}
                           value={(registerForm as any)[key]} 
                           onChange={e => setRegisterForm(f => ({ ...f, [key]: key === 'phone' ? e.target.value.replace(/\D/g, '').slice(0, 11) : key === 'email' ? e.target.value.replace(/\s/g, '') : e.target.value, error: '' }))} 
-                          className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-sm text-neutral-100 focus:border-emerald-500 outline-none transition-colors" 
+                          className={`w-full bg-neutral-900 border rounded-xl px-4 py-3 text-sm text-neutral-100 focus:border-emerald-500 outline-none transition-colors ${error ? 'border-rose-500/60' : 'border-neutral-700'}`} 
                         />
+                        {error && <p className="text-[10px] text-rose-400 mt-1">{error}</p>}
                       </div>
                       );
                     })}
-                    <div><label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-center"><span>Password</span><span className={`text-[10px] font-medium ${registerForm.password.length >= 100 ? 'text-amber-400' : 'text-neutral-500'}`}>{registerForm.password.length}/100</span></label><div className="relative"><input type={registerForm.showPw ? 'text' : 'password'} maxLength={100} value={registerForm.password} onChange={e => setRegisterForm(f => ({ ...f, password: e.target.value, error: '' }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 pr-10 text-sm text-neutral-100 focus:border-emerald-500 outline-none transition-colors" /><button onClick={() => setRegisterForm(f => ({ ...f, showPw: !f.showPw }))} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300">{registerForm.showPw ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></div>
-                    <div><label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-center"><span>Confirm Password</span><span className={`text-[10px] font-medium ${registerForm.confirm.length >= 100 ? 'text-amber-400' : 'text-neutral-500'}`}>{registerForm.confirm.length}/100</span></label><input type="password" maxLength={100} value={registerForm.confirm} onChange={e => setRegisterForm(f => ({ ...f, confirm: e.target.value, error: '' }))} className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-sm text-neutral-100 focus:border-emerald-500 outline-none transition-colors" /></div>
+                    <div>
+                      <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-center"><span>Password</span><span className={`text-[10px] font-medium ${registerForm.password.length >= 100 ? 'text-amber-400' : 'text-neutral-500'}`}>{registerForm.password.length}/100</span></label>
+                      <div className="relative">
+                        <input type={registerForm.showPw ? 'text' : 'password'} maxLength={100} value={registerForm.password} onBlur={() => setRegisterTouched(t => ({ ...t, password: true }))} onChange={e => setRegisterForm(f => ({ ...f, password: e.target.value, error: '' }))} className={`w-full bg-neutral-900 border rounded-xl px-4 py-3 pr-10 text-sm text-neutral-100 focus:border-emerald-500 outline-none transition-colors ${(registerAttempted || registerTouched.password) && registerErrors.password ? 'border-rose-500/60' : 'border-neutral-700'}`} />
+                        <button onClick={() => setRegisterForm(f => ({ ...f, showPw: !f.showPw }))} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300">{registerForm.showPw ? <EyeOff size={16} /> : <Eye size={16} />}</button>
+                      </div>
+                      {(registerAttempted || registerTouched.password) && registerErrors.password && <p className="text-[10px] text-rose-400 mt-1">{registerErrors.password}</p>}
+                    </div>
+                    <div>
+                      <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-center"><span>Confirm Password</span><span className={`text-[10px] font-medium ${registerForm.confirm.length >= 100 ? 'text-amber-400' : 'text-neutral-500'}`}>{registerForm.confirm.length}/100</span></label>
+                      <input type="password" maxLength={100} value={registerForm.confirm} onBlur={() => setRegisterTouched(t => ({ ...t, confirm: true }))} onChange={e => setRegisterForm(f => ({ ...f, confirm: e.target.value, error: '' }))} className={`w-full bg-neutral-900 border rounded-xl px-4 py-3 text-sm text-neutral-100 focus:border-emerald-500 outline-none transition-colors ${(registerAttempted || registerTouched.confirm) && registerErrors.confirm ? 'border-rose-500/60' : 'border-neutral-700'}`} />
+                      {(registerAttempted || registerTouched.confirm) && registerErrors.confirm && <p className="text-[10px] text-rose-400 mt-1">{registerErrors.confirm}</p>}
+                    </div>
                   </div>
                   <button onClick={handleRegisterSubmit} disabled={registerForm.loading} className="w-full mt-4 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white py-3 rounded-xl text-sm font-bold shadow-lg shadow-emerald-900/30 transition-colors">
                     {registerForm.loading ? 'Creating Account...' : 'Register Account'}
