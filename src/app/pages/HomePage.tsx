@@ -147,12 +147,12 @@ export function HomePage() {
     const waitingCount = (queue || []).filter((q: any) => q.status === 'waiting').length;
 
     if (freeTables > waitingCount) {
-      setDynamicWaitTime("0 mins (Available Now)");
+      setDynamicWaitTime("Available Now");
       return;
     }
 
     if (activeTables.length === 0) {
-      setDynamicWaitTime("0 mins (Available Now)");
+      setDynamicWaitTime("Available Now");
       return;
     }
 
@@ -167,7 +167,9 @@ export function HomePage() {
     const unseatedQueue = Math.max(0, waitingCount - freeTables);
     const totalWait = baseWait + (unseatedQueue * 15); 
 
-    if (totalWait < 60) {
+    if (totalWait < 1) {
+      setDynamicWaitTime("Available Now");
+    } else if (totalWait < 60) {
       setDynamicWaitTime(`~${Math.round(totalWait)} mins`);
     } else {
       setDynamicWaitTime(`~${Math.floor(totalWait / 60)}h ${Math.round(totalWait % 60)}m`);
