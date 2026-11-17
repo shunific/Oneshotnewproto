@@ -6,8 +6,9 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell
 } from 'recharts';
 import { useAppContext } from '../context/AppContext';
+import { PesoSign } from '../components/PesoSign';
 import {
-  TrendingUp, BarChart3, Clock, DollarSign, TableProperties,
+  TrendingUp, BarChart3, Clock, TableProperties,
   Calendar as CalendarIcon, Printer, CheckCircle, Table2, Users,
   BarChart2, Download, X, ClipboardList
 } from 'lucide-react';
@@ -64,7 +65,7 @@ function StatCard({ label, value, sub, icon: Icon, color }: any) {
     <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4">
       <div className="flex items-start justify-between mb-2">
         <p className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">{label}</p>
-        <div className={`p-1.5 rounded-lg ${color.replace('text-', 'bg-').replace('-400', '-500/10')}`}>
+        <div className={`flex size-7 items-center justify-center rounded-lg ${color.replace('text-', 'bg-').replace('-400', '-500/10')}`}>
           <Icon size={14} className={color} />
         </div>
       </div>
@@ -405,7 +406,7 @@ export function Analytics() {
             {[
               { label: 'Tables Used', value: tablesUsedToday, icon: Table2, color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/20' },
               { label: 'Completed Sessions', value: dayHistory.length, icon: BarChart2, color: 'text-sky-400', bg: 'bg-sky-500/10 border-sky-500/20' },
-              { label: 'Payments Applied to Closed Bills', value: formatPHP(revenueCollected), icon: DollarSign, color: 'text-amber-400', bg: 'bg-amber-500/10 border-amber-500/20' },
+              { label: 'Payments Applied to Closed Bills', value: formatPHP(revenueCollected), icon: PesoSign, color: 'text-amber-400', bg: 'bg-amber-500/10 border-amber-500/20' },
               { label: 'Reservations Served', value: reservationsServed, icon: CheckCircle, color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/20' },
               { label: 'Avg Session Duration', value: dayHistory.length ? `${(dayHistory.reduce((s: number, r: any) => s + (r.durationMinutes || 0), 0) / dayHistory.length / 60).toFixed(1)}h` : '—', icon: Clock, color: 'text-violet-400', bg: 'bg-violet-500/10 border-violet-500/20' },
               { label: 'Queue Served', value: isSelectedToday ? queue.filter((q: any) => q.status === 'called' || q.status === 'seated').length : '—', icon: Users, color: 'text-rose-400', bg: 'bg-rose-500/10 border-rose-500/20' },
@@ -555,7 +556,7 @@ export function Analytics() {
 
         {/* KPI Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <StatCard label="Session Bills" value={`₱${totalRevenue.toLocaleString()}`} sub={finances.reviewCount > 0 ? `For selected date range · ${finances.reviewCount} not receipt-verified` : 'For selected date range'} icon={DollarSign} color="text-emerald-400" />
+          <StatCard label="Session Bills" value={`₱${totalRevenue.toLocaleString()}`} sub={finances.reviewCount > 0 ? `For selected date range · ${finances.reviewCount} not receipt-verified` : 'For selected date range'} icon={PesoSign} color="text-emerald-400" />
           <StatCard label="Live Occupancy" value={`${avgOccupancy}%`} sub="Current active floor" icon={TableProperties} color="text-blue-400" />
           <StatCard label="Peak Hour" value={peakHour.sessions ? peakHour.hour : 'N/A'} sub={`${peakHour.sessions} session starts`} icon={Clock} color="text-amber-400" />
           <StatCard label="Avg Session" value={`${overallAvgDuration} hrs`} sub="Per table booking" icon={BarChart3} color="text-purple-400" />
