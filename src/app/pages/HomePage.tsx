@@ -1584,7 +1584,7 @@ export function HomePage() {
 
                     {/* Get in Touch Card */}
                     <div className="bg-neutral-900/90 border border-neutral-800 rounded-2xl p-6 space-y-3.5 shadow-sm">
-                      <p className="text-xs font-bold text-neutral-400 uppercase tracking-wider mb-1">Get in Touch</p>
+                      <p className="text-xs font-bold text-neutral-400 uppercase tracking-wider">Get in Touch</p>
                       <div className="flex items-center gap-3.5 text-sm text-neutral-300">
                         <div className="w-8 h-8 rounded-full bg-emerald-950/50 flex items-center justify-center border border-emerald-900/50 flex-shrink-0"><Phone size={14} className="text-emerald-500" /></div>
                         <span className="font-medium">{cms.phone}</span>
