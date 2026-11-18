@@ -863,19 +863,43 @@ export function HomePage() {
     return fallback;
   };
 
-  const minAllowedPartySize = (() => {
+  const partyLimitsFor = (isWeekend: boolean) => {
     const wDayMin = getTermNum(['weekdayMinPartySize', 'weekdayminpartysize', 'weekday_min_party_size', 'min_party_size', 'minPartySize'], 1);
     const wEndMin = getTermNum(['weekendMinPartySize', 'weekendminpartysize', 'weekend_min_party_size', 'min_party_size', 'minPartySize'], 1);
-    if (!selectedDate) return Math.min(wDayMin, wEndMin);
-    return isWeekendDay(new Date(selectedDate)) ? wEndMin : wDayMin;
-  })();
-
-  const maxAllowedPartySize = (() => {
     const wDayMax = getTermNum(['weekdayMaxPartySize', 'weekdaymaxpartysize', 'weekday_max_party_size', 'max_party_size', 'maxPartySize'], 10);
     const wEndMax = getTermNum(['weekendMaxPartySize', 'weekendmaxpartysize', 'weekend_max_party_size', 'max_party_size', 'maxPartySize'], 10);
-    if (!selectedDate) return Math.max(wDayMax, wEndMax);
-    return isWeekendDay(new Date(selectedDate)) ? wEndMax : wDayMax;
-  })();
+    return isWeekend ? { min: wEndMin, max: wEndMax } : { min: wDayMin, max: wDayMax };
+  };
+
+  const getPartyLimits = (date: Date | null) => {
+    if (!date) {
+      const weekday = partyLimitsFor(false);
+      const weekend = partyLimitsFor(true);
+      return { min: Math.min(weekday.min, weekend.min), max: Math.max(weekday.max, weekend.max) };
+    }
+    return partyLimitsFor(isWeekendDay(date));
+  };
+
+  const minAllowedPartySize = getPartyLimits(selectedDate).min;
+  const maxAllowedPartySize = getPartyLimits(selectedDate).max;
+
+  // Duration limits come from the booking grid itself: from opening time up to
+  // closing, still capped by the venue's configured maximum.
+  const getDurationLimits = () => {
+    const parseToMins = (t: string) => {
+      const [hh = '0', mm = '0'] = (t || '').split(':');
+      return Number(hh) * 60 + Number(mm || 0);
+    };
+    const startMins = parseToMins(rates?.reservationStartTime || '12:00');
+    let endMins = parseToMins(rates?.reservationEndTime || '02:00');
+    if (endMins <= startMins) endMins += 24 * 60;
+    const windowHours = Math.floor((endMins - startMins) / 60);
+    const configuredMax = Number(reservationTerms?.maxHours) || 0;
+    return {
+      min: Math.max(1, Number(reservationTerms?.minHours) || 0),
+      max: configuredMax > 0 ? Math.min(windowHours, configuredMax) : windowHours
+    };
+  };
 
   const getMaxDuration = () => {
     if (!resForm.timeSlot) return reservationTerms?.maxHours || 6;
@@ -1743,9 +1767,7 @@ export function HomePage() {
                                   setIsCalendarExpanded(false);
                                   setIsTableSelectorExpanded(true);
                                   if (d) {
-                                    const isWEnd = d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
-                                    const minP = isWEnd ? (Number(reservationTerms?.weekendMinPartySize) || 1) : (Number(reservationTerms?.weekdayMinPartySize) || 1);
-                                    const maxP = isWEnd ? (Number(reservationTerms?.weekendMaxPartySize) || 10) : (Number(reservationTerms?.weekdayMaxPartySize) || 10);
+                                    const { min: minP, max: maxP } = getPartyLimits(d);
                                     setResForm(f => ({ ...f, pax: Math.max(minP, Math.min(maxP, f.pax)) }));
                                   }
                                 }}
@@ -2785,12 +2807,13 @@ export function HomePage() {
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 text-sm">
                       {(() => {
-                        const minHoursVal = typeof reservationTerms?.minHours === 'number' ? reservationTerms.minHours : parseInt(String(reservationTerms?.minHours)) || 1;
-                        const maxHoursVal = typeof reservationTerms?.maxHours === 'number' ? reservationTerms.maxHours : parseInt(String(reservationTerms?.maxHours)) || 0;
-                        const weekdayMin = typeof reservationTerms?.weekdayMinPartySize === 'number' ? reservationTerms.weekdayMinPartySize : parseInt(String(reservationTerms?.weekdayMinPartySize)) || 1;
-                        const weekdayMax = typeof reservationTerms?.weekdayMaxPartySize === 'number' ? reservationTerms.weekdayMaxPartySize : parseInt(String(reservationTerms?.weekdayMaxPartySize)) || 8;
-                        const weekendMin = typeof reservationTerms?.weekendMinPartySize === 'number' ? reservationTerms.weekendMinPartySize : parseInt(String(reservationTerms?.weekendMinPartySize)) || 1;
-                        const weekendMax = typeof reservationTerms?.weekendMaxPartySize === 'number' ? reservationTerms.weekendMaxPartySize : parseInt(String(reservationTerms?.weekendMaxPartySize)) || 10;
+                        const { min: minHoursVal, max: maxHoursVal } = getDurationLimits();
+                        const weekdayParty = partyLimitsFor(false);
+                        const weekendParty = partyLimitsFor(true);
+                        const weekdayMin = weekdayParty.min;
+                        const weekdayMax = weekdayParty.max;
+                        const weekendMin = weekendParty.min;
+                        const weekendMax = weekendParty.max;
                         
                         return [
                           { label: 'Advance Booking Notice', value: 'Requires at least 1 hour advance notice' },
