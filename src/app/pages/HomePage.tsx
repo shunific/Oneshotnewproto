@@ -906,26 +906,6 @@ export function HomePage() {
     return `${h}:${m}`;
   }, [selectedDate]);
 
-  const buildTimeSlotOptions = (date: Date | null) => {
-    const parseToMins = (t: string) => {
-      const [hh = '0', mm = '0'] = (t || '').split(':');
-      return Number(hh) * 60 + Number(mm || 0);
-    };
-    const startMins = parseToMins(rates?.reservationStartTime || '12:00');
-    let endMins = parseToMins(rates?.reservationEndTime || '02:00');
-    if (endMins <= startMins) endMins += 24 * 60;
-    const now = new Date();
-    const nowMins = now.getHours() * 60 + now.getMinutes();
-    const isTodaySelected = !!(date && isToday(date));
-    const options: { value: string; label: string; disabled: boolean }[] = [];
-    for (let mins = startMins; mins < endMins; mins += 30) {
-      const normalized = mins % (24 * 60);
-      const value = `${String(Math.floor(normalized / 60)).padStart(2, '0')}:${String(normalized % 60).padStart(2, '0')}`;
-      options.push({ value, label: fmt12(value), disabled: isTodaySelected && normalized < nowMins + ADVANCE_NOTICE_MINS });
-    }
-    return options;
-  };
-
   const validateTimeSlotHelper = (time: string, duration: number, dateObj: Date | null, tableId: string | null): string => {
     if (!time || !dateObj) return 'invalid';
     if (!tableId) return 'no_table';
@@ -2077,7 +2057,10 @@ export function HomePage() {
                                       <span className="text-[9px] text-amber-500 font-semibold">Min: {fmt12(minAllowedTime)}</span>
                                     )}
                                   </label>
-                                  <select 
+                                  <input 
+                                    type="time" 
+                                    min={selectedDate && isToday(selectedDate) ? minAllowedTime : undefined}
+                                    style={{ colorScheme: isLightMode ? 'light' : 'dark' }} 
                                     value={resForm.timeSlot} 
                                     onChange={e => {
                                       const val = e.target.value;
@@ -2106,15 +2089,8 @@ export function HomePage() {
                                       }
                                       setResForm(f => ({ ...f, timeSlot: val }));
                                     }} 
-                                    className={`w-full bg-neutral-950 border rounded-xl px-3 py-2.5 text-sm text-neutral-100 text-center outline-none appearance-none cursor-pointer ${['closed', 'happyhour', 'full', 'table_conflict', 'active_conflict', 'past', 'advance'].includes(timeValidation) ? 'border-rose-500/50 text-rose-200' : 'border-neutral-800 focus:border-emerald-500'}`} 
-                                  >
-                                    <option value="" className="bg-neutral-900 text-white">Select time</option>
-                                    {buildTimeSlotOptions(selectedDate).map(opt => (
-                                      <option key={opt.value} value={opt.value} disabled={opt.disabled} className="bg-neutral-900 text-white">
-                                        {opt.label}{opt.disabled ? ' (unavailable)' : ''}
-                                      </option>
-                                    ))}
-                                  </select>
+                                    className={`w-full bg-neutral-950 border rounded-xl px-3 py-2.5 text-sm text-neutral-100 text-center outline-none ${['closed', 'happyhour', 'full', 'table_conflict', 'active_conflict', 'past', 'advance'].includes(timeValidation) ? 'border-rose-500/50 text-rose-200' : 'border-neutral-800 focus:border-emerald-500'}`} 
+                                  />
                                 </div>
                                 <div className="col-span-1">
                                   <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-center">
@@ -3199,8 +3175,11 @@ export function HomePage() {
                       <span className="text-[9px] text-amber-500 font-semibold">Min: {fmt12(format(addMinutes(new Date(), 60), 'HH:mm'))}</span>
                     )}
                   </label>
-                  <select 
+                  <input 
+                    type="time" 
                     required 
+                    min={rescheduleData.newDate && isToday(rescheduleData.newDate) ? format(addMinutes(new Date(), 60), 'HH:mm') : undefined}
+                    style={{ colorScheme: 'dark' }}
                     value={rescheduleData.timeSlot} 
                     onChange={e => {
                       const val = e.target.value;
@@ -3212,15 +3191,8 @@ export function HomePage() {
                       }
                       setRescheduleData(prev => prev ? ({ ...prev, timeSlot: val }) : null);
                     }} 
-                    className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-sm text-neutral-100 focus:border-violet-500 outline-none text-center transition-colors appearance-none cursor-pointer" 
-                  >
-                    <option value="" className="bg-neutral-900 text-white">Select time</option>
-                    {buildTimeSlotOptions(rescheduleData.newDate).map(opt => (
-                      <option key={opt.value} value={opt.value} disabled={opt.disabled} className="bg-neutral-900 text-white">
-                        {opt.label}{opt.disabled ? ' (unavailable)' : ''}
-                      </option>
-                    ))}
-                  </select>
+                    className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-sm text-neutral-100 focus:border-violet-500 outline-none text-center transition-colors" 
+                  />
                 </div>
                 
                 <div>
