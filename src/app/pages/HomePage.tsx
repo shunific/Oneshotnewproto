@@ -2485,7 +2485,7 @@ export function HomePage() {
                                           className="absolute right-0 top-full mt-2 w-48 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-2xl overflow-hidden z-50 flex flex-col py-1"
                                         >
                                           {/* Cancel / Request Refund */}
-                                          {(r.status === 'pending' || r.status === 'pending-reschedule' || r.status === 'confirmed') && (
+                                          {(r.status === 'pending' || r.status === 'pending-reschedule' || r.status === 'confirmed') && currentUser && (
                                             <button 
                                               onClick={(e) => { e.stopPropagation(); handleCancelBooking(r.id, r.date, r.timeSlot); setOpenActionRowId(null); }} 
                                               className="px-4 py-3 text-left text-xs font-bold text-rose-600 dark:text-rose-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors border-b border-neutral-100 dark:border-neutral-800/50 cursor-pointer"
@@ -2836,7 +2836,11 @@ export function HomePage() {
                     </div>
 
                     <p className={`text-[11px] leading-relaxed ${isLightMode ? 'text-slate-500' : 'text-neutral-400'}`}>
-                      * To cancel or request a refund, go to <span className="font-semibold text-emerald-500">Reservations &gt; Track Booking</span> and select <span className="font-semibold">Cancel / Request Refund</span> from the Actions menu.
+                      {currentUser ? (
+                        <>* To cancel or request a refund, go to <span className="font-semibold text-emerald-500">Reservations &gt; Track Booking</span> and select <span className="font-semibold">Cancel / Request Refund</span> from the Actions menu.</>
+                      ) : (
+                        <>* To cancel or request a refund, <span className="font-semibold text-emerald-500">sign in</span> to your account. Cancellations and reschedules are only available to signed-in accounts, from <span className="font-semibold">Reservations &gt; Track Booking</span>.</>
+                      )}
                     </p>
                   </div>
 
