@@ -8,6 +8,10 @@ import {
 
 import { format } from 'date-fns';
 
+const addedDate = new Intl.DateTimeFormat('en-PH', {
+  timeZone: 'Asia/Manila', day: 'numeric', month: 'short', year: 'numeric'
+});
+
 const COMMON_MAINTENANCE_REASONS = [
   'Torn / Damaged Felt',
   'Cue / Cushion Repair Needed',
@@ -79,10 +83,10 @@ export function AdminTableManagement() {
     setLoadingMsg('ADDING NEW TABLE...');
     setIsLoading(true);
     try {
-      await addTable(trimmedName);
+      const savedName = await addTable(trimmedName);
       setNewName('');
       setShowAddForm(false);
-      flash(`Table "${trimmedName}" added!`);
+      flash(`Table "${savedName}" added!`);
     } catch (error: any) {
       flash(error.message || 'Table could not be added.', 'error');
     } finally {
@@ -437,6 +441,13 @@ export function AdminTableManagement() {
                     </div>
                   )}
                 </div>
+
+                <dl className="mb-3 flex items-baseline justify-between gap-2 text-xs">
+                  <dt className="text-neutral-500">Date added</dt>
+                  <dd className="text-neutral-300">{t.dateAdded && Number.isFinite(Date.parse(t.dateAdded))
+                    ? <time dateTime={t.dateAdded}>{addedDate.format(new Date(t.dateAdded))}</time>
+                    : 'Not recorded'}</dd>
+                </dl>
 
                 {/* Card Footer: Contextual Information */}
                 <div className="mt-auto pt-4 border-t border-neutral-800/60">

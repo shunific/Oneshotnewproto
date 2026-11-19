@@ -308,6 +308,13 @@ if (!sqlite3) {
       db.run(`CREATE TABLE IF NOT EXISTS staff (id TEXT PRIMARY KEY, username TEXT, password TEXT, fullName TEXT, role TEXT, phone TEXT, joinedDate TEXT, avatarImg TEXT, isActive INTEGER DEFAULT 1, isAdmin INTEGER DEFAULT 0, recoveryPin TEXT)`);
       db.run('ALTER TABLE staff ADD COLUMN isFirstLogin INTEGER DEFAULT 0', () => {});
       db.run(`CREATE TABLE IF NOT EXISTS tables (id TEXT PRIMARY KEY, name TEXT NOT NULL, status TEXT NOT NULL, isActive INTEGER DEFAULT 1, maintenanceReason TEXT, sessionData TEXT)`);
+      db.run('ALTER TABLE tables ADD COLUMN dateAdded TEXT', err => {
+        if (err && !/duplicate column name/i.test(err.message)) console.error('Table creation date migration failed:', err.message);
+      });
+      // Older app-created table IDs contain the original creation time in milliseconds.
+      db.run(`UPDATE tables SET dateAdded = strftime('%Y-%m-%dT%H:%M:%fZ', CAST(substr(id, 2) AS INTEGER) / 1000.0, 'unixepoch')
+        WHERE dateAdded IS NULL AND length(id) = 14 AND substr(id, 1, 1) = 't'
+          AND substr(id, 2) NOT GLOB '*[^0-9]*'`);
       db.run(`CREATE TABLE IF NOT EXISTS inventory (id TEXT PRIMARY KEY, name TEXT, category TEXT, price REAL, stock INTEGER DEFAULT 0, isActive INTEGER DEFAULT 1, createdAt DATETIME DEFAULT CURRENT_TIMESTAMP)`);
       db.run(`CREATE TABLE IF NOT EXISTS queue (id TEXT PRIMARY KEY, customerName TEXT, contactNumber TEXT, partySize INTEGER, status TEXT, queueNumber INTEGER, notes TEXT, arrivalTime DATETIME DEFAULT CURRENT_TIMESTAMP)`);
       db.run(`CREATE TABLE IF NOT EXISTS reservations (id TEXT PRIMARY KEY, customerName TEXT, contactNumber TEXT, email TEXT, date DATETIME, timeSlot TEXT, durationHours INTEGER, partySize INTEGER, tableId TEXT, status TEXT, totalAmount REAL, downPaymentAmount REAL, downPaymentPaid INTEGER DEFAULT 0, balancePaid INTEGER DEFAULT 0, paymentRef TEXT, receiptImg TEXT, cancellationReason TEXT, refundStatus TEXT, refundMethod TEXT, refundNotes TEXT, createdAt TEXT)`);
@@ -1010,16 +1017,15 @@ app.post('/api/sync-to-cloud', async (req, res) => {
             if (cloudTable === 'reservations') { await syncReservations(payload); return resolve(); }
             console.log(`☁️ Syncing ${localTable}: ${payload.length} row(s)`);
 
-const { data, error } = await supabase
+const { error } = await supabase
   .from(cloudTable)
-  .upsert(payload, { onConflict: conflictKey })
-  .select();
+  .upsert(payload, { onConflict: conflictKey });
 
 if (error) {
   console.error(`❌ ${cloudTable} sync failed:`, error.message);
   syncErrors.push(`${cloudTable}: ${error.message}`);
 } else {
-  console.log(`✅ ${cloudTable} synced: ${data?.length || 0} row(s)`);
+  console.log(`✅ ${cloudTable} synced: ${payload.length} row(s)`);
 }
           } catch (e) {
             syncErrors.push(`${cloudTable}: ${e.message}`);
@@ -1266,14 +1272,31 @@ app.post('/api/images', upload.single('image'), async (req, res) => {
   }
 });
 
+function tableName(value) {
+  if (typeof value !== 'string') return '';
+  const name = value.trim();
+  const numbered = /^table\s*#?\s*0*(\d+)$/i.exec(name);
+  return numbered ? 'Table ' + numbered[1] : name;
+}
+
 app.post('/api/tables', (req, res) => {
-  const { id, name, status, isActive } = req.body;
+  const { id, status, isActive } = req.body;
+  const name = tableName(req.body.name);
+  if (!name) return res.status(400).json({ error: 'Enter a table name.' });
+  const dateAdded = new Date().toISOString();
   db.run(
-    `INSERT INTO tables (id, name, status, isActive) VALUES (?, ?, ?, ?)`,
-    [id, name, status || 'available', isActive ? 1 : 0],
+    `INSERT INTO tables (id, name, status, isActive, dateAdded)
+     SELECT ?, CASE WHEN EXISTS (SELECT 1 FROM tables) THEN ? ELSE 'Table 1' END, ?, ?, ?
+     WHERE NOT EXISTS (SELECT 1 FROM tables WHERE trim(name) = ? COLLATE NOCASE)
+       AND (? <> 'Table 1' OR NOT EXISTS (SELECT 1 FROM tables))`,
+    [id, name, status || 'available', isActive ? 1 : 0, dateAdded, name, name],
     function (err) {
       if (err) return res.status(500).json({ error: err.message });
-      res.status(201).json({ message: 'Table created successfully', id: id });
+      if (!this.changes) return res.status(409).json({ error: name === 'Table 1' ? 'Table 1 is reserved for the original table.' : 'This table name already exists.' });
+      db.get('SELECT id, name, dateAdded FROM tables WHERE id = ?', [id], (readError, row) => {
+        if (readError) return res.status(500).json({ error: readError.message });
+        res.status(201).json(row);
+      });
     }
   );
 });
@@ -1285,13 +1308,24 @@ app.put('/api/tables/:id', (req, res) => {
   if (status !== undefined) { updates.push("status = ?"); params.push(status); }
   if (session !== undefined || req.body.hasOwnProperty('session')) { updates.push("sessionData = ?"); params.push(sessionData); }
   if (isActive !== undefined) { updates.push("isActive = ?"); params.push(isActive ? 1 : 0); }
-  if (name !== undefined) { updates.push("name = ?"); params.push(name); }
+  const requestedName = tableName(name);
+  if (name !== undefined) {
+    if (!requestedName) return res.status(400).json({ error: 'Enter a table name.' });
+    updates.push("name = ?"); params.push(requestedName);
+  }
   if (maintenanceReason !== undefined) { updates.push("maintenanceReason = ?"); params.push(maintenanceReason); }
   if (updates.length === 0) return res.json({ message: "Nothing to update" });
   params.push(req.params.id);
-  db.run(`UPDATE tables SET ${updates.join(', ')} WHERE id = ?`, params, function(err) {
+  let guard = '';
+  if (name !== undefined) {
+    guard = ` AND NOT EXISTS (SELECT 1 FROM tables other WHERE other.id <> tables.id AND trim(other.name) = ? COLLATE NOCASE)
+              AND ((id = (SELECT id FROM tables ORDER BY rowid LIMIT 1)) = (? = 'Table 1'))`;
+    params.push(requestedName, requestedName);
+  }
+  db.run(`UPDATE tables SET ${updates.join(', ')} WHERE id = ?${guard}`, params, function(err) {
     if (err) return res.status(500).json({ error: err.message });
-    res.json({ message: "Table updated successfully." });
+    if (!this.changes) return res.status(409).json({ error: 'Table unavailable or name already in use. The oldest table keeps the name Table 1.' });
+    res.json({ message: "Table updated successfully.", ...(name !== undefined && { name: requestedName }) });
   });
 });
 

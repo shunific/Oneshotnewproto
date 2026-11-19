@@ -65,7 +65,7 @@ export function Legal() {
 
               <h2 className="text-xl font-bold text-white mt-8 mb-4 border-b border-neutral-800 pb-2">2. Reservations and Down Payments</h2>
               <ul className="list-disc pl-5 space-y-2 text-neutral-400">
-                <li>The booking form shows the table rate and down payment{Number(rates.downPaymentPercent) > 0 ? ` (${rates.downPaymentPercent}% of the table fee)` : ''}. Eligible Trusted Customers receive a waiver for bookings of up to three hours.</li>
+                <li>The booking form shows the table rate and down payment{Number(rates.downPaymentPercent) > 0 ? ` (${rates.downPaymentPercent}% of the table fee)` : ''}.</li>
                 <li>Down payments are processed via GCash. Uploaded receipts are verified by staff.</li>
                 <li>The remaining balance of the table rate and any associated Food & Beverage orders must be settled at the venue.</li>
               </ul>
@@ -90,14 +90,13 @@ export function Legal() {
               <ul className="list-disc pl-5 space-y-2 text-neutral-400">
                 <li><strong>Personal Data:</strong> Name, Email Address, and Phone Number provided during registration or booking.</li>
                 <li><strong>OAuth Data:</strong> If logging in via Google or Facebook, we receive your public profile information (Name, Email, Profile Picture) authorized by the provider.</li>
-                <li><strong>Usage Data:</strong> Reservation history, trusted customer metrics, and general platform interaction logs.</li>
+                <li><strong>Usage Data:</strong> Reservation history and general platform interaction logs.</li>
               </ul>
 
               <h2 className="text-xl font-bold text-white mt-8 mb-4 border-b border-neutral-800 pb-2">2. How We Use Your Data</h2>
               <p>Your data is strictly used for operational purposes:</p>
               <ul className="list-disc pl-5 space-y-2 text-neutral-400">
                 <li>To confirm and manage your table reservations.</li>
-                <li>To calculate your Net Trust Score and assign loyalty benefits.</li>
                 <li>To process down payment verifications and refunds.</li>
                 <li>To send operational notifications regarding your booking status.</li>
               </ul>

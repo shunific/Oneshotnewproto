@@ -36,6 +36,7 @@ export type Session = {
 export type Table = {
   id: string;
   name: string;
+  dateAdded?: string | null;
   status: TableStatus;
   session?: Session;
   isActive: boolean;
@@ -259,7 +260,7 @@ export type AppContextType = {
   activeAnnouncement: string; updateActiveAnnouncement: (msg: string) => void;
   staffLoggedIn: boolean; adminLoggedIn: boolean; staffProfile: StaffProfile;
   staffLogin: (u: string, p: string) => Promise<'setup' | 'staff' | 'admin' | { recoveryPin: string }>; staffLogout: () => void; confirmPinBackup: () => Promise<'admin' | 'staff'>; adminLogout: () => void; updateStaffProfile: (profile: Partial<StaffProfile>) => void;
-  assignTable: (id: string, s: Session) => void; freeTable: (id: string) => void; reserveTable: (id: string) => void; extendSession: (id: string, mins: number, pay: number) => void; migrateSession: (fromTableId: string, toTableId: string) => void; setTableMaintenance: (id: string, reason: string) => void; setTableEvent: (id: string, eventName: string) => void; addTable: (n: string) => Promise<void>; updateTable: (id: string, n: string) => Promise<void>; updateTableState: (id: string, changes: Partial<Omit<Table, 'id' | 'session'>> & { session?: Session | null }) => Promise<void>; toggleTableActive: (id: string) => void; deleteTable: (id: string) => void;
+  assignTable: (id: string, s: Session) => void; freeTable: (id: string) => void; reserveTable: (id: string) => void; extendSession: (id: string, mins: number, pay: number) => void; migrateSession: (fromTableId: string, toTableId: string) => void; setTableMaintenance: (id: string, reason: string) => void; setTableEvent: (id: string, eventName: string) => void; addTable: (n: string) => Promise<string>; updateTable: (id: string, n: string) => Promise<void>; updateTableState: (id: string, changes: Partial<Omit<Table, 'id' | 'session'>> & { session?: Session | null }) => Promise<void>; toggleTableActive: (id: string) => void; deleteTable: (id: string) => void;
   checkoutTable: (id: string, payload: any) => Promise<any>; seatQueueCustomer: (queueId: string, tableId: string, session: any) => Promise<any>; retryPendingOrder: (tableId: string, expectedSessionStartTime: string) => Promise<void>;
   addInventoryItem: (i: Omit<InventoryItem, 'id'>) => void; updateInventoryItem: (id: string, i: Partial<InventoryItem>) => void; deleteInventoryItem: (id: string) => void; submitTableOrders: (tableId: string, cart: SessionOrder[]) => void; voidTableOrder: (tableId: string, orderIndex: number, order: SessionOrder) => void;
   addToQueue: (i: Omit<QueueItem, 'id'|'arrivalTime'|'status'|'queueNumber'>) => void; removeFromQueue: (id: string) => void; callQueueItem: (id: string) => Promise<{ replayed: boolean }>;
@@ -421,8 +422,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     };
     checkHeartbeat();
-    const interval = setInterval(checkHeartbeat, 60000); 
-    return () => clearInterval(interval);
   }, []);
 
   const refreshLiveMonitor = async () => {
@@ -772,66 +771,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     forceFullSync();
   }, []);
 
-  // Pull cloud feedback + bookings continuously so website submissions and
-  // reservations from other devices appear without a re-login or restart.
-  // Cached bookings are mirrored into local SQLite, which also lets the server
-  // detect newly synced bookings and email the customer automatically.
-  useEffect(() => {
-    let cancelled = false;
-    const pullCloud = async () => {
-      if (cancelled || document.visibilityState === 'hidden') return;
-      try {
-        const [{ data: feedData, error: feedError }, { data: resData, error: resError }] = await Promise.all([
-          publicSupabase.from('feedback').select('*'),
-          publicSupabase.from('reservations').select('*')
-        ]);
-        if (cancelled) return;
-        if (!feedError && Array.isArray(feedData)) {
-          const cloudFeedback = mergeFeedbackRows(feedData as any[]);
-          setFeedback(prev => mergeFeedbackRows(prev, cloudFeedback));
-          if (cloudFeedback.length > 0) {
-            fetch('/api/cache-feedback', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ feedback: cloudFeedback })
-            }).catch(() => {});
-          }
-        }
-        if (!resError && Array.isArray(resData) && resData.length > 0) {
-          const mapped = (resData as any[]).map(mapCloudReservation);
-          setReservations(prev => JSON.stringify(prev) === JSON.stringify(mapped) ? prev : mapped);
-          cacheCloudReservations(mapped);
-        }
-      } catch {}
-    };
-    const interval = setInterval(pullCloud, 30000);
-    return () => { cancelled = true; clearInterval(interval); };
-  }, []);
-
-  // Re-sync everything (CMS images, settings, reservations) when the window is
-  // focused again or the network comes back, instead of relying on the single
-  // startup fetch. Throttled so tab flicking does not hammer Supabase.
-  const forceFullSyncRef = useRef(forceFullSync);
-  forceFullSyncRef.current = forceFullSync;
-  useEffect(() => {
-    let lastRun = 0;
-    const resync = () => {
-      const now = Date.now();
-      if (now - lastRun < 60000) return;
-      lastRun = now;
-      forceFullSyncRef.current().catch(() => {});
-    };
-    const onVisibility = () => { if (document.visibilityState === 'visible') resync(); };
-    window.addEventListener('focus', resync);
-    window.addEventListener('online', resync);
-    document.addEventListener('visibilitychange', onVisibility);
-    return () => {
-      window.removeEventListener('focus', resync);
-      window.removeEventListener('online', resync);
-      document.removeEventListener('visibilitychange', onVisibility);
-    };
-  }, []);
-
   useEffect(() => {
     const fetchWeather = async () => {
       if (!weatherConfig.lat || !weatherConfig.lon) return;
@@ -888,7 +827,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const text = await res.text();
       let json: any = null;
       try { json = text ? JSON.parse(text) : null; } catch (e) { json = text; }
-      if (res.ok) { return json; } else { throw new Error(`DB error: ${res.status} ${text}`); }
+      if (res.ok) { return json; } else { throw new Error(json?.error || `DB error: ${res.status} ${text}`); }
     } catch (e) { throw e; }
   };
 
@@ -1316,15 +1255,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const addTable = async (name: string) => {
     const newTable = { id: `t${Date.now()}`, name, status: 'available' as TableStatus, isActive: true };
-    await syncToDB('/api/tables', 'POST', newTable, 'Add table');
-    setTables(prev => [...prev.filter(table => table.id !== newTable.id), newTable]);
-    addActivity('admin_action', `Added new table: ${name}`);
+    const saved = await syncToDB('/api/tables', 'POST', newTable, 'Add table');
+    setTables(prev => [...prev.filter(table => table.id !== newTable.id), { ...newTable, ...saved }]);
+    addActivity('admin_action', `Added new table: ${saved.name}`);
     runCloudBackup();
+    return saved.name;
   };
 
   const updateTableState: AppContextType['updateTableState'] = async (id, changes) => {
-    await syncToDB(`/api/tables/${encodeURIComponent(id)}`, 'PUT', changes, 'Update table');
-    setTables(prev => prev.map(table => table.id === id ? { ...table, ...changes, session: changes.session === null ? undefined : changes.session ?? table.session } : table));
+    const saved = await syncToDB(`/api/tables/${encodeURIComponent(id)}`, 'PUT', changes, 'Update table');
+    setTables(prev => prev.map(table => table.id === id ? { ...table, ...changes, name: saved.name ?? changes.name ?? table.name, session: changes.session === null ? undefined : changes.session ?? table.session } : table));
     runCloudBackup();
   };
 
