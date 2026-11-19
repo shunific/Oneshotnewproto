@@ -95,7 +95,7 @@ test('admin creates restricted staff, rejects injected fields and safely resets 
   const created = await call('/api/staff', 'POST', body, admin.cookie);
   assert.equal(created.status, 201);
   const stored = await read(db, 'newcashier');
-  assert.match(stored.password, /^scrypt\$/); assert.equal(stored.isFirstLogin, 1); assert.equal(stored.recoveryPin, '');
+  assert.match(stored.password, /^scrypt\$/); assert.equal(stored.isFirstLogin, 2); assert.equal(stored.recoveryPin, '');
   assert.equal((await call('/api/staff', 'POST', { ...body, id: 'another', username: 'NEWCASHIER' }, admin.cookie)).status, 409);
   assert.equal((await call('/api/staff/newcashier', 'PUT', { 'password = NULL; --': 'x' }, admin.cookie)).status, 400);
   assert.equal((await call('/api/staff/newcashier', 'PUT', { password: sha('backdoor') }, admin.cookie)).status, 400);
@@ -351,4 +351,35 @@ test('first-login actual temporary password cannot be reused and normal changes 
 });
 test('initial administrator creation enforces the same new-password rule without treating legacy login as password creation',async t=>{
  const f=await fixture(t,false);for(const password of ['abcdefgh','12345678','!!!!!!!!'])assert.equal((await f.call('/api/auth/bootstrap','POST',{username:'qa-owner',fullName:'QA Owner',password,recoveryPin:'1234'})).status,400);assert.equal((await f.call('/api/auth/bootstrap','POST',{username:'qa-owner',fullName:'QA Owner',password:'OwnerNew9',recoveryPin:'1234'})).status,201);assert.equal((await f.login('qa-owner','OwnerNew9')).status,200);
+});
+test('created accounts keep their assigned password and activate the PIN from the confirmed sign-in', async t => {
+  const { call, login, db } = await fixture(t);
+  const admin = await login('administrator', 'safe-password');
+  const password = 'Account-password42';
+  for (const isAdmin of [false, true]) {
+    const username = isAdmin ? 'new-manager' : 'new-cashier';
+    const account = { id: username, username, fullName: username, password, role: isAdmin ? 'manager' : 'cashier', isAdmin };
+    assert.equal((await call('/api/staff', 'POST', account, admin.cookie)).status, 201);
+    const storedPassword = (await read(db, username)).password;
+    const interrupted = await login(username, password);
+    assert.equal(interrupted.body.requiresPinBackup, true);
+    assert.equal(interrupted.body.requiresPasswordChange, false);
+    assert.match(interrupted.body.recoveryPin, /^\d{4}$/);
+    assert.equal((await call('/api/auth/me', 'GET', undefined, interrupted.cookie)).body.recoveryPin, undefined);
+    assert.equal((await call('/protected', 'GET', undefined, interrupted.cookie)).status, 403);
+    const resumed = await login(username, password);
+    const pin = resumed.body.recoveryPin;
+    assert.match(pin, /^\d{4}$/);
+    const confirmed = await call('/api/auth/acknowledge-pin', 'POST', { acknowledged: true }, resumed.cookie);
+    assert.equal(confirmed.status, 200);
+    assert.equal(confirmed.body.user.recoveryPinSet, true);
+    assert.equal(confirmed.body.user.isAdmin, isAdmin);
+    assert.equal((await call('/protected', 'GET', undefined, confirmed.cookie)).status, 200);
+    assert.equal((await call('/api/auth/acknowledge-pin', 'POST', { acknowledged: true }, interrupted.cookie)).status, 401);
+    assert.equal((await read(db, username)).password, storedPassword);
+    const returning = await login(username, password);
+    assert.equal(returning.body.requiresPinBackup, false);
+    assert.equal(returning.body.recoveryPin, undefined);
+    assert.equal((await call('/api/auth/recover', 'POST', { username, recoveryPin: pin, newPassword: 'Recovered-pass42' })).status, 200);
+  }
 });

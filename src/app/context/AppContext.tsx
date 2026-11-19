@@ -257,7 +257,7 @@ export type AppContextType = {
   tables: Table[]; queue: QueueItem[]; reservations: Reservation[]; feedback: Feedback[]; activities: Activity[]; promoCodes: PromoCode[]; staffUsers: StaffUser[]; inventory: InventoryItem[]; rates: RatesConfig; reservationTerms: ReservationTerms; announcements: Announcement[]; closedDates: ClosedDate[]; weather: WeatherData | null; updateWeatherLocation: (lat: string, lon: string, name: string) => void;
   activeAnnouncement: string; updateActiveAnnouncement: (msg: string) => void;
   staffLoggedIn: boolean; adminLoggedIn: boolean; staffProfile: StaffProfile;
-  staffLogin: (u: string, p: string) => Promise<'setup' | 'staff' | 'admin'>; staffLogout: () => void; confirmPinBackup: () => Promise<'admin' | 'staff'>; adminLogout: () => void; updateStaffProfile: (profile: Partial<StaffProfile>) => void;
+  staffLogin: (u: string, p: string) => Promise<'setup' | 'staff' | 'admin' | { recoveryPin: string }>; staffLogout: () => void; confirmPinBackup: () => Promise<'admin' | 'staff'>; adminLogout: () => void; updateStaffProfile: (profile: Partial<StaffProfile>) => void;
   assignTable: (id: string, s: Session) => void; freeTable: (id: string) => void; reserveTable: (id: string) => void; extendSession: (id: string, mins: number, pay: number) => void; migrateSession: (fromTableId: string, toTableId: string) => void; setTableMaintenance: (id: string, reason: string) => void; setTableEvent: (id: string, eventName: string) => void; addTable: (n: string) => void; updateTable: (id: string, n: string) => void; toggleTableActive: (id: string) => void; deleteTable: (id: string) => void;
   checkoutTable: (id: string, payload: any) => Promise<any>; seatQueueCustomer: (queueId: string, tableId: string, session: any) => Promise<any>; retryPendingOrder: (tableId: string, expectedSessionStartTime: string) => Promise<void>;
   addInventoryItem: (i: Omit<InventoryItem, 'id'>) => void; updateInventoryItem: (id: string, i: Partial<InventoryItem>) => void; deleteInventoryItem: (id: string) => void; submitTableOrders: (tableId: string, cart: SessionOrder[]) => void; voidTableOrder: (tableId: string, orderIndex: number, order: SessionOrder) => void;
@@ -1240,7 +1240,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const staffLogin = async (username: string, password: string) => {
-    const { user, requiresPasswordChange } = await authRequest('login', { username, password });
+    const { user, requiresPasswordChange, requiresPinBackup, recoveryPin } = await authRequest('login', { username, password });
+    if (requiresPinBackup) {
+      if (typeof recoveryPin !== 'string' || !/^\d{4}$/.test(recoveryPin)) throw new Error('PIN setup could not start. Sign in again.');
+      return { recoveryPin };
+    }
     if (requiresPasswordChange) return 'setup';
     await enterSession(user);
     return user.isAdmin ? 'admin' : 'staff';

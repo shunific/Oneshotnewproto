@@ -97,7 +97,11 @@ export function OfflineLogin() {
     setIsProcessing(true);
     try {
       const result = await staffLogin(username.trim(), password);
-      if (result === 'setup') switchView('force-change');
+      if (typeof result === 'object') {
+        setPassword('');
+        setGeneratedPin(result.recoveryPin);
+        switchView('recovery-pin');
+      } else if (result === 'setup') switchView('force-change');
       else enterPortal(result);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Sign-in failed.');

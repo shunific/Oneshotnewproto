@@ -86,7 +86,6 @@ export function AdminUsers() {
       ...accountFields,
       password: form.password,
       isActive: true,
-      isFirstLogin: 1,
     };
 
     setLoadingMsg('SAVING NEW USER...');
@@ -95,7 +94,7 @@ export function AdminUsers() {
       await addStaffUser(payload as any);
       setShowForm(false);
       setForm(blankForm);
-      flash(`User created successfully! ${payload.fullName} can set up their recovery PIN at first login.`, "success");
+      flash(`User created successfully! ${payload.fullName} will receive a four-digit recovery PIN at first sign-in.`, "success");
     } catch (error) {
       flash(error instanceof Error ? error.message : 'Staff account could not be saved.', 'error');
     } finally {

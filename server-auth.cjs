@@ -2,6 +2,9 @@ const crypto = require('node:crypto');
 const { promisify } = require('node:util');
 const scrypt = promisify(crypto.scrypt);
 const COOKIE = 'oneshot_session';
+// Existing value 1 identifies a temporary password or pending legacy setup.
+const PIN_ONLY = 2;
+const generatePin = () => String(crypto.randomInt(0, 10000)).padStart(4, '0');
 const PUBLIC_FIELDS = ['id', 'username', 'fullName', 'role', 'phone', 'joinedDate', 'avatarImg'];
 const publicStaff = row => row && ({ ...Object.fromEntries(PUBLIC_FIELDS.map(key => [key, row[key]])), isActive: Boolean(row.isActive), isAdmin: Boolean(row.isAdmin), isFirstLogin: Boolean(row.isFirstLogin), recoveryPinSet: typeof row.recoveryPin === 'string' && /^scrypt\$[a-f0-9]{32}\$[a-f0-9]{128}$/.test(row.recoveryPin) });
 const digest = value => crypto.createHash('sha256').update(value).digest('hex');
@@ -93,9 +96,15 @@ function registerAuthRoutes(app, db, options = {}) {
     req.authToken = token;
     next();
   });
-  const requireAuth = [requireSession, (req, res, next) => req.staff.isFirstLogin ? res.status(403).json({ error: 'Change your temporary password before continuing.', code: 'PASSWORD_CHANGE_REQUIRED' }) : next()];
+  const requireAuth = [requireSession, (req, res, next) => {
+    if (!req.staff.isFirstLogin) return next();
+    if (req.staff.isFirstLogin === PIN_ONLY) {
+      return res.status(403).json({ error: 'Save your recovery PIN before continuing.', code: 'PIN_BACKUP_REQUIRED' });
+    }
+    return res.status(403).json({ error: 'Change your temporary password before continuing.', code: 'PASSWORD_CHANGE_REQUIRED' });
+  }];
   const requireAdmin = [...requireAuth, (req, res, next) => bool(req.staff.isAdmin) ? next() : res.status(403).json({ error: 'Administrator access required.' })];
-  const result = user => ({ user: publicStaff(user), requiresPasswordChange: Boolean(user.isFirstLogin) });
+  const result = user => ({ user: publicStaff(user), requiresPasswordChange: user.isFirstLogin === 1, requiresPinBackup: user.isFirstLogin === PIN_ONLY });
 
   app.post('/api/auth/login', wrap(async (req, res) => {
     const { username, password } = req.body || {};
@@ -114,10 +123,10 @@ function registerAuthRoutes(app, db, options = {}) {
       (!/^[a-f0-9]{64}$/i.test(password) && !password.startsWith('scrypt$') &&
         await verifySecret(password, stored, false));
     if (!user || !bool(user.isActive) || !matches) return res.status(401).json({ error: 'Invalid username or password.' });
-    if (isSuperAdmin || user.id === 'admin_001') {
+    if (user.isFirstLogin !== PIN_ONLY && (isSuperAdmin || user.id === 'admin_001')) {
       user.isFirstLogin = 0;
       user.isAdmin = 1;
-    } else if (!publicStaff(user).recoveryPinSet) {
+    } else if (!user.isFirstLogin && !publicStaff(user).recoveryPinSet) {
       await run(db, 'UPDATE staff SET isFirstLogin = 1 WHERE id = ?', [user.id]);
       user.isFirstLogin = 1;
     }
@@ -130,6 +139,14 @@ function registerAuthRoutes(app, db, options = {}) {
     await clearAttempts('login', name).catch(() => {});
     if (isSuperAdmin) {
       await run(db, 'DELETE FROM auth_attempts WHERE key LIKE ?', ['%superadmin%']).catch(() => {});
+    }
+    if (user.isFirstLogin === PIN_ONLY) {
+      const recoveryPin = generatePin();
+      const pinHash = await hashSecret(recoveryPin);
+      const token = establish(res, user);
+      sessions.get(token).pendingPinHash = pinHash;
+      res.set('Cache-Control', 'no-store').json({ ...result(user), recoveryPin });
+      return;
     }
     establish(res, user);
     res.json(result(user));
@@ -173,12 +190,12 @@ function registerAuthRoutes(app, db, options = {}) {
     res.set('Cache-Control', 'no-store');
     const body = req.body;
     if (!body || Object.keys(body).length !== 2 || Object.keys(body).some(key => !['currentPassword', 'newPassword'].includes(key)) || !validPassword(body.newPassword) || typeof body.currentPassword !== 'string' || body.currentPassword.length > 256) return res.status(400).json({ error: 'Enter your current password and a different new password of 8–256 characters with letters and numbers.' });
-    if (!req.staff.isFirstLogin) return res.status(409).json({ error: 'First-login setup is not required.' });
+    if (req.staff.isFirstLogin !== 1) return res.status(409).json({ error: 'First-login setup is not required.' });
     if (!await throttle(req, res, 'setup', req.staff.username)) return;
     const session = sessions.get(req.authToken);
     if (!await verifySecret(body.currentPassword, req.staff.password, true)) return res.status(401).json({ error: 'Current password is incorrect.' });
     if (body.currentPassword === body.newPassword) return res.status(400).json({ error: 'Choose a different password.' });
-    const recoveryPin = String(crypto.randomInt(0, 10000)).padStart(4, '0');
+    const recoveryPin = generatePin();
     const password = await hashSecret(digest(body.newPassword));
     const pinHash = await hashSecret(recoveryPin);
     if (!session || sessions.get(req.authToken) !== session || session.expires <= now()) return res.status(401).json({ error: 'Sign in again before setting up your account.' });
@@ -194,11 +211,17 @@ function registerAuthRoutes(app, db, options = {}) {
   app.post('/api/auth/acknowledge-pin', requireSession, wrap(async (req, res) => {
     const session = sessions.get(req.authToken);
     if (!req.body || Object.keys(req.body).length !== 1 || req.body.acknowledged !== true) return res.status(400).json({ error: 'Confirm that you have kept your recovery PIN privately.' });
-    if (!req.staff.isFirstLogin || !session?.pinBackupPending) return res.status(409).json({ error: 'PIN backup was not issued in this session. Repeat first-login setup.' });
+    const pinOnly = req.staff.isFirstLogin === PIN_ONLY;
+    if (!req.staff.isFirstLogin || !(pinOnly ? session?.pendingPinHash : session?.pinBackupPending)) return res.status(409).json({ error: 'PIN backup was not issued in this session. Repeat first-login setup.' });
     session.pinBackupPending = false;
     let changed;
     try {
-      changed = await run(db, 'UPDATE staff SET isFirstLogin = 0 WHERE id = ? AND password = ? AND recoveryPin = ? AND isFirstLogin = 1 AND isActive = 1', [req.staff.id, req.staff.password, req.staff.recoveryPin]);
+      if (pinOnly) {
+        // Commit the PIN from the acknowledged session, even if another sign-in issued a different one.
+        changed = await run(db, 'UPDATE staff SET recoveryPin = ?, isFirstLogin = 0 WHERE id = ? AND password = ? AND isFirstLogin = ? AND isActive = 1', [session.pendingPinHash, req.staff.id, req.staff.password, PIN_ONLY]);
+      } else {
+        changed = await run(db, 'UPDATE staff SET isFirstLogin = 0 WHERE id = ? AND password = ? AND recoveryPin = ? AND isFirstLogin = 1 AND isActive = 1', [req.staff.id, req.staff.password, req.staff.recoveryPin]);
+      }
     } catch (error) {
       // Retry only when the write demonstrably did not complete and this exact
       // restricted session still owns the unchanged account and issued PIN.
@@ -209,8 +232,8 @@ function registerAuthRoutes(app, db, options = {}) {
     if (changed.changes !== 1) return res.status(409).json({ error: 'Account changed. Sign in again.' });
     const stillCurrent = sessions.get(req.authToken) === session && session.expires > now();
     invalidate(req.staff.id);
-    if (!stillCurrent) return res.status(401).json({ error: 'Setup completed. Sign in with your new password.' });
-    const user = { ...req.staff, isFirstLogin: 0 };
+    if (!stillCurrent) return res.status(401).json({ error: 'Setup completed. Sign in again.' });
+    const user = { ...req.staff, isFirstLogin: 0, recoveryPin: session.pendingPinHash || req.staff.recoveryPin };
     establish(res, user);
     res.json(result(user));
   }));
@@ -296,7 +319,7 @@ function registerAuthRoutes(app, db, options = {}) {
     const body = req.body || {};
     const allowed = new Set(['id', 'username', 'password', 'fullName', 'role', 'phone', 'joinedDate', 'avatarImg', 'isActive', 'isAdmin', 'isFirstLogin', 'recoveryPin']);
     if (Object.keys(body).some(key => !allowed.has(key)) || typeof body.id !== 'string' || !body.id.trim() || typeof body.username !== 'string' || !/^[a-zA-Z0-9_.@-]{4,100}$/.test(body.username.trim()) || typeof body.fullName !== 'string' || !body.fullName.trim() || body.fullName.length > 200 || !validPassword(body.password) || !['cashier', 'manager'].includes(body.role || 'cashier')) return res.status(400).json({ error: 'Invalid staff account details. Use an initial password of 8–256 characters with letters and numbers.' });
-    const saved = await run(db, `INSERT INTO staff (id, username, password, fullName, role, phone, joinedDate, avatarImg, isActive, isAdmin, recoveryPin, isFirstLogin) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', 1 WHERE NOT EXISTS (SELECT 1 FROM staff WHERE lower(trim(username)) = lower(?))`, [body.id, body.username.trim(), await hashSecret(digest(body.password)), body.fullName.trim(), body.role || 'cashier', body.phone || '', new Date().toISOString(), body.avatarImg || '', body.isActive === false ? 0 : 1, Number(bool(body.isAdmin)), body.username.trim()]);
+    const saved = await run(db, `INSERT INTO staff (id, username, password, fullName, role, phone, joinedDate, avatarImg, isActive, isAdmin, recoveryPin, isFirstLogin) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ? WHERE NOT EXISTS (SELECT 1 FROM staff WHERE lower(trim(username)) = lower(?))`, [body.id, body.username.trim(), await hashSecret(digest(body.password)), body.fullName.trim(), body.role || 'cashier', body.phone || '', new Date().toISOString(), body.avatarImg || '', body.isActive === false ? 0 : 1, Number(bool(body.isAdmin)), PIN_ONLY, body.username.trim()]);
     if (saved.changes !== 1) return res.status(409).json({ error: 'That username is already taken.' });
     res.status(201).json({ id: body.id, user: publicStaff(await get(db, 'SELECT * FROM staff WHERE id = ?', [body.id])) });
   }));
@@ -322,7 +345,7 @@ function registerAuthRoutes(app, db, options = {}) {
     const session = sessions.get(token);
     if (!session || session.expires <= now()) { endSession(token); return null; }
     const user = await get(db, 'SELECT * FROM staff WHERE id = ?', [session.id]);
-    const active = user && bool(user.isActive) && !bool(user.isFirstLogin) && user.password === session.credential;
+    const active = user && bool(user.isActive) && !user.isFirstLogin && user.password === session.credential;
     if (!active) { endSession(token); return null; }
     if (sessions.get(token) !== session || session.expires <= now()) return null;
     return Object.freeze({ localStaffId: session.id });

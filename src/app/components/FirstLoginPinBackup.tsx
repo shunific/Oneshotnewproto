@@ -24,12 +24,12 @@ export function FirstLoginPinBackup({ pin, username, onContinue, onRestart }: {
     if (!action || !confirmed || pending.current) return;
     pending.current = true; setBusy(true); setError('');
     try { await onContinue(); }
-    catch { setError('Backup confirmation was not confirmed by the server. Retry, or sign in again with your new password.'); }
+    catch { setError('Backup confirmation was not confirmed by the server. Retry, or sign in again.'); }
     finally { pending.current = false; setBusy(false); }
   };
   return <section className="space-y-5">
     <h2 className="text-xl font-bold">Keep your Recovery PIN</h2>
-    <p className="text-sm text-neutral-400">Your password has been changed. This automatically generated 4-digit PIN is shown only here. Keep it privately before continuing.</p>
+    <p className="text-sm text-neutral-400">Use this four-digit PIN to recover your account if you forget your password. Copy it or save it privately before continuing.</p>
     <p aria-label="Recovery PIN" className="text-center text-4xl font-mono tracking-[0.4em]">{pin}</p>
     <div className="flex gap-3">
       <button type="button" disabled={busy} onClick={copy} className="flex-1 rounded-xl bg-neutral-800 px-3 py-3">Copy PIN</button>

@@ -63,7 +63,7 @@ async function open(filename,readonly) {
 }
 function assertAdmin(req) {
   const user=req.staff;
-  if (!user || typeof user.id!=='string' || !user.id || ![true,1].includes(user.isAdmin) || [false,0].includes(user.isActive) || [true,1].includes(user.isFirstLogin)) throw fail(403,'ADMIN_REQUIRED','Administrator access is required.');
+  if (!user || typeof user.id!=='string' || !user.id || ![true,1].includes(user.isAdmin) || [false,0].includes(user.isActive) || Boolean(user.isFirstLogin)) throw fail(403,'ADMIN_REQUIRED','Administrator access is required.');
 }
 function registerPolicyRoutes(app,dbPath,{requireAdmin}={}) {
   if (typeof requireAdmin!=='function' && (!Array.isArray(requireAdmin) || !requireAdmin.length || requireAdmin.some(guard=>typeof guard!=='function'))) throw new Error('Policy routes require administrator authentication middleware.');
