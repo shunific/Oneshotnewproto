@@ -1149,7 +1149,6 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
 
               {isEditingMenu ? (
                 <div className="space-y-4">
-                  his:
                   {!showArchivedMenu && !editingItem && (
                     <form onSubmit={handleSaveMenuItem} className="bg-neutral-900 border border-amber-900/40 rounded-xl p-4 space-y-3">
                       <div className="flex justify-between items-center mb-1">
