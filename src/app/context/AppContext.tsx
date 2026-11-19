@@ -60,7 +60,7 @@ export type ReservationStatus = 'pending' | 'confirmed' | 'checked-in' | 'comple
 
 export type Reservation = {
   id: string; customerName: string; contactNumber: string; email?: string; date: Date; timeSlot: string; durationHours: number; partySize: number; tableId?: string; status: ReservationStatus; totalAmount: number; downPaymentAmount: number; downPaymentPaid: boolean; balancePaid: boolean; createdAt: Date; cancellationReason?: string; promoCode?: string; discountAmount?: number; paymentRef?: string; receiptImg?: string; rescheduleCount?: number;
-  refundStatus?: 'pending' | 'processing' | 'sent' | 'in_person' | 'remediated' | 'acknowledged' | 'expired';
+  refundStatus?: 'declined' | 'settled' | 'pending' | 'processing' | 'sent' | 'in_person' | 'remediated' | 'acknowledged' | 'expired';
   refundMethod?: 'gcash' | 'cash' | 'session_credit';
   refundNotes?: string;
 };
@@ -259,7 +259,7 @@ export type AppContextType = {
   activeAnnouncement: string; updateActiveAnnouncement: (msg: string) => void;
   staffLoggedIn: boolean; adminLoggedIn: boolean; staffProfile: StaffProfile;
   staffLogin: (u: string, p: string) => Promise<'setup' | 'staff' | 'admin' | { recoveryPin: string }>; staffLogout: () => void; confirmPinBackup: () => Promise<'admin' | 'staff'>; adminLogout: () => void; updateStaffProfile: (profile: Partial<StaffProfile>) => void;
-  assignTable: (id: string, s: Session) => void; freeTable: (id: string) => void; reserveTable: (id: string) => void; extendSession: (id: string, mins: number, pay: number) => void; migrateSession: (fromTableId: string, toTableId: string) => void; setTableMaintenance: (id: string, reason: string) => void; setTableEvent: (id: string, eventName: string) => void; addTable: (n: string) => void; updateTable: (id: string, n: string) => void; toggleTableActive: (id: string) => void; deleteTable: (id: string) => void;
+  assignTable: (id: string, s: Session) => void; freeTable: (id: string) => void; reserveTable: (id: string) => void; extendSession: (id: string, mins: number, pay: number) => void; migrateSession: (fromTableId: string, toTableId: string) => void; setTableMaintenance: (id: string, reason: string) => void; setTableEvent: (id: string, eventName: string) => void; addTable: (n: string) => Promise<void>; updateTable: (id: string, n: string) => Promise<void>; updateTableState: (id: string, changes: Partial<Omit<Table, 'id' | 'session'>> & { session?: Session | null }) => Promise<void>; toggleTableActive: (id: string) => void; deleteTable: (id: string) => void;
   checkoutTable: (id: string, payload: any) => Promise<any>; seatQueueCustomer: (queueId: string, tableId: string, session: any) => Promise<any>; retryPendingOrder: (tableId: string, expectedSessionStartTime: string) => Promise<void>;
   addInventoryItem: (i: Omit<InventoryItem, 'id'>) => void; updateInventoryItem: (id: string, i: Partial<InventoryItem>) => void; deleteInventoryItem: (id: string) => void; submitTableOrders: (tableId: string, cart: SessionOrder[]) => void; voidTableOrder: (tableId: string, orderIndex: number, order: SessionOrder) => void;
   addToQueue: (i: Omit<QueueItem, 'id'|'arrivalTime'|'status'|'queueNumber'>) => void; removeFromQueue: (id: string) => void; callQueueItem: (id: string) => Promise<{ replayed: boolean }>;
@@ -1314,17 +1314,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   };
 
-  const addTable = (name: string) => {
+  const addTable = async (name: string) => {
     const newTable = { id: `t${Date.now()}`, name, status: 'available' as TableStatus, isActive: true };
-    setTables(prev => [...prev, newTable]);
+    await syncToDB('/api/tables', 'POST', newTable, 'Add table');
+    setTables(prev => [...prev.filter(table => table.id !== newTable.id), newTable]);
     addActivity('admin_action', `Added new table: ${name}`);
-    syncToDB('/api/tables', 'POST', newTable, `New table added`).then(runCloudBackup).catch(()=>{});
+    runCloudBackup();
   };
 
-  const updateTable = (id: string, name: string) => {
-    setTables(prev => prev.map(t => t.id === id ? { ...t, name } : t));
+  const updateTableState: AppContextType['updateTableState'] = async (id, changes) => {
+    await syncToDB(`/api/tables/${encodeURIComponent(id)}`, 'PUT', changes, 'Update table');
+    setTables(prev => prev.map(table => table.id === id ? { ...table, ...changes, session: changes.session === null ? undefined : changes.session ?? table.session } : table));
+    runCloudBackup();
+  };
+
+  const updateTable = async (id: string, name: string) => {
+    await updateTableState(id, { name });
     addActivity('admin_action', `Renamed table ID: ${id} to ${name}`);
-    syncToDB(`/api/tables/${id}`, 'PUT', { name }, `Table updated`).then(runCloudBackup).catch(()=>{});
   };
 
   const toggleTableActive = (id: string) => {
@@ -1753,7 +1759,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       activeAnnouncement, updateActiveAnnouncement,
       staffLoggedIn, adminLoggedIn, staffProfile,
       staffLogin, staffLogout, confirmPinBackup, adminLogout: staffLogout, updateStaffProfile,
-      assignTable, freeTable, reserveTable, extendSession, migrateSession, setTableMaintenance, setTableEvent, addTable, updateTable, toggleTableActive, deleteTable,
+      assignTable, freeTable, reserveTable, extendSession, migrateSession, setTableMaintenance, setTableEvent, addTable, updateTable, updateTableState, toggleTableActive, deleteTable,
       checkoutTable, seatQueueCustomer, retryPendingOrder,
       addInventoryItem, updateInventoryItem, deleteInventoryItem, submitTableOrders, voidTableOrder,
       addToQueue, removeFromQueue, callQueueItem,

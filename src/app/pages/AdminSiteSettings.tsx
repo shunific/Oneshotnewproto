@@ -1,5 +1,4 @@
 import { LoadingRing } from '../components/LoadingRing';
-import { TimeField } from '../components/ui/TimeField';
 import React, { useState, useEffect, useRef } from "react";
 import { useAppContext } from "../context/AppContext";
 import { 
@@ -515,18 +514,18 @@ export function AdminSiteSettings() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-[11px] text-neutral-400 mb-1 font-medium">Store Opens</label>
-                <TimeField label="Weekday opening time"
+                <input type="time" aria-label="Weekday opening time"
                   value={hoursForm.weekdayStartTime} 
-                  onChange={newValue => setHoursForm(h => ({ ...h, weekdayStartTime: newValue }))}
+                  onChange={e => { const value = e.currentTarget.value; setHoursForm(h => ({ ...h, weekdayStartTime: value })); }}
                   style={{ colorScheme: theme === "light" ? "light" : "dark" }}
                   className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-xs text-neutral-100 outline-none focus:border-emerald-500"
                 />
               </div>
               <div>
                 <label className="block text-[11px] text-neutral-400 mb-1 font-medium">Store Closes</label>
-                <TimeField label="Weekday closing time"
+                <input type="time" aria-label="Weekday closing time"
                   value={hoursForm.weekdayEndTime} 
-                  onChange={newValue => setHoursForm(h => ({ ...h, weekdayEndTime: newValue }))}
+                  onChange={e => { const value = e.currentTarget.value; setHoursForm(h => ({ ...h, weekdayEndTime: value })); }}
                   style={{ colorScheme: theme === "light" ? "light" : "dark" }}
                   className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-xs text-neutral-100 outline-none focus:border-emerald-500"
                 />
@@ -542,18 +541,18 @@ export function AdminSiteSettings() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-[11px] text-neutral-400 mb-1 font-medium">Store Opens</label>
-                <TimeField label="Weekend opening time"
+                <input type="time" aria-label="Weekend opening time"
                   value={hoursForm.weekendStartTime} 
-                  onChange={newValue => setHoursForm(h => ({ ...h, weekendStartTime: newValue }))}
+                  onChange={e => { const value = e.currentTarget.value; setHoursForm(h => ({ ...h, weekendStartTime: value })); }}
                   style={{ colorScheme: theme === "light" ? "light" : "dark" }}
                   className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-xs text-neutral-100 outline-none focus:border-purple-500"
                 />
               </div>
               <div>
                 <label className="block text-[11px] text-neutral-400 mb-1 font-medium">Store Closes</label>
-                <TimeField label="Weekend closing time"
+                <input type="time" aria-label="Weekend closing time"
                   value={hoursForm.weekendEndTime} 
-                  onChange={newValue => setHoursForm(h => ({ ...h, weekendEndTime: newValue }))}
+                  onChange={e => { const value = e.currentTarget.value; setHoursForm(h => ({ ...h, weekendEndTime: value })); }}
                   style={{ colorScheme: theme === "light" ? "light" : "dark" }}
                   className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-xs text-neutral-100 outline-none focus:border-purple-500"
                 />

@@ -383,11 +383,11 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
     return closeDate;
   };
 
-  const getNextReservation = (tableId: string) => {
+  const getNextReservation = (tableId: string, excludeId?: string) => {
     const now = new Date();
     const upcoming = reservations
       .filter((r: any) => {
-        if (r.tableId !== tableId || (r.status !== 'pending' && r.status !== 'confirmed')) return false;
+        if (r.id === excludeId || r.tableId !== tableId || (r.status !== 'pending' && r.status !== 'confirmed')) return false;
         // 🟢 FIX: Reconstruct exact date and time to bypass Javascript Midnight mapping
         const rDate = new Date(r.date);
         const [h, m] = (r.timeSlot || '00:00').split(':').map(Number);
@@ -442,7 +442,7 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
   // 🟢 DYAMIC FALLBACK: Auto-adjust modal if background sync finds a new booking mid-click
   useEffect(() => {
     if (assigningTableId) {
-      const availData = getAvailableDurations(assigningTableId);
+      const availData = getAvailableDurations(assigningTableId, selectedCustomer?.kind === 'reservation' ? selectedCustomer.id : undefined);
       if (durationMinutes !== 'open' && typeof durationMinutes === 'number') {
         if (availData && durationMinutes > availData.maxMins) {
           const newMins = (availData?.opts && availData.opts.length > 0) ? availData.opts[0] : 60;
@@ -459,7 +459,7 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
   }, [reservations, assigningTableId, effectiveHourly]);
 
   // 🟢 NEW: Pro-Rated Table-Specific Gap Calculator
-  const getAvailableDurations = (tableId: string | null) => {
+  const getAvailableDurations = (tableId: string | null, excludeId?: string) => {
     if (!tableId) return { opts: [60], maxMins: 1440, conflictWarning: null, isBlocked: false };
     const now = new Date();
     let maxMins = (reservationTerms?.maxHours || 8) * 60;
@@ -472,7 +472,7 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
       if (minsLeft > 0) maxMins = Math.min(maxMins, minsLeft);
     }
 
-    const nextRes = getNextReservation(tableId);
+    const nextRes = getNextReservation(tableId, excludeId);
     if (nextRes) {
       const minsUntilRes = Math.floor(differenceInSeconds(nextRes.date, now) / 60);
       if (minsUntilRes < 30) {
@@ -537,7 +537,7 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
   const pickCustomer = (c: CustomerSource) => {
     setSelectedCustomer(c); setCustomerName(c.name);
     setPartySize(String(c.partySize || 1));
-    const availData = getAvailableDurations(assigningTableId);
+    const availData = getAvailableDurations(assigningTableId, c.kind === 'reservation' ? c.id : undefined);
     if (c.kind === 'reservation') {
       const mins = c.durationHours * 60;
       const finalMins = availData ? Math.min(mins, availData.maxMins) : mins; // Enforce max gap
@@ -1401,7 +1401,7 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
               )}
 
               {(() => {
-                const availData = getAvailableDurations(assigningTableId);
+                const availData = getAvailableDurations(assigningTableId, selectedCustomer?.kind === 'reservation' ? selectedCustomer.id : undefined);
                 return availData.isBlocked ? (
                   <div className="p-10 flex flex-col items-center justify-center text-center space-y-4">
                     <div className="w-16 h-16 rounded-full bg-rose-500/10 flex items-center justify-center border border-rose-500/20">

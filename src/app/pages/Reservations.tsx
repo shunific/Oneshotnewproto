@@ -14,6 +14,7 @@ import {
 import { format, isToday, isTomorrow, isPast, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isBefore, startOfDay, addMonths, subMonths, differenceInSeconds, isThisWeek, addMinutes, differenceInHours, differenceInDays } from 'date-fns';
 import { useLocation, useNavigate } from 'react-router';
 import { supabase } from '../utils/supabase';
+import { localFetch } from '../utils/localApi';
 import { motion, AnimatePresence } from 'motion/react';
 
 const formatPHP = (amount?: number | string | null) => {
@@ -62,7 +63,7 @@ const formatTimeOnly = (timeStr: string) => {
 const todayStart = startOfDay(new Date());
 
 type ActionModalData = {
-  type: 'receipt' | 'refund' | 'reschedule';
+  type: 'receipt' | 'refund' | 'decline-refund' | 'reschedule';
   reservation: any;
 };
 
@@ -519,14 +520,29 @@ export function Reservations() {
     }
   };
 
+  const openRefundReview = (reservation: ActionModalData['reservation'], type: 'refund' | 'decline-refund') => {
+    setCallSummary('');
+    setRefundReceiptFile(null);
+    setRefundReceiptPreview(null);
+    setShowDenyInput(false);
+    setActionModal({ type, reservation });
+  };
+
   const executeActionModal = async () => {
     if (!actionModal) return;
-    if (!callSummary.trim()) { flash("Call summary is required to proceed.", "error"); return; }
+    if (!callSummary.trim()) { flash(actionModal.type === 'decline-refund' ? 'Enter a reason for declining the refund.' : 'Call summary is required to proceed.', 'error'); return; }
     
     setIsActionSubmitting(true);
     
     try {
-      if (actionModal.type === 'refund') {
+      if (actionModal.type === 'decline-refund') {
+        const response = await localFetch('/api/reservations/' + encodeURIComponent(actionModal.reservation.id) + '/decline-refund', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: callSummary.trim() })
+        });
+        if (!response.ok) throw new Error((await response.json()).error || 'Refund decision could not be saved.');
+        await forceFullSync();
+        flash('Booking cancelled and refund declined.', 'success');
+      } else if (actionModal.type === 'refund') {
          let finalReceiptUrl = null;
          if (refundReceiptFile) {
             const fileExt = refundReceiptFile.name.split('.').pop();
@@ -772,9 +788,18 @@ export function Reservations() {
         <section className="space-y-3 rounded-xl border border-amber-900/40 bg-neutral-950 p-4">
           <h3 className="text-sm font-bold text-amber-400">Refund requests</h3>
           {reservations.filter((r:any)=>r.status==='pending-refund').map((r:any)=>
-            <div key={r.id} className="flex items-center justify-between gap-3 text-sm">
+            <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 text-sm">
               <span>{r.customerName} · #{r.id}</span>
-              <button type="button" className="text-amber-400" onClick={()=>{setCallSummary('');setActionModal({type:'refund',reservation:r});}}>Process refund</button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button type="button" onClick={() => openRefundReview(r, 'decline-refund')}
+                  className="px-4 py-2.5 bg-neutral-900 hover:bg-rose-950/40 border border-neutral-800 hover:border-rose-800 text-rose-400 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5">
+                  <ThumbsDown size={13} /> Decline
+                </button>
+                <button type="button" onClick={() => openRefundReview(r, 'refund')}
+                  className="px-4 py-2.5 bg-violet-600 hover:bg-violet-500 text-white rounded-lg text-xs font-bold shadow-lg shadow-violet-900/30 transition-colors flex items-center gap-1.5">
+                  <CheckCircle size={13} /> Process refund
+                </button>
+              </div>
             </div>)}
         </section>
       )}
@@ -1011,7 +1036,7 @@ export function Reservations() {
                                 {openActionRowId === r.id && (
                                   <motion.div initial={{ opacity: 0, y: 5, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 5, scale: 0.95 }} className="absolute right-4 top-10 mt-1 w-44 bg-neutral-900 border border-neutral-700 rounded-xl shadow-2xl overflow-hidden z-[60] flex flex-col py-1">
                                     {r.status === 'pending' && <button onClick={(e) => { e.stopPropagation(); setActionModal({ type: 'receipt', reservation: r }); setOpenActionRowId(null); setSelectedId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-emerald-400 hover:bg-neutral-800 transition-colors">Verify Booking</button>}
-                                    {r.status === 'pending-refund' && <button onClick={(e) => { e.stopPropagation(); setActionModal({ type: 'refund', reservation: r }); setOpenActionRowId(null); setSelectedId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-rose-400 hover:bg-neutral-800 transition-colors">Process Refund</button>}
+                                    {r.status === 'pending-refund' && <button onClick={(e) => { e.stopPropagation(); openRefundReview(r, 'refund'); setOpenActionRowId(null); setSelectedId(null); }} className="px-4 py-2.5 text-left text-xs font-bold text-rose-400 hover:bg-neutral-800 transition-colors">Process Refund</button>}
                                     {r.status === 'pending-reschedule' && <button onClick={(e) => { e.stopPropagation(); setOpenActionRowId(null); openRescheduleApproval(r); }} className="px-4 py-2.5 text-left text-xs font-bold text-violet-400 hover:bg-neutral-800 transition-colors">Process Reschedule</button>}
                                     {r.status === 'confirmed' && (
                                       <>
@@ -1127,7 +1152,7 @@ export function Reservations() {
                                     <>
                                       <span className="text-[10px] text-rose-400 flex items-center gap-1 font-semibold"><AlertTriangle size={10} /> Affected: No Action</span>
                                       <button 
-                                        onClick={() => setActionModal({ type: 'refund', reservation: r })}
+                                        onClick={() => openRefundReview(r, 'refund')}
                                         className="text-[10px] bg-rose-600/20 text-rose-400 hover:bg-rose-600/40 px-2 py-1 rounded flex items-center gap-1 transition-colors"
                                       >
                                         <Send size={10} /> Contact Customer
@@ -1273,7 +1298,7 @@ export function Reservations() {
                     {openActionRowId === selected.id && (
                       <motion.div initial={{ opacity: 0, y: -10, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -10, scale: 0.95 }} className="absolute bottom-full left-0 mb-2 w-full bg-neutral-900 border border-neutral-700 rounded-xl shadow-2xl overflow-hidden z-[60] flex flex-col py-1">
                         {selected.status === 'pending' && <button onClick={(e) => { e.stopPropagation(); setActionModal({ type: 'receipt', reservation: selected }); setOpenActionRowId(null); setSelectedId(null); }} className="px-5 py-3 text-left text-sm font-bold text-emerald-400 hover:bg-neutral-800 transition-colors">Verify Booking</button>}
-                        {selected.status === 'pending-refund' && <button onClick={(e) => { e.stopPropagation(); setActionModal({ type: 'refund', reservation: selected }); setOpenActionRowId(null); setSelectedId(null); }} className="px-5 py-3 text-left text-sm font-bold text-rose-400 hover:bg-neutral-800 transition-colors">Process Refund</button>}
+                        {selected.status === 'pending-refund' && <button onClick={(e) => { e.stopPropagation(); openRefundReview(selected, 'refund'); setOpenActionRowId(null); setSelectedId(null); }} className="px-5 py-3 text-left text-sm font-bold text-rose-400 hover:bg-neutral-800 transition-colors">Process Refund</button>}
                         {selected.status === 'pending-reschedule' && <button onClick={(e) => { e.stopPropagation(); openRescheduleApproval(selected); }} className="px-5 py-3 text-left text-sm font-bold text-violet-400 hover:bg-neutral-800 transition-colors">Process Reschedule</button>}
                         {selected.status === 'confirmed' && (
                           <>
@@ -1322,9 +1347,9 @@ export function Reservations() {
           <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
             <div className="p-4 border-b border-neutral-800 flex justify-between items-center bg-neutral-900/50">
               <h3 className="font-bold text-neutral-200">
-                {actionModal.type === 'receipt' ? 'Verify Receipt' : actionModal.type === 'refund' ? 'Process Refund Request' : 'Process Reschedule Request'}
+                {actionModal.type === 'receipt' ? 'Verify Receipt' : actionModal.type === 'refund' ? 'Process Refund Request' : actionModal.type === 'decline-refund' ? 'Decline Refund Request' : 'Process Reschedule Request'}
               </h3>
-              <button onClick={() => { setActionModal(null); setShowDenyInput(false); setCallSummary(''); setRefundReceiptFile(null); setRefundReceiptPreview(null); }} className="p-1.5 text-neutral-500 hover:text-white rounded-lg transition-colors"><X size={15}/></button>
+              <button disabled={isActionSubmitting} aria-label="Close review" onClick={() => { setActionModal(null); setShowDenyInput(false); setCallSummary(''); setRefundReceiptFile(null); setRefundReceiptPreview(null); }} className="p-1.5 text-neutral-500 hover:text-white rounded-lg transition-colors"><X size={15}/></button>
             </div>
             
             <div className="p-5 flex-1 overflow-y-auto space-y-4">
@@ -1389,6 +1414,15 @@ export function Reservations() {
                 </>
               )}
 
+              {actionModal.type === 'decline-refund' && (
+                <div className="space-y-3">
+                  <p className="text-sm text-neutral-300">Booking #{actionModal.reservation.id} will be cancelled and the refund declined. The customer can see your reason in booking tracking.</p>
+                  <label className="block text-xs font-semibold text-neutral-400">Reason for declining
+                    <textarea autoFocus required maxLength={500} disabled={isActionSubmitting} value={callSummary} onChange={e => setCallSummary(e.target.value)}
+                      className="mt-2 h-20 w-full rounded-xl border border-neutral-700 bg-neutral-900 p-3 text-sm text-neutral-200" />
+                  </label>
+                </div>
+              )}
               {(actionModal.type === 'refund' || actionModal.type === 'reschedule') && (
                 <div className="space-y-4">
                   <div className={`p-3 rounded-lg border text-xs leading-relaxed ${actionModal.type === 'refund' ? 'bg-rose-950/20 border-rose-900/40 text-rose-300' : 'bg-violet-950/20 border-violet-900/40 text-violet-300'}`}>
@@ -1473,7 +1507,17 @@ export function Reservations() {
                       <CheckCircle size={14}/> Verify & Approve
                     </button>
                   </>
+                ) : actionModal.type === 'decline-refund' ? (
+                  <button type="button" disabled={isActionSubmitting || !callSummary.trim()} onClick={executeActionModal}
+                    className="w-full rounded-xl bg-rose-600 py-2.5 text-xs font-bold text-white hover:bg-rose-500 disabled:opacity-50">
+                    {isActionSubmitting ? 'Saving…' : 'Cancel booking & decline refund'}
+                  </button>
                 ) : (
+                  <>
+                    {actionModal.type === 'refund' && actionModal.reservation.status === 'pending-refund' && (
+                      <button type="button" disabled={isActionSubmitting} onClick={() => openRefundReview(actionModal.reservation, 'decline-refund')}
+                        className="px-4 py-2.5 rounded-xl border border-neutral-800 bg-neutral-900 text-xs font-bold text-rose-400 hover:bg-rose-950/40">Decline</button>
+                    )}
                   <button 
                     disabled={isActionSubmitting}
                     onClick={executeActionModal} 
@@ -1481,6 +1525,7 @@ export function Reservations() {
                   >
                     {isActionSubmitting ? <><RefreshCw size={14} className="animate-spin" /> Processing...</> : <><CheckCircle size={14} /> Mark as Contacted & Resolved</>}
                   </button>
+                  </>
                 )}
               </div>
             )}

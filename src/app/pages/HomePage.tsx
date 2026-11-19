@@ -1,6 +1,6 @@
+import { completedReservationStats, openTimeRemaining } from '../utils/waitHistory';
 import { RefundRequestDialog, type RefundBooking } from '../components/RefundRequestDialog';
 import { clockLabel } from '../utils/clockDisplay';
-import { TimeField } from '../components/ui/TimeField';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
@@ -143,6 +143,7 @@ export function HomePage() {
 
   const [activeUser, setActiveUser] = useState<{ name: string; email: string; } | null>(null);
 
+  const completedHistory = useMemo(() => completedReservationStats(reservations || []), [reservations]);
   const [dynamicWaitTime, setDynamicWaitTime] = useState<string>('Calculating...');
 
   useEffect(() => {
@@ -162,12 +163,12 @@ export function HomePage() {
 
     const now = new Date();
     const remainingTimes = activeTables.map((t: any) => {
-      if (t.session.isOpenTime || !t.session.durationMinutes) return 45; 
+      if (t.session.isOpenTime || !t.session.durationMinutes) return completedHistory.typicalBookedMinutes ? openTimeRemaining(t.session.startTime, now, completedHistory.typicalBookedMinutes) : 45;
       const end = addMinutes(new Date(t.session.startTime), t.session.durationMinutes);
       return Math.max(0, differenceInMinutes(end, now));
     }).sort((a: any, b: any) => a - b);
 
-    const baseWait = remainingTimes[0] || 15;
+    const baseWait = remainingTimes[0] ?? 15;
     const unseatedQueue = Math.max(0, waitingCount - freeTables);
     const totalWait = baseWait + (unseatedQueue * 15); 
 
@@ -176,7 +177,7 @@ export function HomePage() {
     } else {
       setDynamicWaitTime(`~${Math.floor(totalWait / 60)}h ${Math.round(totalWait % 60)}m`);
     }
-  }, [tables, queue]);
+  }, [tables, queue, completedHistory]);
 
   const [rateLimits, setRateLimits] = useState<Record<string, number[]>>({});
   const checkRateLimit = useCallback((action: string, maxAttempts: number, windowMinutes: number) => {
@@ -1791,12 +1792,12 @@ export function HomePage() {
                                       <span className="text-[9px] text-amber-500 font-semibold">Min: {clockLabel(minAllowedTime)}</span>
                                     )}
                                   </label>
-                                  <TimeField label="Start time"
+                                  <input type="time" aria-label="Start time"
                                     min={selectedDate && isToday(selectedDate) ? minAllowedTime : undefined}
                                     style={{ colorScheme: isLightMode ? 'light' : 'dark' }} 
                                     value={resForm.timeSlot} 
-                                    onChange={newValue => {
-                                      const val = newValue;
+                                    onChange={e => {
+                                      const val = e.currentTarget.value;
                                       if (!val) {
                                         setResForm(f => ({ ...f, timeSlot: '' }));
                                         return;
@@ -2156,6 +2157,9 @@ export function HomePage() {
                                     <span className="text-xs font-black text-neutral-900 dark:text-white font-mono bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 rounded border border-neutral-300 dark:border-neutral-700">{r.id}</span>
                                     <ReservationStatusBadge status={r.status} />
                                   </div>
+                                  {r.refundStatus === 'declined' && (
+                                    <p className="mb-1 text-xs font-semibold text-rose-400">Refund declined{canManageBooking(r) && r.refundNotes ? ` · ${r.refundNotes}` : ''}</p>
+                                  )}
                                   <p className="text-sm font-semibold text-neutral-800 dark:text-neutral-200">{format(new Date(r.date), 'MMM d, yyyy')} · {clockLabel(r.timeSlot)} ({r.durationHours}h)</p>
                                   <p className="text-xs text-neutral-500">
                                     {tables.find((t: any) => t.id === r.tableId)?.name || 'Billiard Table'}
@@ -2757,13 +2761,13 @@ export function HomePage() {
                       <span className="text-[9px] text-amber-500 font-semibold">Min: {format(new Date(), 'h:mm a')}</span>
                     )}
                   </label>
-                  <TimeField label="New time"
+                  <input type="time" aria-label="New time"
                     style={{ colorScheme: isLightMode ? 'light' : 'dark' }} 
                     required 
                     min={rescheduleData.newDate && isToday(rescheduleData.newDate) ? format(new Date(), 'HH:mm') : undefined}
                     value={rescheduleData.timeSlot} 
-                    onChange={newValue => {
-                      const val = newValue;
+                    onChange={e => {
+                      const val = e.currentTarget.value;
                       const nowStr = format(new Date(), 'HH:mm');
                       if (rescheduleData.newDate && isToday(rescheduleData.newDate) && val && val < nowStr) {
                         setToastMsg({ title: "Time Has Passed", desc: "Cannot reschedule to a past time for today.", type: 'error' });

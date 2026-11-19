@@ -1,3 +1,4 @@
+import { completedReservationStats, openTimeRemaining } from '../utils/waitHistory';
 import { useState, useEffect } from 'react';
 import logoImg from '../../assets/40eb82831843e17a3c48a360fd80f0aaaa58ddc8.png';
 import { useAppContext } from '../context/AppContext';
@@ -214,7 +215,7 @@ function QueueRow({ item, position, estWait }: { item: QueueItem; position: numb
 // ── Main Component ─────────────────────────────────────────────
 export function LiveMonitor() {
   // 🟢 Extract refreshLiveMonitor and rates from context
-  const { tables, availableTables, heldTableIds, reservationMoveError, queue, refreshLiveMonitor, rates } = useAppContext();
+  const { tables, availableTables, heldTableIds, reservationMoveError, queue, reservations, refreshLiveMonitor, rates } = useAppContext();
   const [tick, setTick] = useState(0);
   const [now, setNow] = useState(new Date());
 
@@ -234,14 +235,15 @@ export function LiveMonitor() {
   }, [refreshLiveMonitor]);
 
   // --- GLOBAL AI WAIT-TIME ESTIMATOR ---
+  const completedHistory = completedReservationStats(reservations);
   const calculateAIWaitTime = (position: number) => {
     if(reservationMoveError||heldTableIds.size)return 'Check transfer recovery';
     const activeTables = tables.filter(t => t.isActive && t.status === 'occupied' && t.session);
     if (activeTables.length === 0) return "0 mins";
 
     const remainingTimes = activeTables.map(t => {
-      // If it's an open time, assume a default 2 hour block for estimation purposes
-      const duration = t.session?.durationMinutes || 120;
+      if (t.session?.isOpenTime || !t.session?.durationMinutes) return openTimeRemaining(t.session!.startTime, now, completedHistory.typicalBookedMinutes ?? 120);
+      const duration = t.session.durationMinutes;
       const endTime = addMinutes(new Date(t.session!.startTime), duration);
       return Math.max(0, Math.floor(differenceInSeconds(endTime, now) / 60));
     }).sort((a, b) => a - b);

@@ -176,6 +176,25 @@ try {
 const registerCoreRoutes = (database) => {
   const auth = registerAuthRoutes(app, database);
   registerBackupRoutes(app, database, { requireAdmin: auth.requireAdmin });
+  app.post('/api/reservations/:id/decline-refund', auth.requireAuth, async (req, res) => {
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+    if (!reason || reason.length > 500) return res.status(400).json({ error: 'Enter a reason of up to 500 characters.' });
+    if (!supabase) return res.status(503).json({ error: 'Reconnect to the cloud before reviewing this refund.' });
+    const message = 'Refund declined: ' + reason;
+    try {
+      const { data, error } = await supabase.from('reservations')
+        .update({ status: 'cancelled', refundStatus: 'declined', refundNotes: reason, cancellation_reason: message, cancellationreason: message })
+        .eq('id', req.params.id).eq('status', 'pending-refund').select('id').maybeSingle();
+      if (error) return res.status(502).json({ error: 'Cloud save failed. Refresh the reservation and retry.' });
+      if (!data) return res.status(409).json({ error: 'This refund is no longer pending. Refresh the reservation.' });
+      database.run("UPDATE reservations SET status='cancelled', refundStatus='declined', refundNotes=?, cancellationReason=? WHERE id=?", [reason, message, req.params.id], err => {
+        if (err) console.error('Local refund decision cache update failed:', err.message);
+        res.json({ status: 'cancelled', refundStatus: 'declined' });
+      });
+    } catch {
+      res.status(503).json({ error: 'Unable to confirm the cloud decision. Refresh before retrying.' });
+    }
+  });
 };
 
 // Customer email notifications share one service instance, created lazily so it
@@ -763,10 +782,10 @@ app.get('/api/watchlist', (req, res) => {
 // 🧠 AI INFERENCE ROUTE (POST)
 // ====================================================================
 app.post('/api/ai/predict-wait-time', (req, res) => {
-  if (!isAITrained) {
-    // Fallback if network hasn't trained yet
-    return res.json({ estimatedMinutes: 45, confidence: 'baseline' });
-  }
+  const history = req.body?.completedReservations;
+  const historyCount = Number.isSafeInteger(history?.count) && history.count > 0 ? history.count : 0;
+  const typical = historyCount && Number.isFinite(history.typicalBookedMinutes) && history.typicalBookedMinutes > 0 ? Math.min(history.typicalBookedMinutes, 360) : 0;
+  if (!isAITrained) return res.json({ estimatedMinutes: typical ? Math.max(15, Math.round(typical)) : 45, confidence: 'baseline' });
   
   const { partySize, hasOrders, currentOccupancyRate } = req.body;
   const now = new Date();
@@ -782,7 +801,10 @@ app.post('/api/ai/predict-wait-time', (req, res) => {
   const result = waitTimeNet.run(inputVector);
   
   // result.duration is 0-1. Multiply by max duration limit (360 mins / 6 hrs)
-  const estimatedMinutes = Math.round((result.duration || 0.16) * 360);
+  const modelMinutes = (result.duration || 0.16) * 360;
+  // Booked durations give context for open sessions. Keep actual session history as the primary signal.
+  const historyWeight = typical ? Math.min(historyCount / (historyCount + 10), 0.5) : 0;
+  const estimatedMinutes = Math.round(modelMinutes * (1 - historyWeight) + typical * historyWeight);
   
   res.json({
     estimatedMinutes: Math.max(15, estimatedMinutes), // Set 15m absolute minimum boundary
@@ -966,7 +988,7 @@ app.post('/api/sync-to-cloud', async (req, res) => {
         for (const row of batch) {
           const current = existing.get(row.id);
           if (!current || ['pending-refund','pending-reschedule'].some(status => current.status === status || row.status === status)
-              || current.refundStatus === 'settled' || Number(current.rescheduleCount) > Number(row.rescheduleCount || 0)) continue;
+              || ['settled', 'declined'].includes(current.refundStatus) || Number(current.rescheduleCount) > Number(row.rescheduleCount || 0)) continue;
           if (Object.keys(row).every(key => String(current[key] ?? '') === String(row[key] ?? ''))) continue;
           const { error } = await supabase.from('reservations').update(row).eq('id',row.id).eq('status',current.status);
           if (error) throw error;

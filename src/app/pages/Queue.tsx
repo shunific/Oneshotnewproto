@@ -1,3 +1,4 @@
+import { completedReservationStats } from '../utils/waitHistory';
 import { clockLabel } from '../utils/clockDisplay';
 import { PendingQueueActions } from '../components/PendingQueueActions';
 import { localFetch } from '../utils/localApi';
@@ -85,7 +86,8 @@ export function Queue() {
         body: JSON.stringify({ 
           partySize: nextPartySize, 
           hasOrders: true, // Conservative prediction assumes customers will order
-          currentOccupancyRate 
+          completedReservations: completedReservationStats(reservations),
+          currentOccupancyRate
         })
       });
       
@@ -113,7 +115,7 @@ export function Queue() {
       setAiWaitTime("~45 mins (Fallback)"); 
     }
     setIsAILoading(false);
-  }, [tables, availableTables, heldTableIds, reservationMoveError, waiting, now]);
+  }, [tables, availableTables, heldTableIds, reservationMoveError, reservations, waiting, now]);
 
   // Poll the AI engine every 30 seconds for dynamic adjustments
   useEffect(() => {
@@ -707,12 +709,12 @@ export function Queue() {
         </div>
 
         {upcomingReservations.length === 0 ? (
-          <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-10 text-center shadow-sm">
+          <div className="bg-neutral-950 border border-neutral-800 rounded-none p-10 text-center shadow-sm">
             <CalendarIcon size={32} className="mx-auto text-neutral-700 mb-3" />
             <p className="text-neutral-500">No upcoming reservations</p>
           </div>
         ) : (
-          <div className="bg-white dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-800 rounded-xl overflow-hidden shadow-sm">
+          <div className="bg-white dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-800 rounded-none overflow-hidden shadow-sm">
             <div className="divide-y divide-neutral-200 dark:divide-neutral-800/50">
               {upcomingReservations.map((reservation: any) => {
                 const minsUntil = differenceInMinutes(new Date(reservation.date), new Date());
