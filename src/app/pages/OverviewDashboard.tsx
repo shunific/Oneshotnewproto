@@ -42,7 +42,7 @@ export function OverviewDashboard() {
   } = useAppContext() as any;
   
   const navigate = useNavigate();
-  const showTable = (name: string) => navigate('/staff/tables', { state: { tableName: name } });
+  const openTableMonitor = () => navigate('/staff/tables');
 
   // ── Connectivity & Local Backup State ─────────────────────────
   const [isSyncing, setIsSyncing] = useState(false);
@@ -328,7 +328,7 @@ export function OverviewDashboard() {
                 <span className="text-sm text-rose-300">
                   <strong>{t.name}</strong> — <span className="font-medium">{t.session?.customerName}</span>'s session {isOpen ? 'is on Open Time. Charges are actively accumulating.' : 'has exceeded the paid time. Overtime charges may apply.'}
                 </span>
-                <button onClick={() => showTable(t.name)} className="ml-auto text-xs text-rose-400 hover:text-rose-300 font-semibold flex items-center gap-1">
+                <button onClick={openTableMonitor} className="ml-auto text-xs text-rose-400 hover:text-rose-300 font-semibold flex items-center gap-1">
                   View <ChevronRight size={12} />
                 </button>
               </div>
@@ -340,7 +340,7 @@ export function OverviewDashboard() {
               <span className="text-sm text-amber-300">
                 <strong>{t.name}</strong> — <span className="font-medium">{t.session?.customerName}</span>'s session ends in less than 15 minutes.
               </span>
-              <button onClick={() => showTable(t.name)} className="ml-auto text-xs text-amber-400 hover:text-amber-300 font-semibold flex items-center gap-1">
+              <button onClick={openTableMonitor} className="ml-auto text-xs text-amber-400 hover:text-amber-300 font-semibold flex items-center gap-1">
                 View <ChevronRight size={12} />
               </button>
             </div>
@@ -360,7 +360,7 @@ export function OverviewDashboard() {
       <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-5">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-semibold text-neutral-300">Table Status</h2>
-          <button onClick={() => navigate('/staff/tables')} className="text-xs text-emerald-500 hover:text-emerald-400 flex items-center gap-1 font-semibold">
+          <button onClick={openTableMonitor} className="text-xs text-emerald-500 hover:text-emerald-400 flex items-center gap-1 font-semibold">
             Manage Tables <ChevronRight size={12} />
           </button>
         </div>
@@ -376,7 +376,7 @@ export function OverviewDashboard() {
             return (
               <button type="button"
                 key={t.id}
-                onClick={() => showTable(t.name)}
+                onClick={openTableMonitor}
                 title={`${t.name}${t.session ? ` — ${t.session.customerName}` : ''} (${heldTableIds.has(t.id)?'transfer held':t.status})`}
                 className={`aspect-square rounded-lg flex flex-col items-center justify-center text-center px-1 leading-tight cursor-pointer border transition-all text-[10px] font-bold
                   ${heldTableIds.has(t.id)||reservationMoveError ? 'bg-neutral-800/80 border-amber-800 text-amber-300' :

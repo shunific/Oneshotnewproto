@@ -141,7 +141,7 @@ export function Tables() {
   
   const { state } = useLocation();
   const [filter, setFilter] = useState<FilterStatus>(state?.filter ?? 'all');
-  const [search, setSearch] = useState<string>(state?.tableName ?? '');
+  const [search, setSearch] = useState('');
   const [assigningTableId, setAssigningTableId] = useState<string | null>(null);
   const [extendingTableId, setExtendingTableId] = useState<string | null>(null);
   const [endingTableId,    setEndingTableId]    = useState<string | null>(null);
