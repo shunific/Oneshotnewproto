@@ -1,7 +1,7 @@
 import { localFetch } from '../utils/localApi';
 import { useState, useRef, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { Package, Search, Plus, UploadCloud, Archive, CheckCircle, Clock, Check, X, AlertTriangle, RefreshCw, History } from 'lucide-react';
+import { Package, Search, Plus, UploadCloud, Archive, ArchiveRestore, CheckCircle, Clock, Check, X, AlertTriangle, RefreshCw, History } from 'lucide-react';
 import { format } from 'date-fns';
 
 export function lostPhotoUrl(image: string) {
@@ -261,6 +261,15 @@ export function LostAndFound() {
               <div className="border-t border-neutral-800 p-3 flex gap-2 bg-neutral-900/50">
                 <button disabled={isSubmitting} onClick={() => setClaimModalId(item.id)} className="flex-1 bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-600 dark:text-emerald-400 border border-emerald-600/30 text-xs font-bold py-2 rounded-lg transition-colors">Mark as Claimed</button>
                 <button disabled={isSubmitting} onClick={() => runLostAction(()=>deleteLostItem(item.id),"Item moved to archives.")} className="px-3 bg-neutral-900 hover:bg-rose-900/50 border border-neutral-800 text-neutral-500 hover:text-rose-500 rounded-lg transition-colors" title="Move to History/Archive"><Archive size={14}/></button>
+              </div>
+            )}
+            {!!item.isArchived && item.status !== 'claimed' && (
+              <div className="border-t border-neutral-800 p-3 flex gap-2 bg-neutral-900/50">
+                <button type="button" disabled={isSubmitting}
+                  onClick={() => runLostAction(() => updateLostItem(item.id, { isArchived: false }), 'Item restored to Found.')}
+                  className="flex items-center gap-2 rounded-lg border border-neutral-700 px-3 py-2 text-xs font-semibold hover:text-emerald-500">
+                  <ArchiveRestore size={14}/> Unarchive
+                </button>
               </div>
             )}
             {item.status === 'claimed' && (

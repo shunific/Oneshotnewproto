@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { ShieldAlert, Search, Plus, X, AlertTriangle, Scale, Archive, Link as LinkIcon, CheckCircle, RefreshCw, Pencil } from 'lucide-react';
+import { ShieldAlert, Search, Plus, X, AlertTriangle, Scale, Archive, ArchiveRestore, Link as LinkIcon, CheckCircle, RefreshCw, Pencil } from 'lucide-react';
 import { format } from 'date-fns';
 
 const REASON_CFG = {
@@ -80,14 +80,16 @@ export function Watchlist() {
     } finally { setIsSaving(false); }
   };
 
-  const handleStatusChange = async (id: string, action: 'resolve' | 'reopen' | 'archive') => {
+  const handleStatusChange = async (id: string, action: 'resolve' | 'reopen' | 'archive' | 'unarchive') => {
     if (isSaving) return;
     setIsSaving(true);
     try {
       if (action === 'archive') await deleteWatchlistItem(id);
+      else if (action === 'unarchive') await updateWatchlistItem(id, { isArchived: false });
       else await updateWatchlistItem(id, action === 'resolve' ? { status: 'resolved', resolvedDate: new Date(), isArchived: true } : { status: 'active', resolvedDate: null, isArchived: false });
       setConfirmResolveId(null);
-      flash(action === 'resolve' ? 'Case marked as resolved and moved to archives.' : action === 'reopen' ? 'Case re-opened.' : 'Case manually archived.', 'success');
+      const messages = { resolve: 'Case marked as resolved.', reopen: 'Case re-opened.', archive: 'Case manually archived.', unarchive: 'Case restored to Active.' };
+      flash(messages[action], 'success');
     } catch (error) {
       flash(error instanceof Error ? error.message : 'Case could not be saved. Please retry.', 'error');
     } finally { setIsSaving(false); }
@@ -234,6 +236,12 @@ export function Watchlist() {
                       <Archive size={14}/>
                     </button>
                   </div>
+                )}
+                {!!item.isArchived && item.status !== 'resolved' && (
+                  <button type="button" disabled={isSaving} onClick={() => handleStatusChange(item.id, 'unarchive')}
+                    className="flex items-center gap-2 rounded-lg border border-neutral-700 px-3 py-2 text-xs font-semibold hover:text-emerald-500">
+                    <ArchiveRestore size={14}/> Unarchive
+                  </button>
                 )}
                 {item.status === 'resolved' && (
                   <div className="flex gap-2">

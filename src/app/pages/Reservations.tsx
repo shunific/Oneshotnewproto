@@ -1,3 +1,4 @@
+import { eventReservationName } from '../utils/eventReservation';
 import { clockLabel } from '../utils/clockDisplay';
 import { TimeField } from '../components/ui/TimeField';
 import { SessionReceipt, bookingReceiptRecord } from '../components/SessionReceipt';
@@ -789,7 +790,7 @@ export function Reservations() {
           <h3 className="text-sm font-bold text-amber-400">Refund requests</h3>
           {reservations.filter((r:any)=>r.status==='pending-refund').map((r:any)=>
             <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 text-sm">
-              <span>{r.customerName} · #{r.id}</span>
+              <span>{eventReservationName(r) ?? `${r.customerName} · #${r.id}`}</span>
               <div className="flex flex-wrap items-center gap-2">
                 <button type="button" onClick={() => openRefundReview(r, 'decline-refund')}
                   className="px-4 py-2.5 bg-neutral-900 hover:bg-rose-950/40 border border-neutral-800 hover:border-rose-800 text-rose-400 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5">
@@ -824,8 +825,8 @@ export function Reservations() {
                 <div key={r.id} className="p-4 flex flex-col lg:flex-row lg:items-center gap-4">
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-neutral-200 flex items-center gap-2">
-                      {r.customerName}
-                      <span className="text-[9px] font-mono text-neutral-500 bg-neutral-800 px-1.5 py-0.5 rounded tracking-widest">{r.id}</span>
+                      {eventReservationName(r) ?? r.customerName}
+                      {!eventReservationName(r) && <span className="text-[9px] font-mono text-neutral-500 bg-neutral-800 px-1.5 py-0.5 rounded tracking-widest">{r.id}</span>}
                     </p>
                     <p className="text-xs text-neutral-500 mt-0.5">{r.contactNumber} · {r.partySize} pax · {r.durationHours}h</p>
                     <div className="flex flex-wrap items-center gap-2 mt-2 text-xs">
@@ -997,8 +998,8 @@ export function Reservations() {
                     <tr key={r.id} onClick={() => setSelectedId(r.id)} className="hover:bg-neutral-900/60 transition-colors cursor-pointer relative">
                       <td className="px-3 py-3 min-w-0">
                         <p className="text-sm font-semibold text-neutral-200 flex items-center gap-2 min-w-0">
-                          <span className="truncate" title={r.customerName}>{r.customerName}</span>
-                          <span className="text-[9px] font-mono text-neutral-500 bg-neutral-800 px-1.5 py-0.5 rounded tracking-widest flex-shrink-0">{r.id}</span>
+                          <span className="truncate" title={eventReservationName(r) ?? r.customerName}>{eventReservationName(r) ?? r.customerName}</span>
+                          {!eventReservationName(r) && <span className="text-[9px] font-mono text-neutral-500 bg-neutral-800 px-1.5 py-0.5 rounded tracking-widest flex-shrink-0">{r.id}</span>}
                         </p>
                         <p className="text-xs text-neutral-500 truncate" title={r.contactNumber}>{r.contactNumber}</p>
                       </td>
@@ -1133,8 +1134,8 @@ export function Reservations() {
                               <div className="flex justify-between items-start">
                                 <div>
                                   <div className="flex items-center gap-2">
-                                    <p className="text-sm font-semibold text-neutral-200">{r.customerName}</p>
-                                    <span className="text-[9px] font-mono text-neutral-500 bg-neutral-800 px-1.5 py-0.5 rounded tracking-widest">{r.id}</span>
+                                    <p className="text-sm font-semibold text-neutral-200">{eventReservationName(r) ?? r.customerName}</p>
+                                    {!eventReservationName(r) && <span className="text-[9px] font-mono text-neutral-500 bg-neutral-800 px-1.5 py-0.5 rounded tracking-widest">{r.id}</span>}
                                   </div>
                                   <p className="text-xs text-neutral-500">{clockLabel(r.timeSlot)} · {r.partySize} pax</p>
                                 </div>
@@ -1180,8 +1181,8 @@ export function Reservations() {
           <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-lg shadow-2xl">
             <div className="px-6 py-5 border-b border-neutral-800 flex justify-between items-center">
               <div>
-                <h2 className="text-xl font-black text-neutral-100">{selected.customerName}</h2>
-                <p className="text-sm text-neutral-500 font-mono tracking-wider mt-1">Reservation #{selected.id.toUpperCase()}</p>
+                <h2 className="text-xl font-black text-neutral-100">{eventReservationName(selected) ?? selected.customerName}</h2>
+                {!eventReservationName(selected) && <p className="text-sm text-neutral-500 font-mono tracking-wider mt-1">Reservation #{selected.id.toUpperCase()}</p>}
               </div>
               <button onClick={() => setSelectedId(null)} className="p-2.5 text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 rounded-xl transition-colors"><X size={20} /></button>
             </div>
@@ -1708,7 +1709,7 @@ export function Reservations() {
                                     <div key={r.id} className="flex items-center gap-3 bg-neutral-900 p-2.5 rounded-lg border border-neutral-800">
                                       <div className="w-2 h-2 rounded-full bg-sky-500 shadow-[0_0_8px_rgba(14,165,233,0.5)]" />
                                       <span className="text-neutral-200 text-xs font-semibold">{format(rStart, 'h:mm a')} - {format(rEnd, 'h:mm a')}</span>
-                                      <span className="text-neutral-500 text-[10px] font-medium ml-auto">{r.durationHours}h reserved</span>
+                                      <span className="text-neutral-500 text-[10px] font-medium ml-auto">{eventReservationName(r) ?? `${r.durationHours}h reserved`}</span>
                                     </div>
                                   );
                                 })}
@@ -1761,7 +1762,7 @@ export function Reservations() {
                           <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end">
                             <span>Start Time <span className="text-rose-500">*</span></span>
                             {selectedDate && isToday(selectedDate) && (
-                              <span className="text-[9px] text-amber-500 font-semibold">Min: {format(addMinutes(new Date(),60), 'h:mm a')}</span>
+                              <span className="text-[9px] text-amber-500 font-semibold">{format(addMinutes(new Date(),60), 'h:mm a')}</span>
                             )}
                           </label>
                           <TimeField label="Start time" required

@@ -1,12 +1,13 @@
 import { TimeField } from '../components/ui/TimeField';
 // Full promo code management (Admin only — create, edit, toggle, delete)
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAppContext, generateRandomPromoCode, PromoCode } from '../context/AppContext';
 import { Plus, X, Tag, Copy, ToggleLeft, ToggleRight, Trash2, Wand2, CheckCircle, RefreshCw, Edit2 } from 'lucide-react';
 import { format } from 'date-fns';
 
 export function AdminPromoCodes() {
-  const { promoCodes, addPromoCode, updatePromoCode, togglePromoCode, deletePromoCode } = useAppContext();
+  const { promoCodes, refreshPromoUsage, addPromoCode, updatePromoCode, togglePromoCode, deletePromoCode } = useAppContext();
+  useEffect(() => { void refreshPromoUsage(); }, [refreshPromoUsage]);
   const [editingPromoId, setEditingPromoId] = useState<string | null>(null);
 
   const [showForm, setShowForm] = useState(false);
@@ -65,7 +66,7 @@ export function AdminPromoCodes() {
 
   const getStatus = (p: PromoCode) => {
     if (!p.isActive) return { label: 'Inactive', color: 'bg-neutral-700/40 text-neutral-500 border-neutral-700' };
-    if (p.usageCount >= p.maxUsage) return { label: 'Exhausted', color: 'bg-rose-500/10 text-rose-400 border-rose-500/20' };
+    if (p.isLimitedUses !== false && p.usageCount >= p.maxUsage) return { label: 'Exhausted', color: 'bg-rose-500/10 text-rose-400 border-rose-500/20' };
     if (p.expiresAt && new Date() > new Date(p.expiresAt)) return { label: 'Expired', color: 'bg-rose-500/10 text-rose-400 border-rose-500/20' };
     return { label: 'Active', color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' };
   };
@@ -122,13 +123,13 @@ export function AdminPromoCodes() {
                   </div>
                   <p className="text-xs text-neutral-400 mb-2">{pc.description}</p>
                   <div className="flex items-center gap-4 text-[11px] text-neutral-600">
-                    <span>Used: <strong className="text-neutral-400">{pc.usageCount}</strong> / {pc.maxUsage}</span>
+                    <span>Used: <strong className="text-neutral-400">{pc.usageCount}</strong> / {pc.isLimitedUses === false ? 'Unlimited' : pc.maxUsage}</span>
                     {pc.expiresAt && <span>Expires: <strong className="text-neutral-400">{format(new Date(pc.expiresAt), 'MMM d, yyyy')}</strong></span>}
-                    <span>Created: {format(new Date(pc.createdAt), 'MMM d')}</span>
+                    {pc.createdAt && <span>Created: {format(new Date(pc.createdAt), 'MMM d')}</span>}
                   </div>
-                  <div className="mt-2 h-1.5 bg-neutral-800 rounded-full overflow-hidden w-full max-w-xs">
+                  {pc.isLimitedUses !== false && pc.maxUsage > 0 && (<div className="mt-2 h-1.5 bg-neutral-800 rounded-full overflow-hidden w-full max-w-xs">
                     <div className="h-full bg-violet-500 rounded-full transition-all" style={{ width: `${Math.min((pc.usageCount/pc.maxUsage)*100,100)}%` }} />
-                  </div>
+                  </div>)}
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0">
                   <button onClick={() => handleCopy(pc.code, pc.id)} title="Copy code"

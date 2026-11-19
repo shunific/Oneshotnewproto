@@ -1,3 +1,4 @@
+import { eventReservationName } from '../utils/eventReservation';
 import { completedReservationStats, openTimeRemaining } from '../utils/waitHistory';
 import { RefundRequestDialog, type RefundBooking } from '../components/RefundRequestDialog';
 import { clockLabel } from '../utils/clockDisplay';
@@ -1646,7 +1647,7 @@ export function HomePage() {
                                             className="flex items-center gap-3 bg-purple-950/40 p-2.5 rounded-lg border border-purple-800/60 cursor-pointer hover:bg-purple-900/50 transition-colors"
                                           >
                                             <div className="w-2 h-2 rounded-full bg-purple-400 animate-pulse shadow-[0_0_8px_rgba(168,85,247,0.6)]" />
-                                            <span className="text-purple-200 text-xs font-bold">EVENT: {eventForTable.title || eventForTable.customerName?.replace(/^EVENT:\s*/, '')}{eventWindowLabel}</span>
+                                            <span className="text-purple-200 text-xs font-bold">{eventForTable.title || eventReservationName(eventForTable)}{eventWindowLabel}</span>
                                             <span className="text-purple-400 text-[10px] font-bold ml-auto flex items-center gap-1">View Details &rarr;</span>
                                           </div>
                                         )}
@@ -1667,9 +1668,9 @@ export function HomePage() {
                                           const [rH, rM] = r.timeSlot.split(':').map(Number);
                                           rStart.setHours(rH, rM, 0, 0);
                                           const rEnd = addMinutes(rStart, r.durationHours * 60);
-                                          const isEventRes = r.customerName?.startsWith('EVENT:') || r.id?.startsWith('EVT-') || r.paymentRef === 'EVENT';
+                                          const eventName = eventReservationName(r);
 
-                                          if (isEventRes) {
+                                          if (eventName) {
                                             return (
                                               <div 
                                                 key={r.id} 
@@ -1679,7 +1680,7 @@ export function HomePage() {
                                                 <div className="w-2 h-2 rounded-full bg-purple-400 animate-pulse shadow-[0_0_8px_rgba(168,85,247,0.6)]" />
                                                 <span className="text-purple-200 text-xs font-semibold">{format(rStart, 'h:mm a')} - {format(rEnd, 'h:mm a')}</span>
                                                 <span className="text-purple-300 group-hover:text-white text-[10px] font-bold ml-auto px-2 py-0.5 rounded bg-purple-900/60 border border-purple-700/50 flex items-center gap-1">
-                                                  EVENT &rarr;
+                                                  {eventName} &rarr;
                                                 </span>
                                               </div>
                                             );
@@ -1786,7 +1787,7 @@ export function HomePage() {
                                   <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end">
                                     <span>Start Time *</span>
                                     {selectedDate && isToday(selectedDate) && minAllowedTime && (
-                                      <span className="text-[9px] text-amber-500 font-semibold">Min: {clockLabel(minAllowedTime)}</span>
+                                      <span className="text-[9px] text-amber-500 font-semibold">{clockLabel(minAllowedTime)}</span>
                                     )}
                                   </label>
                                   <input type="time" aria-label="Start time"
@@ -2145,7 +2146,7 @@ export function HomePage() {
                               <div key={r.id} className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm">
                                 <div>
                                   <div className="flex items-center gap-2 mb-1">
-                                    <span className="text-xs font-black text-neutral-900 dark:text-white font-mono bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 rounded border border-neutral-300 dark:border-neutral-700">{r.id}</span>
+                                    <span className="text-xs font-black text-neutral-900 dark:text-white font-mono bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 rounded border border-neutral-300 dark:border-neutral-700">{eventReservationName(r) ?? r.id}</span>
                                     <ReservationStatusBadge status={r.status} />
                                   </div>
                                   {r.refundStatus === 'declined' && (
@@ -2561,9 +2562,9 @@ export function HomePage() {
 
                 <div className="border-y border-dashed border-neutral-300 py-3 space-y-1.5 text-[11px]">
                   <div className="flex justify-between items-center">
-                    <span>Booking ID:</span>
+                    <span>{eventReservationName(viewingReceipt) ? 'Event:' : 'Booking ID:'}</span>
                     <div className="flex items-center gap-1.5">
-                      <span className="font-bold">{viewingReceipt.id}</span>
+                      <span className="font-bold">{eventReservationName(viewingReceipt) ?? viewingReceipt.id}</span>
                       <ReservationStatusBadge status={viewingReceipt.status} />
                     </div>
                   </div>
@@ -2683,7 +2684,7 @@ export function HomePage() {
               <div className="flex justify-between items-start mb-2">
                 <div>
                   <h3 className="text-lg font-black text-violet-400 flex items-center gap-2"><Calendar size={18} /> Reschedule Booking</h3>
-                  <p className="text-xs text-neutral-500 mt-1">Reservation #{rescheduleData.reservation.id.toUpperCase()}</p>
+                  <p className="text-xs text-neutral-500 mt-1">{eventReservationName(rescheduleData.reservation) ?? `Reservation #${rescheduleData.reservation.id.toUpperCase()}`}</p>
                 </div>
                 <button onClick={() => setRescheduleData(null)} className="text-neutral-500 hover:text-white transition-colors"><X size={18} /></button>
               </div>
@@ -2704,7 +2705,7 @@ export function HomePage() {
                   <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end">
                     <span>New Time Slot (Duration: {rescheduleData.reservation.durationHours}h) *</span>
                     {rescheduleData.newDate && isToday(rescheduleData.newDate) && (
-                      <span className="text-[9px] text-amber-500 font-semibold">Min: {format(new Date(), 'h:mm a')}</span>
+                      <span className="text-[9px] text-amber-500 font-semibold">{format(new Date(), 'h:mm a')}</span>
                     )}
                   </label>
                   <input type="time" aria-label="New time"

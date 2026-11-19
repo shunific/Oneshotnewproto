@@ -1,3 +1,4 @@
+import { eventReservationName } from './utils/eventReservation';
 import { localFetch } from './utils/localApi';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router';
@@ -269,7 +270,7 @@ export function Layout() {
     
     (reservations || []).forEach((r: any) => {
       if (r.customerName.toLowerCase().includes(query) || r.id.toLowerCase().includes(query)) {
-         results.push({ type: 'Reservation', label: `${r.customerName} - ${r.id}`, link: '/staff/reservations' });
+         results.push({ type: 'Reservation', label: eventReservationName(r) ?? `${r.customerName} - ${r.id}`, link: '/staff/reservations' });
       }
     });
     

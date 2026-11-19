@@ -499,12 +499,12 @@ setInterval(trainQueueAI, 1000 * 60 * 60 * 6);
 // 🚀 READ ROUTES (GET)
 // ====================================================================
 app.get('/api/promo-codes', (req, res) => {
-  db.all(`SELECT * FROM promo_codes`, [], (err, rows) => {
+  db.all(`SELECT p.*, (SELECT count(*) FROM reservations r WHERE upper(trim(r.promoCode)) = upper(trim(p.code))) AS saved_uses FROM promo_codes p`, [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json(rows.map(r => ({
       id: r.id, code: r.code, discountPercent: r.discount_percent, description: r.description,
       isActive: r.is_active === 1, isLimitedUses: r.is_limited_uses === 1, maxUsage: r.max_usage,
-      usageCount: r.usage_count, startDate: r.start_date, expiresAt: r.expires_at
+      usageCount: Math.max(r.usage_count || 0, r.saved_uses), startDate: r.start_date, expiresAt: r.expires_at
     })));
   });
 });
@@ -1413,10 +1413,10 @@ app.delete('/api/lost-and-found/:id', (req, res) => {
 });
 
 app.post('/api/reservations', (req, res) => {
-  const { id, customerName, contactNumber, email, date, timeSlot, durationHours, partySize, tableId, status, totalAmount, downPaymentAmount, downPaymentPaid, balancePaid, paymentRef, receiptImg } = req.body;
+  const { id, customerName, contactNumber, email, date, timeSlot, durationHours, partySize, tableId, status, totalAmount, downPaymentAmount, downPaymentPaid, balancePaid, paymentRef, receiptImg, promoCode, discountAmount } = req.body;
   const createdAt = new Date().toISOString();
-  db.run(`INSERT INTO reservations (id, customerName, contactNumber, email, date, timeSlot, durationHours, partySize, tableId, status, totalAmount, downPaymentAmount, downPaymentPaid, balancePaid, paymentRef, receiptImg, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  [id, customerName, contactNumber, email || null, reservationDay(date), timeSlot, durationHours, partySize, tableId || null, status, totalAmount, downPaymentAmount, downPaymentPaid ? 1 : 0, balancePaid ? 1 : 0, paymentRef || null, receiptImg || null, createdAt], function(err) {
+  db.run(`INSERT INTO reservations (id, customerName, contactNumber, email, date, timeSlot, durationHours, partySize, tableId, status, totalAmount, downPaymentAmount, downPaymentPaid, balancePaid, paymentRef, receiptImg, promoCode, discountAmount, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  [id, customerName, contactNumber, email || null, reservationDay(date), timeSlot, durationHours, partySize, tableId || null, status, totalAmount, downPaymentAmount, downPaymentPaid ? 1 : 0, balancePaid ? 1 : 0, paymentRef || null, receiptImg || null, promoCode || null, discountAmount ?? 0, createdAt], function(err) {
     if (err) return res.status(500).json({ error: err.message });
     res.status(201).json({ message: 'Reservation created successfully', id: id });
     // Fire-and-forget: notify the customer their booking was received.

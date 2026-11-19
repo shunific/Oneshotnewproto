@@ -1,3 +1,4 @@
+import { eventReservationName } from '../utils/eventReservation';
 import { useState, useRef, useEffect, useMemo } from 'react';
 import {
   Calendar as CalendarIcon, Plus, Trash2, Edit2, Tag, Paperclip, X, Link,
@@ -61,13 +62,14 @@ const emptyPromoForm: PromoForm = { code: '', discountPercent: 10, description: 
 export function AdminEvents() {
   const { 
     events, addEvent, updateEvent, deleteEvent, 
-    promoCodes, addPromoCode, updatePromoCode, togglePromoCode, deletePromoCode,
+    promoCodes, refreshPromoUsage, addPromoCode, updatePromoCode, togglePromoCode, deletePromoCode,
     closedDates, addClosedDate, removeClosedDate, updateClosedDate,
     reservations, updateReservation, updateReservationStatus, tables,
     rates 
   } = useAppContext() as any;
 
   const [activeTab, setActiveTab] = useState<'calendar' | 'events' | 'promos'>('calendar');
+  useEffect(() => { if (activeTab === 'promos') void refreshPromoUsage(); }, [activeTab, refreshPromoUsage]);
   const [viewMonth, setViewMonth] = useState(new Date());
   const [dayActionDate, setDayActionDate] = useState<Date | null>(null);
   const [toast, setToast] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
@@ -1042,8 +1044,8 @@ export function AdminEvents() {
                       <div key={r.id} className="bg-neutral-950 border border-neutral-800 rounded-lg p-3">
                         <div className="flex justify-between items-start mb-2">
                           <div>
-                            <p className="text-xs font-bold text-white">{r.customerName}</p>
-                            <p className="text-[10px] text-neutral-500 font-mono">{r.id}</p>
+                            <p className="text-xs font-bold text-white">{eventReservationName(r) ?? r.customerName}</p>
+                            {!eventReservationName(r) && <p className="text-[10px] text-neutral-500 font-mono">{r.id}</p>}
                           </div>
                           <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border ${
                             r.status === 'pending-refund' ? 'bg-rose-900/30 text-rose-400 border-rose-800' : 
@@ -1370,7 +1372,7 @@ export function AdminEvents() {
                           {dayRes.map((r: any) => (
                             <div key={r.id} className="bg-neutral-950 border border-neutral-800 rounded-md p-2.5 flex flex-col gap-1.5">
                               <div className="flex justify-between items-start">
-                                <span className="text-xs font-semibold text-neutral-200 truncate">{r.customerName}</span>
+                                <span className="text-xs font-semibold text-neutral-200 truncate">{eventReservationName(r) ?? r.customerName}</span>
                                 <span className={`text-[8px] px-1.5 py-0.5 rounded border uppercase font-bold whitespace-nowrap ${
                                   r.status === 'confirmed' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 
                                   r.status === 'pending' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 
@@ -1551,7 +1553,7 @@ export function AdminEvents() {
                                     {tableReservations.map((r:any) => (
                                        <div key={r.id} className="text-[10px] text-neutral-300 flex justify-between bg-neutral-950 p-1.5 rounded border border-neutral-800 mb-1">
                                           <span>{format(new Date(r.date), 'MMM d')} - {fmt12(r.timeSlot)} ({r.durationHours}h)</span>
-                                          <span className="text-neutral-500">{r.customerName}</span>
+                                          <span className="text-neutral-500">{eventReservationName(r) ?? r.customerName}</span>
                                        </div>
                                     ))}
                                  </div>
@@ -1731,7 +1733,7 @@ export function AdminEvents() {
                             <div className="space-y-2 max-h-32 overflow-y-auto pr-1">
                                {conflicts.map((r: any) => (
                                  <div key={r.id} className="bg-rose-950/50 border border-rose-900/50 p-2.5 rounded-lg">
-                                   <p className="text-xs font-bold text-white mb-0.5">{r.customerName}</p>
+                                   <p className="text-xs font-bold text-white mb-0.5">{eventReservationName(r) ?? r.customerName}</p>
                                    <div className="flex flex-col text-[10px] text-rose-300/80 gap-0.5">
                                       <a href={`tel:${r.contactNumber}`} className="hover:text-white flex items-center gap-1"><span className="text-rose-500">📞</span> {r.contactNumber}</a>
                                       {r.email && <a href={`mailto:${r.email}`} className="hover:text-white flex items-center gap-1"><span className="text-rose-500">✉️</span> {r.email}</a>}

@@ -293,6 +293,7 @@ export type AppContextType = {
   isLoggingOut: boolean;
   logoutStep: string;
   lastSynced: Date | null;
+  refreshPromoUsage: () => Promise<void>;
   forceFullSync: () => Promise<void>;
   availableTables: Table[];
   heldTableIds: Set<string>;
@@ -330,6 +331,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [feedback, setFeedback] = useState<Feedback[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [promoCodes, setPromoCodes] = useState<PromoCode[]>([]);
+  const refreshPromoUsage = useCallback(async () => {
+    const [cloud, local] = await Promise.all([
+      publicSupabase.from('promo_codes').select('id,usage_count'),
+      fetch('/api/promo-codes').then(res => res.ok ? res.json() : []).catch(() => [])
+    ]);
+    const counts = new Map<string, number>();
+    if (Array.isArray(local)) for (const p of local) counts.set(p.id, Number(p.usageCount) || 0);
+    for (const p of cloud.data ?? []) counts.set(p.id, Math.max(counts.get(p.id) ?? 0, Number(p.usage_count) || 0));
+    setPromoCodes(prev => prev.map(p => counts.has(p.id) ? { ...p, usageCount: Math.max(p.usageCount, counts.get(p.id)!) } : p));
+  }, []);
   const [staffUsers, setStaffUsers] = useState<StaffUser[]>([]);
   const [rates, setRates] = useState<RatesConfig>({ hourlyRate: 0, overtimeRate: 0, downPaymentPercent: 0, weekdayStartTime: '', weekdayEndTime: '', isWeekdayHappyHourActive: false, weekdayHappyHourRate: 0, weekdayHappyHourStart: '', weekdayHappyHourEnd: '', weekdayOnlineCapacityLimit: 0, weekendStartTime: '', weekendEndTime: '', isWeekendHappyHourActive: false, weekendHappyHourRate: 0, weekendHappyHourStart: '', weekendHappyHourEnd: '', weekendOnlineCapacityLimit: 0, bookingCutoffMinutes: 60 });
   const [reservationTerms, setReservationTerms] = useState<ReservationTerms>({ minHours: 0, maxHours: 0, cancellationHours: 0, advanceBookingHours: 1, cancellationPolicy: '', termsAndConditions: '', weekdayMinPartySize: 0, weekdayMaxPartySize: 0, weekendMinPartySize: 0, weekendMaxPartySize: 0 });
@@ -582,17 +593,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
       }
       if (promoData) {
-        const countFromRes = (code: string) => {
-          if (!resData || !code) return 0;
-          return (resData as any[]).filter(r => {
-            const pCode = (r.promoCode || r.promocode || r.promo_code || '').trim().toUpperCase();
-            return pCode === code.trim().toUpperCase();
-          }).length;
-        };
-
         setPromoCodes((promoData as any[]).map(r => {
-          const resCount = countFromRes(r.code);
-          const effectiveUsage = Math.max(r.usage_count ?? r.usageCount ?? 0, resCount);
           return {
             id: r.id,
             code: r.code,
@@ -601,11 +602,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
             isActive: r.is_active === 1 || r.is_active === true || r.isActive === true || r.isActive === 1,
             isLimitedUses: r.is_limited_uses === 1 || r.is_limited_uses === true || r.isLimitedUses === true,
             maxUsage: r.max_usage ?? r.maxUsage ?? 0,
-            usageCount: effectiveUsage,
+            usageCount: Number(r.usage_count ?? r.usageCount) || 0,
             startDate: r.start_date || r.startDate || null,
             expiresAt: r.expires_at || r.expiresAt || null
           };
         }) as PromoCode[]);
+      } else {
+        const local = await fetch('/api/promo-codes').catch(() => null);
+        if (local?.ok) setPromoCodes(await local.json());
       }
       if (eventsData && (eventsData as any[]).length > 0) {
         setEvents((eventsData as any[]).map(e => {
@@ -1120,13 +1124,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     syncToDB('/api/lost-and-found', 'POST', newItem, `Added lost item`).then(runCloudBackup).catch(()=>{});
     addActivity('admin_action', `Added lost item: ${i.itemName}`);
   };
-  const updateLostItem = (id: string, u: Partial<LostItem>) => {
+  const updateLostItem = async (id: string, u: Partial<LostItem>) => {
+    await syncToDB(`/api/lost-and-found/${id}`, 'PUT', u, `Updated lost item`);
     setLostItems(prev => prev.map(i => i.id === id ? { ...i, ...u } : i));
-    syncToDB(`/api/lost-and-found/${id}`, 'PUT', u, `Updated lost item`).then(runCloudBackup).catch(()=>{});
+    runCloudBackup();
   };
-  const deleteLostItem = (id: string) => {
+  const deleteLostItem = async (id: string) => {
+    await syncToDB(`/api/lost-and-found/${id}`, 'DELETE', {}, `Archived lost item`);
     setLostItems(prev => prev.map(i => i.id === id ? { ...i, isArchived: true } : i));
-    syncToDB(`/api/lost-and-found/${id}`, 'DELETE', {}, `Archived lost item`).then(runCloudBackup).catch(()=>{});
+    runCloudBackup();
   };
 
   const addWatchlistItem = (i: Omit<WatchlistItem, 'id'>) => {
@@ -1135,13 +1141,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     syncToDB('/api/watchlist', 'POST', newItem, `Added to watchlist`).then(runCloudBackup).catch(()=>{});
     addActivity('admin_action', `Added ${i.name} to Watchlist`);
   };
-  const updateWatchlistItem = (id: string, u: Partial<WatchlistItem>) => {
+  const updateWatchlistItem = async (id: string, u: Partial<WatchlistItem>) => {
+    await syncToDB(`/api/watchlist/${id}`, 'PUT', u, `Updated watchlist item`);
     setWatchlist(prev => prev.map(i => i.id === id ? { ...i, ...u } : i));
-    syncToDB(`/api/watchlist/${id}`, 'PUT', u, `Updated watchlist item`).then(runCloudBackup).catch(()=>{});
+    runCloudBackup();
   };
-  const deleteWatchlistItem = (id: string) => {
+  const deleteWatchlistItem = async (id: string) => {
+    await syncToDB(`/api/watchlist/${id}`, 'DELETE', {}, `Archived watchlist item`);
     setWatchlist(prev => prev.map(i => i.id === id ? { ...i, isArchived: true } : i));
-    syncToDB(`/api/watchlist/${id}`, 'DELETE', {}, `Archived watchlist item`).then(runCloudBackup).catch(()=>{});
+    runCloudBackup();
   };
 
   const addSessionHistory = (i: Omit<SessionHistoryItem, 'id'>) => {
@@ -1714,7 +1722,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       theme, primaryColor, updateTheme, updatePrimaryColor,
       updateRefundStatus, acknowledgeRefund,
       isLoggingOut, logoutStep,
-      lastSynced, forceFullSync,
+      lastSynced, forceFullSync, refreshPromoUsage,
       availableTables, heldTableIds, reservationMoveError, pendingReservationMoves, recoverReservationTransfer, refreshReservationTransfers
     }}>
       {/* 🟢 Global Fullscreen Logout Overlay with Thread Loader */}
