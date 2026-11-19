@@ -449,12 +449,9 @@ export function HomePage() {
 
   const completedBookings = userReservations.filter((r: any) => r.status === 'completed').length;
   const missedBookings = userReservations.filter((r: any) => r.status === 'walkout' || r.status === 'cancelled').length;
-  const netTrustScore = completedBookings - missedBookings;
-  const isTrustedCustomer = netTrustScore >= 3;
   const totalHoursPlayed = userReservations
     .filter((r: any) => r.status === 'completed')
     .reduce((sum: number, r: any) => sum + (r.durationHours || 0), 0);
-  const isDownPaymentWaived = isTrustedCustomer && resForm.duration <= 3;
 
   const effectiveHourly = (rates && Number(rates.hourlyRate) > 0) ? Number(rates.hourlyRate) : HOURLY_RATE;
   const baseAmount = Number(resForm.duration) * effectiveHourly;
@@ -868,7 +865,7 @@ export function HomePage() {
       return;
     }
 
-    if (!isDownPaymentWaived && resForm.paymentMethod === 'gcash') {
+    if (resForm.paymentMethod === 'gcash') {
       const hasRef = resForm.paymentRef.trim().length > 0;
       const hasImg = receiptFile !== null;
       if (!hasRef && !hasImg) {
@@ -917,12 +914,12 @@ export function HomePage() {
         durationHours: resForm.duration,
         partySize: resForm.pax,
         tableId: selectedTableId,
-        status: isDownPaymentWaived ? 'confirmed' : 'pending',
+        status: 'pending',
         totalAmount,
-        downPaymentAmount: isDownPaymentWaived ? 0 : downPayment,
-        downPaymentPaid: isDownPaymentWaived ? true : !!finalReceiptUrl || !!resForm.paymentRef.trim(),
+        downPaymentAmount: downPayment,
+        downPaymentPaid: !!finalReceiptUrl || !!resForm.paymentRef.trim(),
         balancePaid: false,
-        paymentRef: isDownPaymentWaived ? 'TRUSTED_WAIVER' : (resForm.paymentMethod === 'cash' ? 'CASH' : resForm.paymentRef),
+        paymentRef: (resForm.paymentMethod === 'cash' ? 'CASH' : resForm.paymentRef),
         promoCode: appliedPromo?.code,
         discountAmount: discountAmount > 0 ? discountAmount : undefined,
         receiptImg: finalReceiptUrl || undefined,
@@ -1408,10 +1405,10 @@ export function HomePage() {
                         <div className="flex-1">
                           <h4 className="text-sm font-black text-emerald-400 mb-1">Smart Queue Neural Network</h4>
                           <p className="text-xs text-emerald-100/70 leading-relaxed mb-3 pr-2">
-                            Our system tracks live table occupancy and analyzes historical data to give you real-time estimates before you walk in.
+                            The estimate uses the table and queue information loaded with this page, along with completed bookings. Reload the page for an updated estimate.
                           </p>
                           <div className="bg-emerald-950/80 border border-emerald-800/60 rounded-xl p-3 shadow-lg">
-                            <span className="text-[9px] text-neutral-400 uppercase tracking-wider font-bold block mb-1">Live Wait Estimate</span>
+                            <span className="text-[9px] text-neutral-400 uppercase tracking-wider font-bold block mb-1">Estimated Wait</span>
                             <span className="text-sm font-black text-emerald-400 tracking-wide flex items-center gap-1.5"><Clock size={12}/> {dynamicWaitTime}</span>
                           </div>
                         </div>
@@ -2034,13 +2031,13 @@ export function HomePage() {
                               <div className="flex justify-between items-center">
                                 <p className="text-xs text-amber-500 uppercase tracking-wider font-bold">Down Payment Info</p>
                                 <div className="flex bg-neutral-950 border border-neutral-800 rounded-lg p-1">
-                                  <span className={`px-3 py-1 text-xs font-semibold rounded-md ${isDownPaymentWaived ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-sky-500/20 text-sky-400 border border-sky-500/30'}`}>
-                                    {isDownPaymentWaived ? 'Waived (Trusted)' : 'GCash'}
+                                  <span className="px-3 py-1 text-xs font-semibold rounded-md bg-sky-500/20 text-sky-400 border border-sky-500/30">
+                                    GCash
                                   </span>
                                 </div>
                               </div>
 
-                              {!isDownPaymentWaived && resForm.paymentMethod === 'gcash' && (
+                              {resForm.paymentMethod === 'gcash' && (
                                 <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-3 flex flex-col items-center gap-2">
                                   <p className="text-xs text-neutral-400 font-medium text-center">
                                     Scan to pay down payment of <span className="text-amber-400 font-bold">₱{downPayment}.00</span> via GCash
@@ -2058,7 +2055,6 @@ export function HomePage() {
                                 </div>
                               )}
 
-                              {!isDownPaymentWaived ? (
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                   <div>
                                     <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Ref No.</label>
@@ -2088,12 +2084,7 @@ export function HomePage() {
                                     )}
                                   </div>
                                 </div>
-                              ) : (
-                                <div className="bg-emerald-950/20 border border-emerald-900/30 rounded-xl p-3 flex items-center gap-3">
-                                  <CheckCircle size={16} className="text-emerald-400 flex-shrink-0" />
-                                  <p className="text-xs text-emerald-400 font-bold">Down payment is waived for Trusted Customers. Your booking will be instantly confirmed.</p>
-                                </div>
-                              )}
+
                             </div>
 
                             <div className="mt-auto pt-4 space-y-4">
@@ -2109,8 +2100,8 @@ export function HomePage() {
                                   <div className="flex justify-between font-semibold"><span className="text-neutral-300">Discounted Total</span><span className="text-white">₱{totalAmount}.00</span></div>
                                 )}
                                 <div className="flex justify-between font-bold text-amber-400">
-                                  <span>{isDownPaymentWaived ? 'Down Payment (Waived for Trusted User)' : `Down Payment (${rates?.downPaymentPercent || 25}%)`}</span>
-                                  <span>₱{isDownPaymentWaived ? 0 : downPayment}.00</span>
+                                  <span>{`Down Payment (${rates?.downPaymentPercent || 25}%)`}</span>
+                                  <span>₱{downPayment}.00</span>
                                 </div>
                               </div>
 
@@ -2746,7 +2737,7 @@ export function HomePage() {
               </div>
               <h3 className="text-lg font-black text-white">Log Out Confirmation</h3>
               <p className="text-xs text-neutral-400 leading-relaxed">
-                Are you sure you want to end your current session? You will need to sign in again to track your loyalty status and bookings.
+                Are you sure you want to end your current session? You will need to sign in again to track your bookings.
               </p>
               <div className="flex gap-2 pt-2">
                 <button onClick={() => setShowLogoutConfirm(false)} className="flex-1 py-3 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 font-bold rounded-xl text-xs transition-colors border border-neutral-800">Cancel</button>
@@ -2865,11 +2856,6 @@ export function HomePage() {
                       <div className="w-16 h-16 rounded-full bg-gradient-to-br from-emerald-500 to-emerald-700 flex items-center justify-center text-2xl font-black text-white shadow-[0_0_20px_rgba(16,185,129,0.3)] ring-4 ring-neutral-950">
                         {currentUser.name[0]}
                       </div>
-                      {isTrustedCustomer && (
-                        <div className="absolute -bottom-1 -right-1 bg-neutral-950 rounded-full p-1 border border-emerald-900/50">
-                          <Shield size={12} className="text-emerald-400 fill-emerald-400/20" />
-                        </div>
-                      )}
                     </div>
                     <div className="min-w-0">
                       <h3 className="text-xl font-black text-white leading-tight truncate">{currentUser.name}</h3>
@@ -2880,46 +2866,6 @@ export function HomePage() {
                 </div>
 
                 <div className="space-y-4">
-                  {isTrustedCustomer ? (
-                    <div className="bg-emerald-950/30 border border-emerald-500/50 rounded-2xl p-5 flex items-start gap-4 shadow-lg shadow-emerald-900/10 relative overflow-hidden">
-                      <div className="absolute -right-4 -top-4 w-20 h-20 bg-emerald-500/10 rounded-full blur-2xl" />
-                      <div className="w-10 h-10 rounded-full bg-emerald-500/20 flex items-center justify-center shrink-0 border border-emerald-500/30">
-                        <Shield size={20} className="text-emerald-400" />
-                      </div>
-                      <div className="relative z-10">
-                        <h4 className="text-sm font-black text-emerald-400 mb-1">Trusted Customer</h4>
-                        <p className="text-[10px] text-emerald-200/70 leading-relaxed">
-                          Zero-downpayment bookings unlocked! Your stellar track record (Score: {netTrustScore}) keeps this perk active.
-                        </p>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="bg-neutral-900/80 border border-neutral-800 rounded-2xl p-5 relative overflow-hidden">
-                      <div className="flex items-start gap-3 relative z-10">
-                        <div className="w-8 h-8 rounded-full bg-neutral-800 border border-neutral-700 flex items-center justify-center shrink-0">
-                          <Lock size={14} className="text-neutral-400" />
-                        </div>
-                        <div className="flex-1">
-                          <h4 className="text-sm font-bold text-neutral-200 flex items-center justify-between">
-                            Standard Tier
-                            <span className="text-[10px] text-emerald-500 font-black">{Math.max(0, netTrustScore)} / 3</span>
-                          </h4>
-                          <p className="text-[10px] text-neutral-500 leading-relaxed mt-1">
-                            Complete {Math.max(0, 3 - netTrustScore)} more bookings without missing to unlock zero-downpayment Trusted Status.
-                          </p>
-                          <div className="w-full bg-neutral-950 rounded-full h-1.5 mt-3 overflow-hidden border border-neutral-800/50">
-                            <motion.div 
-                              initial={{ width: 0 }}
-                              animate={{ width: `${(Math.max(0, netTrustScore) / 3) * 100}%` }}
-                              transition={{ duration: 1, ease: "easeOut" }}
-                              className="bg-gradient-to-r from-emerald-600 to-emerald-400 h-full rounded-full" 
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
                   <div className="grid grid-cols-3 gap-3">
                     <div className="bg-neutral-900/50 border border-neutral-800/80 p-3 rounded-2xl flex flex-col items-center justify-center relative overflow-hidden group hover:bg-neutral-900 transition-colors">
                       <div className="absolute top-0 right-0 w-16 h-16 bg-emerald-500/5 rounded-full blur-xl transition-all group-hover:bg-emerald-500/10" />

@@ -587,16 +587,15 @@ app.post('/api/sync-to-cloud', async (req, res) => {
             const payload = rows.map(mapFn);
             console.log(`☁️ Syncing ${localTable}: ${payload.length} row(s)`);
 
-const { data, error } = await supabase
+const { error } = await supabase
   .from(cloudTable)
-  .upsert(payload, { onConflict: conflictKey })
-  .select();
+  .upsert(payload, { onConflict: conflictKey });
 
 if (error) {
   console.error(`❌ ${cloudTable} sync failed:`, error.message);
   syncErrors.push(`${cloudTable}: ${error.message}`);
 } else {
-  console.log(`✅ ${cloudTable} synced: ${data?.length || 0} row(s)`);
+  console.log(`✅ ${cloudTable} synced: ${payload.length} row(s)`);
 }
           } catch (e) {
             syncErrors.push(`${cloudTable}: ${e.message}`);

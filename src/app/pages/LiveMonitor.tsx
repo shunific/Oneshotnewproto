@@ -211,23 +211,23 @@ function QueueRow({ item, position, estWait }: { item: QueueItem; position: numb
 // ── Main Component ─────────────────────────────────────────────
 export function LiveMonitor() {
   const { tables, queue, reservations, refreshLiveMonitor, rates } = useAppContext();
-  const [tick, setTick] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
   const [now, setNow] = useState(new Date());
 
   // 🟢 FIXED: Use effective hourly rate to ensure it doesn't show ₱0
   const effectiveHourly = (rates && Number(rates.hourlyRate) > 0) ? Number(rates.hourlyRate) : 0;
 
-  // Refresh timers and check for database updates
   useEffect(() => {
-    const id = setInterval(() => {
-      setTick(t => {
-        if (t % 3 === 0) refreshLiveMonitor();
-        return t + 1;
-      });
-      setNow(new Date());
-    }, 1000);
-    return () => clearInterval(id);
-  }, [refreshLiveMonitor]);
+    const clock = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(clock);
+  }, []);
+
+  const refreshFloor = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try { await refreshLiveMonitor(); }
+    finally { setRefreshing(false); }
+  };
 
   // 🟢 FIXED: Accurate AI Wait Time that handles Open Time correctly without returning 0 mins!
   const completedHistory = completedReservationStats(reservations);
@@ -274,10 +274,13 @@ export function LiveMonitor() {
           </div>
           <div>
             <p className="text-white font-black text-base tracking-tight leading-tight">ONE SHOT BAR & BILLIARDS</p>
-            <p className="text-[11px] text-neutral-500 uppercase tracking-widest">Live Table Status & Walk-in Queue</p>
+            <p className="text-[11px] text-neutral-500 uppercase tracking-widest">Table Status &amp; Walk-in Queue</p>
           </div>
         </div>
 
+        <button type="button" disabled={refreshing} onClick={refreshFloor} className="rounded-lg border border-neutral-700 px-3 py-2 text-xs font-bold text-neutral-200 hover:border-emerald-500 disabled:opacity-50">
+          {refreshing ? 'Refreshing…' : 'Refresh tables'}
+        </button>
         {/* Live clock */}
         <div className="text-right">
           <p className="text-2xl font-black text-white tabular-nums tracking-tight">{timeStr}</p>

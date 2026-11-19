@@ -418,8 +418,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     };
     checkHeartbeat();
-    const interval = setInterval(checkHeartbeat, 60000); 
-    return () => clearInterval(interval);
   }, []);
 
   const refreshLiveMonitor = useCallback(async () => {
@@ -749,22 +747,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     forceFullSync();
-  }, []);
-
-  // Re-pull cloud data when the visitor comes back to the tab so admin changes
-  // to rates, policies, reservations and events show up without a hard reload.
-  useEffect(() => {
-    const refreshIfVisible = () => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-        forceFullSync();
-      }
-    };
-    document.addEventListener('visibilitychange', refreshIfVisible);
-    window.addEventListener('focus', refreshIfVisible);
-    return () => {
-      document.removeEventListener('visibilitychange', refreshIfVisible);
-      window.removeEventListener('focus', refreshIfVisible);
-    };
   }, []);
 
   useEffect(() => {
