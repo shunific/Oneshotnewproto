@@ -1,3 +1,4 @@
+import { clockLabel } from '../utils/clockDisplay';
 import { exportCsv } from '../utils/csvExport.js';
 import { recordedLegacyBill, sessionFinancials, summarizeSessionFinancials } from '../utils/sessionFinancials.js';
 import { useState, useMemo } from 'react';
@@ -262,8 +263,8 @@ export function Analytics() {
         h.id,
         h.customerName,
         tableName,
-        format(new Date(h.startTime), 'M/d/yy HH:mm'),
-        h.endTime ? format(new Date(h.endTime), 'M/d/yy HH:mm') : '',
+        format(new Date(h.startTime), 'M/d/yy h:mm a'),
+        h.endTime ? format(new Date(h.endTime), 'M/d/yy h:mm a') : '',
         h.durationMinutes || 0,
         sessionFinancials(h) ? (sessionFinancials(h)!.billedCents / 100).toFixed(2) : '',
         sessionFinancials(h) ? (sessionFinancials(h)!.appliedCents / 100).toFixed(2) : ''
@@ -289,7 +290,7 @@ export function Analytics() {
       return [
         r.customerName,
         r.isReservation ? 'Reservation' : 'Walk-in',
-        r.timeSlot,
+        clockLabel(r.timeSlot),
         r.duration,
         r.partySize,
         tableName,
@@ -447,7 +448,7 @@ export function Analytics() {
                             </p>
                             <p className="text-xs text-neutral-500">{r.contactNumber}</p>
                           </td>
-                          <td className="px-4 py-3 text-sm text-neutral-400">{r.timeSlot}</td>
+                          <td className="px-4 py-3 text-sm text-neutral-400">{clockLabel(r.timeSlot)}</td>
                           <td className="px-4 py-3 text-sm text-neutral-400">{r.duration}</td>
                           <td className="px-4 py-3 text-sm text-neutral-400">{r.partySize}</td>
                           <td className="px-4 py-3 text-sm text-neutral-400">{tableName}</td>

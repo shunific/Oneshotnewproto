@@ -476,7 +476,7 @@ export function AdminLayout() {
                             <div key={activity.id} className={`px-4 py-3 border-b border-neutral-800/50 transition-colors relative ${isUnread ? 'bg-emerald-950/10 hover:bg-emerald-900/20' : 'hover:bg-neutral-900/40'}`}>
                               {isUnread && <span className="absolute left-2.5 top-4 w-1.5 h-1.5 bg-emerald-500 rounded-full shadow-[0_0_8px_rgba(16,185,129,0.6)]" />}
                               <p className={`text-xs pl-3 ${isUnread ? 'text-neutral-200 font-medium' : 'text-neutral-400'}`}>{activity.description}</p>
-                              <p className="text-[10px] text-neutral-600 mt-1.5 pl-3">{new Date(activity.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                              <p className="text-[10px] text-neutral-600 mt-1.5 pl-3">{new Date(activity.timestamp).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}</p>
                             </div>
                           );
                         })

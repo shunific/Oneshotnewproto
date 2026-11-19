@@ -1,3 +1,4 @@
+import { clockLabel } from '../utils/clockDisplay';
 import { NativeReservationAccess } from './NativeReservationAccess';
 import { useEffect, useRef, useState } from "react";
 import { localFetch } from "../utils/localApi";
@@ -346,7 +347,7 @@ export function CloudStaffAccess({ localStaffId }: { localStaffId: string }) {
                 className="rounded-xl border border-neutral-800 p-4 text-sm"
               >
                 <p className="font-semibold">
-                  {r.customerName} · {r.date} {r.timeSlot}
+                  {r.customerName} · {r.date} {clockLabel(r.timeSlot)}
                 </p>
                 <CloudBookingAmounts reservation={r} />
                 <div className="mt-2 flex gap-3">

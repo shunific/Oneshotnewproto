@@ -1,3 +1,4 @@
+import { TimeField } from '../components/ui/TimeField';
 // Full promo code management (Admin only — create, edit, toggle, delete)
 import { useState } from 'react';
 import { useAppContext, generateRandomPromoCode, PromoCode } from '../context/AppContext';
@@ -214,7 +215,7 @@ export function AdminPromoCodes() {
                 <span className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Set Expiry Date</span>
               </label>
               {form.hasExpiry && (
-                <input type="datetime-local" value={form.expiresAt} onChange={e => setForm(f=>({...f, expiresAt: e.target.value}))}
+                <TimeField label="Expiry date and time" dateTime value={form.expiresAt} onChange={newValue => setForm(f=>({...f, expiresAt: newValue}))}
                   className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-violet-500/40" />
               )}
               <label className="flex items-center gap-2 cursor-pointer">

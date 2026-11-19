@@ -1,3 +1,5 @@
+import { clockLabel } from '../utils/clockDisplay';
+import { TimeField } from '../components/ui/TimeField';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
@@ -679,7 +681,7 @@ export function HomePage() {
       if (cutoffMins <= startMins) return 'No online bookings';
       return `${fmt12(start)} to ${fmt12(cutoffMins)}`;
     } catch (e) {
-      return `${rates?.reservationStartTime || '12:00'} to ${rates?.reservationEndTime || '02:00'}`;
+      return `${clockLabel(rates?.reservationStartTime || '12:00')} to ${clockLabel(rates?.reservationEndTime || '02:00')}`;
     }
   })();
 
@@ -1824,16 +1826,15 @@ export function HomePage() {
                                   <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end">
                                     <span>Start Time *</span>
                                     {selectedDate && isToday(selectedDate) && minAllowedTime && (
-                                      <span className="text-[9px] text-amber-500 font-semibold">Min: {minAllowedTime}</span>
+                                      <span className="text-[9px] text-amber-500 font-semibold">Min: {clockLabel(minAllowedTime)}</span>
                                     )}
                                   </label>
-                                  <input 
-                                    type="time" 
+                                  <TimeField label="Start time"
                                     min={selectedDate && isToday(selectedDate) ? minAllowedTime : undefined}
                                     style={{ colorScheme: isLightMode ? 'light' : 'dark' }} 
                                     value={resForm.timeSlot} 
-                                    onChange={e => {
-                                      const val = e.target.value;
+                                    onChange={newValue => {
+                                      const val = newValue;
                                       if (!val) {
                                         setResForm(f => ({ ...f, timeSlot: '' }));
                                         return;
@@ -2193,7 +2194,7 @@ export function HomePage() {
                                     <span className="text-xs font-black text-neutral-900 dark:text-white font-mono bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 rounded border border-neutral-300 dark:border-neutral-700">{r.id}</span>
                                     <ReservationStatusBadge status={r.status} />
                                   </div>
-                                  <p className="text-sm font-semibold text-neutral-800 dark:text-neutral-200">{format(new Date(r.date), 'MMM d, yyyy')} · {r.timeSlot} ({r.durationHours}h)</p>
+                                  <p className="text-sm font-semibold text-neutral-800 dark:text-neutral-200">{format(new Date(r.date), 'MMM d, yyyy')} · {clockLabel(r.timeSlot)} ({r.durationHours}h)</p>
                                   <p className="text-xs text-neutral-500">
                                     {tables.find((t: any) => t.id === r.tableId)?.name || 'Billiard Table'}
                                   </p>
@@ -2611,7 +2612,7 @@ export function HomePage() {
                   </div>
                   <div className="flex justify-between"><span>Customer:</span><span>{viewingReceipt.customerName}</span></div>
                   <div className="flex justify-between"><span>Date:</span><span>{format(new Date(viewingReceipt.date), 'MM/dd/yyyy')}</span></div>
-                  <div className="flex justify-between"><span>Time Slot:</span><span>{viewingReceipt.timeSlot} ({viewingReceipt.durationHours}h)</span></div>
+                  <div className="flex justify-between"><span>Time Slot:</span><span>{clockLabel(viewingReceipt.timeSlot)} ({viewingReceipt.durationHours}h)</span></div>
                 </div>
 
                 <div className="space-y-1 text-xs font-semibold">
@@ -2786,17 +2787,16 @@ export function HomePage() {
                   <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end">
                     <span>New Time Slot (Duration: {rescheduleData.reservation.durationHours}h) *</span>
                     {rescheduleData.newDate && isToday(rescheduleData.newDate) && (
-                      <span className="text-[9px] text-amber-500 font-semibold">Min: {format(new Date(), 'HH:mm')}</span>
+                      <span className="text-[9px] text-amber-500 font-semibold">Min: {format(new Date(), 'h:mm a')}</span>
                     )}
                   </label>
-                  <input 
-                    type="time" 
+                  <TimeField label="New time"
                     style={{ colorScheme: isLightMode ? 'light' : 'dark' }} 
                     required 
                     min={rescheduleData.newDate && isToday(rescheduleData.newDate) ? format(new Date(), 'HH:mm') : undefined}
                     value={rescheduleData.timeSlot} 
-                    onChange={e => {
-                      const val = e.target.value;
+                    onChange={newValue => {
+                      const val = newValue;
                       const nowStr = format(new Date(), 'HH:mm');
                       if (rescheduleData.newDate && isToday(rescheduleData.newDate) && val && val < nowStr) {
                         setToastMsg({ title: "Time Has Passed", desc: "Cannot reschedule to a past time for today.", type: 'error' });

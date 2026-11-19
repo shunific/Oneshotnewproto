@@ -1,3 +1,4 @@
+import { clockLabel } from '../utils/clockDisplay';
 import { localFetch } from '../utils/localApi';
 import { useLocation } from 'react-router';
 import { isOvertimeTable } from '../utils/tableAvailability.js';
@@ -480,7 +481,7 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
         conflictWarning = `Table locked. Upcoming reservation for ${nextRes.customerName} arrives in ${minsUntilRes} min(s).`;
       } else {
         maxMins = Math.min(maxMins, minsUntilRes);
-        conflictWarning = `Upcoming reservation at ${nextRes.timeSlot}. Max pro-rated play time is ${maxMins} mins.`;
+        conflictWarning = `Upcoming reservation at ${clockLabel(nextRes.timeSlot)}. Max pro-rated play time is ${maxMins} mins.`;
       }
     }
 
@@ -565,7 +566,7 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
       if (minsUntilRes > 0) {
         maxMins = Math.min(maxMins, minsUntilRes);
         blocksOpenTime = true;
-        conflictWarning = `Upcoming reservation for ${nextRes.customerName} at ${nextRes.timeSlot}.`;
+        conflictWarning = `Upcoming reservation for ${nextRes.customerName} at ${clockLabel(nextRes.timeSlot)}.`;
       } else {
         maxMins = 0;
         blocksOpenTime = true;
@@ -1387,7 +1388,7 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
                             </div>
                             <div className="flex-1 min-w-0">
                               <p className="text-sm font-semibold text-neutral-200 truncate">{c.name}</p>
-                              <p className="text-[11px] text-neutral-500">{c.timeSlot} · {c.durationHours}h · {c.partySize} {c.partySize === 1 ? 'person' : 'people'}</p>
+                              <p className="text-[11px] text-neutral-500">{clockLabel(c.timeSlot)} · {c.durationHours}h · {c.partySize} {c.partySize === 1 ? 'person' : 'people'}</p>
                             </div>
                             {selectedCustomer?.id === c.id && selectedCustomer.kind === 'reservation'
                               ? <CheckCircle size={15} className="text-emerald-400 flex-shrink-0" />
@@ -1453,7 +1454,7 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
                       {selectedCustomer && (
                         <p className="text-[11px] text-emerald-500 flex items-center gap-1">
                           <CheckCircle size={10} />
-                          {selectedCustomer.kind === 'queue' ? 'Assigned from walk-in queue' : `Assigned from today's reservation · ${(selectedCustomer as any).timeSlot}`}
+                          {selectedCustomer.kind === 'queue' ? 'Assigned from walk-in queue' : `Assigned from today's reservation · ${clockLabel((selectedCustomer as any).timeSlot)}`}
                         </p>
                       )}
                     </div>

@@ -1,3 +1,4 @@
+import { TimeField } from '../components/ui/TimeField';
 import { localFetch } from '../utils/localApi';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router';
@@ -159,13 +160,8 @@ export default function AdminPolicyRatesEditor() {
       if (cutoff <= s) return 'No online bookings';
       return `${fmt12(start || '12:00')} to ${fmt12(cutoff)}`;
     } catch (e) {
-      return `${start || '12:00'} to ${end || '02:00'}`;
+      return `${fmt12(start || '12:00')} to ${fmt12(end || '02:00')}`;
     }
-  };
-
-  const handleRatesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value, type } = e.target;
-    setRatesForm(prev => ({ ...prev, [name]: type === 'range' ? Number(value) : value }));
   };
 
   const handleRateInput = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -495,8 +491,8 @@ export default function AdminPolicyRatesEditor() {
                     <input type="text" inputMode="numeric" name="weekdayHappyHourRate" value={ratesForm.weekdayHappyHourRate} onChange={handleRateInput} className="w-full bg-neutral-900 border border-neutral-800 rounded p-2 text-neutral-100 focus:border-emerald-500 outline-none font-mono" />
                   </div>
                   <div className="flex flex-col gap-3">
-                    <div className="flex-1"><label className="block text-[10px] text-neutral-400 mb-1 uppercase">Start</label><input type="time" style={{ colorScheme: theme === 'light' ? 'light' : 'dark' }} name="weekdayHappyHourStart" value={ratesForm.weekdayHappyHourStart} onChange={handleRatesChange} className="w-full bg-neutral-900 border border-neutral-800 rounded p-2 text-neutral-100 outline-none" /></div>
-                    <div className="flex-1"><label className="block text-[10px] text-neutral-400 mb-1 uppercase">End</label><input type="time" style={{ colorScheme: theme === 'light' ? 'light' : 'dark' }} name="weekdayHappyHourEnd" value={ratesForm.weekdayHappyHourEnd} onChange={handleRatesChange} className="w-full bg-neutral-900 border border-neutral-800 rounded p-2 text-neutral-100 outline-none" /></div>
+                    <div className="flex-1"><label className="block text-[10px] text-neutral-400 mb-1 uppercase">Start</label><TimeField label="Weekday happy hour start" style={{ colorScheme: theme === 'light' ? 'light' : 'dark' }} value={ratesForm.weekdayHappyHourStart} onChange={newValue => setRatesForm(prev => ({ ...prev, weekdayHappyHourStart: newValue }))} className="w-full bg-neutral-900 border border-neutral-800 rounded p-2 text-neutral-100 outline-none" /></div>
+                    <div className="flex-1"><label className="block text-[10px] text-neutral-400 mb-1 uppercase">End</label><TimeField label="Weekday happy hour end" style={{ colorScheme: theme === 'light' ? 'light' : 'dark' }} value={ratesForm.weekdayHappyHourEnd} onChange={newValue => setRatesForm(prev => ({ ...prev, weekdayHappyHourEnd: newValue }))} className="w-full bg-neutral-900 border border-neutral-800 rounded p-2 text-neutral-100 outline-none" /></div>
                   </div>
                 </div>
               </div>
@@ -517,8 +513,8 @@ export default function AdminPolicyRatesEditor() {
                     <input type="text" inputMode="numeric" name="weekendHappyHourRate" value={ratesForm.weekendHappyHourRate} onChange={handleRateInput} className="w-full bg-neutral-900 border border-neutral-800 rounded p-2 text-neutral-100 focus:border-emerald-500 outline-none font-mono" />
                   </div>
                   <div className="flex flex-col gap-3">
-                    <div className="flex-1"><label className="block text-[10px] text-neutral-400 mb-1 uppercase">Start</label><input type="time" style={{ colorScheme: theme === 'light' ? 'light' : 'dark' }} name="weekendHappyHourStart" value={ratesForm.weekendHappyHourStart} onChange={handleRatesChange} className="w-full bg-neutral-900 border border-neutral-800 rounded p-2 text-neutral-100 outline-none" /></div>
-                    <div className="flex-1"><label className="block text-[10px] text-neutral-400 mb-1 uppercase">End</label><input type="time" style={{ colorScheme: theme === 'light' ? 'light' : 'dark' }} name="weekendHappyHourEnd" value={ratesForm.weekendHappyHourEnd} onChange={handleRatesChange} className="w-full bg-neutral-900 border border-neutral-800 rounded p-2 text-neutral-100 outline-none" /></div>
+                    <div className="flex-1"><label className="block text-[10px] text-neutral-400 mb-1 uppercase">Start</label><TimeField label="Weekend happy hour start" style={{ colorScheme: theme === 'light' ? 'light' : 'dark' }} value={ratesForm.weekendHappyHourStart} onChange={newValue => setRatesForm(prev => ({ ...prev, weekendHappyHourStart: newValue }))} className="w-full bg-neutral-900 border border-neutral-800 rounded p-2 text-neutral-100 outline-none" /></div>
+                    <div className="flex-1"><label className="block text-[10px] text-neutral-400 mb-1 uppercase">End</label><TimeField label="Weekend happy hour end" style={{ colorScheme: theme === 'light' ? 'light' : 'dark' }} value={ratesForm.weekendHappyHourEnd} onChange={newValue => setRatesForm(prev => ({ ...prev, weekendHappyHourEnd: newValue }))} className="w-full bg-neutral-900 border border-neutral-800 rounded p-2 text-neutral-100 outline-none" /></div>
                   </div>
                 </div>
               </div>

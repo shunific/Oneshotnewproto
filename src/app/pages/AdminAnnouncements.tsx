@@ -1,3 +1,4 @@
+import { TimeField } from '../components/ui/TimeField';
 import { PendingContentCreate } from '../components/PendingContentCreate';
 import { useState, useRef, useEffect } from 'react';
 import { useAppContext, Announcement, AnnouncementType } from '../context/AppContext';
@@ -427,11 +428,10 @@ export function AdminAnnouncements() {
                     <label className="text-[10px] text-neutral-400 uppercase tracking-wider font-semibold block mb-1.5 flex items-center gap-1.5">
                       <Calendar size={10} /> Schedule Start Time *
                     </label>
-                    <input
-                      type="datetime-local"
+                    <TimeField label="Start date and time" dateTime
                       min={getMinDateTime()}
                       value={form.startDate}
-                      onChange={e => setForm(f=>({...f, startDate: e.target.value}))}
+                      onChange={newValue => setForm(f=>({...f, startDate: newValue}))}
                       className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-amber-500 transition-colors"
                     />
                   </div>
@@ -448,11 +448,10 @@ export function AdminAnnouncements() {
                 </label>
                 {form.hasExpiry && (
                   <div className="pl-11 animate-in fade-in slide-in-from-top-1">
-                    <input
-                      type="datetime-local"
+                    <TimeField label="Expiry date and time" dateTime
                       min={!form.isActive && form.startDate ? form.startDate : getMinDateTime()}
                       value={form.expiresAt}
-                      onChange={e => setForm(f=>({...f, expiresAt: e.target.value}))}
+                      onChange={newValue => setForm(f=>({...f, expiresAt: newValue}))}
                       className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-amber-500 transition-colors"
                     />
                   </div>

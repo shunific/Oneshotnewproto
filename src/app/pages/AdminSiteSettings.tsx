@@ -1,3 +1,4 @@
+import { TimeField } from '../components/ui/TimeField';
 import React, { useState, useEffect, useRef } from "react";
 import { useAppContext } from "../context/AppContext";
 import { 
@@ -517,20 +518,18 @@ export function AdminSiteSettings() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-[11px] text-neutral-400 mb-1 font-medium">Store Opens</label>
-                <input 
-                  type="time" 
+                <TimeField label="Weekday opening time"
                   value={hoursForm.weekdayStartTime} 
-                  onChange={e => setHoursForm(h => ({ ...h, weekdayStartTime: e.target.value }))}
+                  onChange={newValue => setHoursForm(h => ({ ...h, weekdayStartTime: newValue }))}
                   style={{ colorScheme: theme === "light" ? "light" : "dark" }}
                   className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-xs text-neutral-100 outline-none focus:border-emerald-500"
                 />
               </div>
               <div>
                 <label className="block text-[11px] text-neutral-400 mb-1 font-medium">Store Closes</label>
-                <input 
-                  type="time" 
+                <TimeField label="Weekday closing time"
                   value={hoursForm.weekdayEndTime} 
-                  onChange={e => setHoursForm(h => ({ ...h, weekdayEndTime: e.target.value }))}
+                  onChange={newValue => setHoursForm(h => ({ ...h, weekdayEndTime: newValue }))}
                   style={{ colorScheme: theme === "light" ? "light" : "dark" }}
                   className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-xs text-neutral-100 outline-none focus:border-emerald-500"
                 />
@@ -546,20 +545,18 @@ export function AdminSiteSettings() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-[11px] text-neutral-400 mb-1 font-medium">Store Opens</label>
-                <input 
-                  type="time" 
+                <TimeField label="Weekend opening time"
                   value={hoursForm.weekendStartTime} 
-                  onChange={e => setHoursForm(h => ({ ...h, weekendStartTime: e.target.value }))}
+                  onChange={newValue => setHoursForm(h => ({ ...h, weekendStartTime: newValue }))}
                   style={{ colorScheme: theme === "light" ? "light" : "dark" }}
                   className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-xs text-neutral-100 outline-none focus:border-purple-500"
                 />
               </div>
               <div>
                 <label className="block text-[11px] text-neutral-400 mb-1 font-medium">Store Closes</label>
-                <input 
-                  type="time" 
+                <TimeField label="Weekend closing time"
                   value={hoursForm.weekendEndTime} 
-                  onChange={e => setHoursForm(h => ({ ...h, weekendEndTime: e.target.value }))}
+                  onChange={newValue => setHoursForm(h => ({ ...h, weekendEndTime: newValue }))}
                   style={{ colorScheme: theme === "light" ? "light" : "dark" }}
                   className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-xs text-neutral-100 outline-none focus:border-purple-500"
                 />

@@ -1,3 +1,4 @@
+import { clockLabel } from '../utils/clockDisplay';
 import { openTimeStop } from '../utils/openTimeAvailability.js';
 import { useState, useEffect } from 'react';
 import { Table } from '../context/AppContext';
@@ -131,7 +132,7 @@ export function TableCard({ table, held=false, availabilityVerified=true, onAssi
               <div className="bg-blue-950/20 border border-blue-900/30 rounded-lg p-3 text-left">
                 <p className="text-[10px] text-blue-400 uppercase tracking-wider font-semibold mb-1 flex items-center gap-1"><Calendar size={10}/> Next Reservation</p>
                 <p className="text-sm text-neutral-200 font-semibold truncate">{nextReservation.customerName}</p>
-                <p className="text-xs text-neutral-500">{nextReservation.timeSlot}</p>
+                <p className="text-xs text-neutral-500">{clockLabel(nextReservation.timeSlot)}</p>
               </div>
             ) : (
               <p className="text-xs text-neutral-500 pointer-events-none">{held?'Resolve the pending transfer before using this table.':!availabilityVerified?'Refresh transfer recovery before using this table.':'Ready for walk-in or reservation.'}</p>

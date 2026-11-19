@@ -1,3 +1,4 @@
+import { clockLabel } from '../utils/clockDisplay';
 import { isOvertimeTable } from '../utils/tableAvailability.js';
 import { localFetch } from '../utils/localApi';
 import { useState, useRef, useEffect } from 'react';
@@ -438,7 +439,7 @@ export function OverviewDashboard() {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-neutral-200 truncate">{r.customerName}</p>
                     <p className="text-xs text-neutral-500">
-                      {format(new Date(r.date), 'MMM d')} · {r.timeSlot} · {r.durationHours}h · {r.partySize} pax
+                      {format(new Date(r.date), 'MMM d')} · {clockLabel(r.timeSlot)} · {r.durationHours}h · {r.partySize} pax
                     </p>
                   </div>
                   <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md ${getReservationStatusColor(r.status)}`}>

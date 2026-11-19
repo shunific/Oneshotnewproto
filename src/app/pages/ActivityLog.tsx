@@ -91,7 +91,7 @@ export function ActivityLog() {
       const dataRows = filteredActivities.map(act => {
         const dateObj = new Date(act.timestamp);
         // Using a cleaner format: YYYY-MM-DD HH:MM AM/PM
-        const formattedDate = `${dateObj.toLocaleDateString()} ${dateObj.toLocaleTimeString()}`;
+        const formattedDate = `${dateObj.toLocaleDateString()} ${dateObj.toLocaleTimeString('en-US', {hour12:true})}`;
         const module = getModule(act.type);
         const actor = getActor(act);
         const event = act.type.replace(/_/g, ' ');
@@ -315,7 +315,7 @@ export function ActivityLog() {
             ) : (
               filteredActivities.map((act) => {
                 const dateObj = new Date(act.timestamp);
-                const formattedDate = `${dateObj.getDate().toString().padStart(2, '0')} ${dateObj.toLocaleString('default', { month: 'short' })} ${dateObj.getFullYear()} ${dateObj.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })}`;
+                const formattedDate = `${dateObj.getDate().toString().padStart(2, '0')} ${dateObj.toLocaleString('default', { month: 'short' })} ${dateObj.getFullYear()} ${dateObj.toLocaleTimeString('en-US', { hour12: true, hour: '2-digit', minute: '2-digit' })}`;
                 const moduleName = getModule(act.type);
                 const eventUI = getEventUI(act.type);
                 const cleanDesc = cleanDescription(act.description);

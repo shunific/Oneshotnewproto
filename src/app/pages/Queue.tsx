@@ -1,3 +1,4 @@
+import { clockLabel } from '../utils/clockDisplay';
 import { PendingQueueActions } from '../components/PendingQueueActions';
 import { localFetch } from '../utils/localApi';
 import { useState, useEffect, useRef, useCallback } from 'react';
@@ -401,7 +402,7 @@ export function Queue() {
                       </span>
                       <span className="text-xs text-neutral-600 dark:text-neutral-400">{r.contactNumber}</span>
                       <span className="text-xs text-sky-600 dark:text-sky-400 font-medium">
-                        {isToday(new Date(r.date)) ? 'Today' : isTomorrow(new Date(r.date)) ? 'Tomorrow' : format(new Date(r.date), 'MMM d')} · {r.timeSlot} · {r.durationHours}h
+                        {isToday(new Date(r.date)) ? 'Today' : isTomorrow(new Date(r.date)) ? 'Tomorrow' : format(new Date(r.date), 'MMM d')} · {clockLabel(r.timeSlot)} · {r.durationHours}h
                       </span>
                     </div>
                   </div>

@@ -1,3 +1,4 @@
+import { clockLabel } from '../utils/clockDisplay';
 import { recordedLegacyBill, summarizeSessionFinancials } from '../utils/sessionFinancials.js';
 import { localFetch } from '../utils/localApi';
 import { useState, useEffect, useRef, useMemo } from 'react';
@@ -468,7 +469,7 @@ export function AdminDashboard() {
                         {isTodayRes && <span className="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-400 text-[8px] font-bold uppercase tracking-wider">Today</span>}
                       </div>
                       <div className="flex items-center gap-2 text-[10px] text-neutral-500">
-                        <span>{dateLabel}, {r.timeSlot}</span><span>·</span><span>{r.partySize} pax</span>
+                        <span>{dateLabel}, {clockLabel(r.timeSlot)}</span><span>·</span><span>{r.partySize} pax</span>
                       </div>
                     </div>
 <button onClick={() => navigate('/staff/reservations')} className="opacity-0 group-hover:opacity-100 p-1.5 text-neutral-500 hover:text-emerald-400 transition-all"><ArrowRight size={14} /></button>                  </div>

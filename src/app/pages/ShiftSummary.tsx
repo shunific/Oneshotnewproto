@@ -1,3 +1,4 @@
+import { clockLabel } from '../utils/clockDisplay';
 import { useState, useMemo } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { format, isToday, startOfDay, endOfDay } from 'date-fns';
@@ -195,7 +196,7 @@ export function ShiftSummary() {
                         <p className="text-sm font-semibold text-neutral-200">{r.customerName}</p>
                         <p className="text-xs text-neutral-500">{r.contactNumber}</p>
                       </td>
-                      <td className="px-4 py-3 text-sm text-neutral-400">{r.timeSlot}</td>
+                      <td className="px-4 py-3 text-sm text-neutral-400">{clockLabel(r.timeSlot)}</td>
                       <td className="px-4 py-3 text-sm text-neutral-400">{r.durationHours}h</td>
                       <td className="px-4 py-3 text-sm text-neutral-400">{r.partySize} pax</td>
                       <td className="px-4 py-3 text-sm text-neutral-400">{tableName}</td>

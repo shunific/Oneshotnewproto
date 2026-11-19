@@ -1,3 +1,5 @@
+import { clockLabel } from '../utils/clockDisplay';
+import { TimeField } from '../components/ui/TimeField';
 import { SessionReceipt, bookingReceiptRecord } from '../components/SessionReceipt';
 import { BookingCalendar } from '../components/BookingCalendar';
 import { bookingDay, bookingDayKey, closureOn, freeIntervals, holdsBooking, slotCapacity } from '../utils/bookingSchedule.js';
@@ -1109,7 +1111,7 @@ export function Reservations() {
                                     <p className="text-sm font-semibold text-neutral-200">{r.customerName}</p>
                                     <span className="text-[9px] font-mono text-neutral-500 bg-neutral-800 px-1.5 py-0.5 rounded tracking-widest">{r.id}</span>
                                   </div>
-                                  <p className="text-xs text-neutral-500">{r.timeSlot} · {r.partySize} pax</p>
+                                  <p className="text-xs text-neutral-500">{clockLabel(r.timeSlot)} · {r.partySize} pax</p>
                                 </div>
                                 <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${statusConfig[r.status]?.color}`}>
                                   {statusConfig[r.status]?.label || r.status}
@@ -1393,7 +1395,7 @@ export function Reservations() {
                     {actionModal.type === 'refund' ? (
                        <p>Please contact the customer to manually settle the GCash refund of <strong>{formatPHP(actionModal.reservation.downPaymentAmount)}</strong>.</p>
                     ) : (
-                       <p>Please contact the customer to manually reschedule their booking from <strong>{format(new Date(actionModal.reservation.date), 'MMM d, yyyy')}</strong> at <strong>{actionModal.reservation.timeSlot}</strong>.</p>
+                       <p>Please contact the customer to manually reschedule their booking from <strong>{format(new Date(actionModal.reservation.date), 'MMM d, yyyy')}</strong> at <strong>{clockLabel(actionModal.reservation.timeSlot)}</strong>.</p>
                     )}
                   </div>
                   
@@ -1432,9 +1434,9 @@ export function Reservations() {
                            </div>
                            <div>
                               <label className="block text-[10px] text-neutral-500 mb-1">New Time</label>
-                              <input type="time" required style={{colorScheme:'dark'}}
+                              <TimeField label="New time" required style={{colorScheme:'dark'}}
                                 value={rescheduleData.newTimeSlot}
-                                onChange={e=>{const time=e.target.value;setRescheduleData(prev=>prev ? {...prev,newTimeSlot:time} : null);}}
+                                onChange={newValue =>{const time=newValue;setRescheduleData(prev=>prev ? {...prev,newTimeSlot:time} : null);}}
                                 className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-[10px] text-neutral-100 focus-within:border-amber-500"
                               />
                            </div>
@@ -1714,13 +1716,13 @@ export function Reservations() {
                           <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end">
                             <span>Start Time <span className="text-rose-500">*</span></span>
                             {selectedDate && isToday(selectedDate) && (
-                              <span className="text-[9px] text-amber-500 font-semibold">Min: {format(addMinutes(new Date(),60), 'HH:mm')}</span>
+                              <span className="text-[9px] text-amber-500 font-semibold">Min: {format(addMinutes(new Date(),60), 'h:mm a')}</span>
                             )}
                           </label>
-                          <input type="time" required
+                          <TimeField label="Start time" required
                             value={form.timeSlot} style={{ colorScheme: 'dark' }}
-                            onChange={e => {
-                              const timeSlot=e.target.value;
+                            onChange={newValue => {
+                              const timeSlot=newValue;
                               const cap=slotCapacity(selectedDate,timeSlot,bookingTable,bookingSettings);
                               setForm(f=>({...f,timeSlot,durationHours:cap>0 ? Math.min(f.durationHours,cap) : f.durationHours}));
                             }}

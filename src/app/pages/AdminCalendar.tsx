@@ -2,19 +2,10 @@ import { useState } from 'react';
 import { useAppContext, ClosedDate } from '../context/AppContext';
 import { CalendarX2, X, Plus, CheckCircle, AlertTriangle, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isBefore, startOfDay, addMonths, subMonths } from 'date-fns';
+import { clockLabel as fmt12 } from '../utils/clockDisplay';
 import { TimeField } from '../components/ui/TimeField';
 
 const todayStart = startOfDay(new Date());
-
-// Renders a stored 24h "HH:mm" value as 12-hour AM/PM for display.
-const fmt12 = (time?: string | null) => {
-  if (!time) return '';
-  const [h, m] = String(time).split(':').map(Number);
-  if (!Number.isFinite(h)) return String(time);
-  const d = new Date();
-  d.setHours(h, m || 0, 0, 0);
-  return format(d, 'h:mm a');
-};
 
 export function AdminCalendar() {
   const { closedDates, addClosedDate, removeClosedDate, updateClosedDate } = useAppContext();
@@ -228,12 +219,12 @@ export function AdminCalendar() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs text-neutral-400 mb-1.5 block">Open Time</label>
-                    <TimeField value={form.openTime} onChange={v => setForm(f=>({...f,openTime:v}))}
+                    <TimeField label="Opening time" value={form.openTime} onChange={v => setForm(f=>({...f,openTime:v}))}
                       className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200" />
                   </div>
                   <div>
                     <label className="text-xs text-neutral-400 mb-1.5 block">Close Time</label>
-                    <TimeField value={form.closeTime} onChange={v => setForm(f=>({...f,closeTime:v}))}
+                    <TimeField label="Closing time" value={form.closeTime} onChange={v => setForm(f=>({...f,closeTime:v}))}
                       className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200" />
                   </div>
                 </div>

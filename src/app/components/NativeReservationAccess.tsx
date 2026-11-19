@@ -1,3 +1,4 @@
+import { clockLabel } from '../utils/clockDisplay';
 import { useEffect, useRef, useState } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { localFetch } from '../utils/localApi';
@@ -140,7 +141,7 @@ export function NativeReservationPanel({ localStaffId, cloudUserId, reservations
     {confirmed.map(booking => {
       const table = mappedNativeTable(booking, mappings, tables), original = recovered.some(command => command.id === booking.id);
       return <article key={booking.id} className="flex flex-wrap items-center justify-between gap-3 rounded border border-neutral-800 p-3">
-        <div><p>{booking.customerName} · {booking.date} {booking.timeSlot}</p><p className="text-neutral-400">{table ? `Physical table: ${table.name || table.id}` : 'Mapped physical table is unavailable, occupied, or needs an approved mapping.'}</p></div>
+        <div><p>{booking.customerName} · {booking.date} {clockLabel(booking.timeSlot)}</p><p className="text-neutral-400">{table ? `Physical table: ${table.name || table.id}` : 'Mapped physical table is unavailable, occupied, or needs an approved mapping.'}</p></div>
         <button disabled={busy || draftError || !recoveryReady || original || !table || !Number.isFinite(overtimeRate) || overtimeRate <= 0} onClick={() => { if (table) void checkin({ requestId: crypto.randomUUID(), id: booking.id, tableId: table.id, expectedRevision: booking.revision, expectedStaffId: cloudUserId, expectedOvertimeRate: overtimeRate }); }} className="rounded bg-emerald-700 px-3 py-2 disabled:opacity-40">Check in booking</button>
       </article>;
     })}

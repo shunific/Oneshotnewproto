@@ -13,27 +13,11 @@ import { useAppContext, generateRandomPromoCode } from '../context/AppContext';
 import type { Event, PromoCode, ClosedDate, Reservation } from '../context/AppContext';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isBefore, startOfDay, addMonths, subMonths } from 'date-fns';
 import { supabase } from '../utils/supabase';
+import { clockLabel as fmt12, clockRangeLabel as fmtDuration } from '../utils/clockDisplay';
 import { TimeField } from '../components/ui/TimeField';
 
 const EVENT_TYPES = ['Tournament', 'League', 'Other']; 
 const todayStart = startOfDay(new Date());
-
-// Renders a stored 24h "HH:mm" value as 12-hour AM/PM for display.
-const fmt12 = (time?: string | null) => {
-  if (!time) return '';
-  const [h, m] = String(time).split(':').map(Number);
-  if (!Number.isFinite(h)) return String(time);
-  const d = new Date();
-  d.setHours(h, m || 0, 0, 0);
-  return format(d, 'h:mm a');
-};
-
-// Event durations are stored either as "Whole Day" or as a "HH:mm - HH:mm" range.
-const fmtDuration = (duration?: string | null) => {
-  if (!duration) return '';
-  if (duration === 'Whole Day') return duration;
-  return duration.split('-').map(s => fmt12(s.trim())).join(' - ');
-};
 
 type FormState = {
   title: string; dates: string[]; type: string; description: string;
@@ -1517,11 +1501,11 @@ export function AdminEvents() {
                       <div className="grid grid-cols-2 gap-4">
                         <div>
                           <label className="text-[10px] font-semibold text-neutral-400 block mb-1.5 uppercase tracking-wider flex items-center gap-1.5"><Clock size={11}/> Start Time</label>
-                          <TimeField value={eventForm.startTime} onChange={v => setEventForm({...eventForm, startTime: v})} className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-200" />
+                          <TimeField label="Event start time" value={eventForm.startTime} onChange={v => setEventForm({...eventForm, startTime: v})} className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-200" />
                         </div>
                         <div>
                           <label className="text-[10px] font-semibold text-neutral-400 block mb-1.5 uppercase tracking-wider flex items-center gap-1.5"><Clock size={11}/> End Time</label>
-                          <TimeField value={eventForm.endTime} onChange={v => setEventForm({...eventForm, endTime: v})} className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-200" />
+                          <TimeField label="Event end time" value={eventForm.endTime} onChange={v => setEventForm({...eventForm, endTime: v})} className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-200" />
                         </div>
                       </div>
                     )}
@@ -1793,11 +1777,11 @@ export function AdminEvents() {
                           <div className="grid grid-cols-2 gap-3">
                             <div>
                               <label className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-1">Open Time</label>
-                              <TimeField value={closureForm.openTime} onChange={v => setClosureForm(f=>({...f,openTime:v}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200" />
+                              <TimeField label="Opening time" value={closureForm.openTime} onChange={v => setClosureForm(f=>({...f,openTime:v}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200" />
                             </div>
                             <div>
                               <label className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-1">Close Time</label>
-                              <TimeField value={closureForm.closeTime} onChange={v => setClosureForm(f=>({...f,closeTime:v}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200" />
+                              <TimeField label="Closing time" value={closureForm.closeTime} onChange={v => setClosureForm(f=>({...f,closeTime:v}))} className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-200" />
                             </div>
                           </div>
                         )}
@@ -1903,7 +1887,7 @@ export function AdminEvents() {
                     <span className="text-xs text-neutral-300 font-medium">Set Start Date</span>
                   </label>
                   {promoForm.hasStart && (
-                    <input type="datetime-local" value={promoForm.startDate} onChange={e => setPromoForm(f=>({...f, startDate: e.target.value}))} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-violet-500" />
+                    <TimeField label="Start date and time" dateTime value={promoForm.startDate} onChange={newValue => setPromoForm(f=>({...f, startDate: newValue}))} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-violet-500" />
                   )}
                 </div>
 
@@ -1915,7 +1899,7 @@ export function AdminEvents() {
                     <span className="text-xs text-neutral-300 font-medium">Set Expiry Date</span>
                   </label>
                   {promoForm.hasExpiry && (
-                    <input type="datetime-local" min={promoForm.hasStart && promoForm.startDate ? promoForm.startDate : undefined} value={promoForm.expiresAt} onChange={e => setPromoForm(f=>({...f, expiresAt: e.target.value}))} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-violet-500" />
+                    <TimeField label="Expiry date and time" dateTime min={promoForm.hasStart && promoForm.startDate ? promoForm.startDate : undefined} value={promoForm.expiresAt} onChange={newValue => setPromoForm(f=>({...f, expiresAt: newValue}))} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-violet-500" />
                   )}
                 </div>
               </div>
