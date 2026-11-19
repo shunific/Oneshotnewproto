@@ -70,7 +70,7 @@ export function AdminCalendar() {
   return (
     <div className="space-y-5">
       {toast && (
-        <div className="flex items-center gap-2 bg-emerald-950/40 border border-emerald-700/40 text-emerald-400 text-sm px-4 py-3 rounded-xl">
+        <div data-alert-kind="success" className="flex items-center gap-2 border text-sm px-4 py-3 rounded-xl">
           <CheckCircle size={14} /> {toast}
         </div>
       )}

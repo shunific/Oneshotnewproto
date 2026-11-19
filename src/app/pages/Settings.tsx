@@ -1,3 +1,4 @@
+import { activityEventLabel } from '../utils/activityEventLabel';
 import { authRequest } from '../utils/localApi';
 import { localFetch } from '../utils/localApi';
 import { useState, useMemo, useRef } from 'react';
@@ -186,11 +187,7 @@ export function SettingsPage() {
           className="fixed top-6 right-6 z-[9999] animate-in slide-in-from-top-4 fade-in duration-300"
           style={{ animation: 'toast-fade-out 5s forwards' }}
         >
-          <div className={`relative overflow-hidden flex items-start gap-3 px-5 py-4 rounded-xl border shadow-2xl backdrop-blur-md min-w-[320px] max-w-md ${
-            toast.type === 'success' 
-              ? 'bg-emerald-950/90 border-emerald-900/50 text-emerald-400' 
-              : 'bg-rose-950/90 border-rose-900/50 text-rose-400'
-          }`}>
+          <div data-alert-kind={toast.type} className="relative overflow-hidden flex items-start gap-3 px-5 py-4 rounded-xl border shadow-2xl backdrop-blur-md min-w-[320px] max-w-md">
             <div className="mt-0.5 flex-shrink-0">
               {toast.type === 'success' ? <CheckCircle size={18} /> : <AlertTriangle size={18} />}
             </div>
@@ -272,7 +269,7 @@ export function SettingsPage() {
                   <div>
                     <p className="text-xs text-neutral-300 font-medium mb-1">{act.description.replace(/\s*\(Action by:.*?\)/, '')}</p>
                     <div className="flex items-center gap-2 text-[10px] text-neutral-500">
-                      <span className="uppercase tracking-wider font-bold bg-neutral-800 px-1.5 py-0.5 rounded border border-neutral-700">{act.type.replace('_', ' ')}</span>
+                      <span className="uppercase tracking-wider font-bold bg-neutral-800 px-1.5 py-0.5 rounded border border-neutral-700">{activityEventLabel(act.type)}</span>
                       <span>{formatDistanceToNow(new Date(act.timestamp), { addSuffix: true })}</span>
                     </div>
                   </div>
@@ -364,7 +361,7 @@ export function SettingsPage() {
         <div className="bg-neutral-950 border border-neutral-800 rounded-2xl overflow-hidden animate-in fade-in slide-in-from-bottom-2">
           <div className="px-6 py-5 border-b border-neutral-800">
             <h3 className="text-sm font-bold text-neutral-100">Application Theme</h3>
-            <p className="text-xs text-neutral-500 mt-0.5">Customize how the local POS system looks on this device.</p>
+            <p className="text-xs text-neutral-500 mt-0.5">Customize how the application looks on this device.</p>
           </div>
           
           <div className="p-6 space-y-8">

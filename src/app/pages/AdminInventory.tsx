@@ -131,9 +131,9 @@ export function AdminInventory() {
         <div>
           <h2 className="text-xl font-bold text-neutral-100 flex items-center gap-2">
             <PackageSearch className="text-emerald-500" size={24} />
-            Inventory & POS Menu
+            Inventory & Menu
           </h2>
-          <p className="text-xs text-neutral-400 mt-1">Manage food, drinks, and extras available at the Point of Sale.</p>
+          <p className="text-xs text-neutral-400 mt-1">Manage food, drinks, and extras available for table orders.</p>
         </div>
         <button disabled={isSaving} onClick={openCreate} className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-emerald-900/20">
           <Plus size={16} /> Add Item

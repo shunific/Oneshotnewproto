@@ -1,5 +1,5 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');const {readFileSync}=require('node:fs');const {join}=require('node:path');const {transform}=require('esbuild');
-test('late unauthorized response from an old login cannot end a newer POS session',async()=>{
+test('late unauthorized response from an old login cannot end a newer desktop session',async()=>{
  const originalFetch=global.fetch,originalWindow=global.window;const events=[];let release;
  const old=new Promise(resolve=>release=resolve);
  global.window={location:{hostname:'localhost',port:'31371',origin:'http://localhost:31371'},dispatchEvent:event=>events.push(event.type)};

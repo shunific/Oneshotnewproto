@@ -215,7 +215,7 @@ function createCloudStaffService({
       throw fail(
         401,
         "LOCAL_SESSION_ENDED",
-        "Sign in to the POS before connecting cloud staff access.",
+        "Sign in to the management app before connecting cloud staff access.",
       );
     }
   }
@@ -642,7 +642,7 @@ function registerCloudStaffRoutes(app, options) {
     res.setHeader("Cache-Control", "no-store");
     try {
       if (!req.staff || !req.authToken)
-        throw fail(401, "LOCAL_SESSION_ENDED", "Sign in to the POS.");
+        throw fail(401, "LOCAL_SESSION_ENDED", "Sign in to the management app.");
       await fn(req, res);
     } catch (error) {
       res.status(error.status || 503).json({

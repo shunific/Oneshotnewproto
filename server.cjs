@@ -950,7 +950,7 @@ app.post('/api/sync-to-cloud', async (req, res) => {
   let syncErrors = [];
   try {
 
-    // Staff review writes are explicit. A background backup from an older POS
+    // Staff review writes are explicit. A background backup from an older desktop app
     // snapshot must not acknowledge, reopen or discard a customer's request.
     const syncReservations = async (rows) => {
       for (let i = 0; i < rows.length; i += 50) {

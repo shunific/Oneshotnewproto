@@ -186,7 +186,7 @@ CREATE POLICY receipt_delete_guard ON storage.objects AS RESTRICTIVE FOR DELETE 
 USING (bucket_id <> 'oneshot-receipts');
 
 -- No customer UPDATE/DELETE/upsert grants and no staff reads are introduced.
--- Local POS users are NOT trusted Supabase memberships. Add a separately reviewed
+-- Local application users are NOT trusted Supabase memberships. Add a separately reviewed
 -- staff gateway/membership policy before staff receipt review can be released.
 -- Storage API enforces bucket limits. Header checks are only client defense in depth;
 -- server content inspection/malware scanning and owner-scoped orphan cleanup remain gates.
@@ -695,7 +695,7 @@ USING (bucket_id <> 'oneshot-receipts' OR (
 --    inspect the row, then set approved_by to the approving owner's UUID and active=true.
 -- 4. Test with that member's real JWT: own identity, receipt read and denied mutations.
 -- 5. To revoke immediately, UPDATE the exact membership SET active=false; verify denial.
--- No public enrollment RPC, seed membership, local-POS auto-import or self-promotion exists.
+-- No public enrollment RPC, seed membership, local account auto-import or self-promotion exists.
 -- Reviewed owner SQL template, using operator-supplied psql variables (not defaults):
 -- BEGIN;
 -- INSERT INTO oneshot_private.staff_memberships(user_id,venue_id,role,active)

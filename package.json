@@ -2,7 +2,7 @@
   "name": "oneshot-bar-billiards-app",
   "private": true,
   "version": "0.0.2-rc.27",
-  "description": "Point of Sale and Reservation Management System for One Shot Bar & Billiards",
+  "description": "Reservation and Venue Management System for One Shot Bar & Billiards",
   "author": "Mark Joseph Morcozo",
   "type": "module",
   "main": "electron/main.cjs",

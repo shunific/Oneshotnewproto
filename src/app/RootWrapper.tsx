@@ -1,11 +1,16 @@
 import { Toaster } from 'sonner';
 import { Outlet } from 'react-router';
-import { AppProvider } from './context/AppContext';
+import { AppProvider, useAppContext } from './context/AppContext';
+
+function ThemedToaster() {
+  const { theme } = useAppContext();
+  return <Toaster position="top-right" theme={theme} closeButton />;
+}
 
 export function RootWrapper() {
   return (
     <AppProvider>
-      <Toaster position="top-right" richColors closeButton />
+      <ThemedToaster />
       <Outlet />
     </AppProvider>
   );

@@ -217,6 +217,6 @@ if (!app.requestSingleInstanceLock()) {
     globalShortcut.unregisterAll();
   });
 
-  // This POS owns its backend; closing its final window ends both processes.
+  // The desktop app owns its backend; closing its final window ends both processes.
   app.on('window-all-closed', () => app.quit());
 }

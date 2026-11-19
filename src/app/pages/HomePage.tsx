@@ -287,7 +287,7 @@ export function HomePage() {
   
   const [openActionRowId, setOpenActionRowId] = useState<string | null>(null);
   
-  const [toastMsg, setToastMsg] = useState<{title: string, desc: string, type: 'success'|'error'} | null>(null);
+  const [toastMsg, setToastMsg] = useState<{title: string, desc: string, type: 'success'|'error'|'info'} | null>(null);
   const [pendingScroll, setPendingScroll] = useState<string | null>(null);
   const [showTermsModal, setShowTermsModal] = useState(false);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
@@ -3046,11 +3046,11 @@ export function HomePage() {
             initial={{ opacity: 0, x: 50 }} 
             animate={{ opacity: 1, x: 0 }} 
             exit={{ opacity: 0, x: 50 }} 
-            className={`fixed top-24 right-5 z-[200] p-4 rounded-xl shadow-2xl border flex items-start gap-3 max-w-sm ${toastMsg.type === 'success' ? 'bg-emerald-950/90 border-emerald-900/50' : 'bg-rose-950/90 border-rose-900/50'}`}
+            data-alert-kind={toastMsg.type} className="fixed top-24 right-5 z-[200] p-4 rounded-xl shadow-2xl border flex items-start gap-3 max-w-sm"
           >
-            {toastMsg.type === 'success' ? <CheckCircle size={20} className="text-emerald-400 mt-0.5 flex-shrink-0" /> : <XCircle size={20} className="text-rose-400 mt-0.5 flex-shrink-0" />}
+            {toastMsg.type === 'success' ? <CheckCircle size={20} className="mt-0.5 flex-shrink-0" /> : toastMsg.type === 'info' ? <Info size={20} className="mt-0.5 flex-shrink-0" /> : <XCircle size={20} className="mt-0.5 flex-shrink-0" />}
             <div>
-              <p className={`text-sm font-bold ${toastMsg.type === 'success' ? 'text-emerald-400' : 'text-rose-400'}`}>{toastMsg.title}</p>
+              <p className="text-sm font-bold">{toastMsg.title}</p>
               <p className="text-xs text-neutral-300 mt-0.5 leading-relaxed">{toastMsg.desc}</p>
             </div>
             <button onClick={() => setToastMsg(null)} className="text-neutral-400 hover:text-white ml-2 flex-shrink-0"><X size={14} /></button>

@@ -207,11 +207,7 @@ export function AdminTableManagement() {
       </div>
 
       {toast && (
-        <div className={`flex items-center gap-2.5 text-sm px-4 py-3 rounded-xl border animate-in fade-in ${
-          toast.type === 'error'
-            ? 'bg-rose-950/40 border-rose-700/40 text-rose-400'
-            : 'bg-emerald-950/40 border-emerald-700/40 text-emerald-400'
-        }`}>
+        <div data-alert-kind={toast.type} className="flex items-center gap-2.5 text-sm px-4 py-3 rounded-xl border animate-in fade-in">
           {toast.type === 'error' ? <AlertTriangle size={15} /> : <CheckCircle size={15} />}
           {toast.msg}
         </div>

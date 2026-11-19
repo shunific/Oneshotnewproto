@@ -39,7 +39,7 @@ async function main() {
     grossCents: adopted.claim.grossTotalCents, discountCents: adopted.claim.discountCents,
     netCents: adopted.claim.netTotalCents, verifiedPaidCents: adopted.claim.verifiedPaidCents,
     state: adopted.claim.state, liveWrites: false,
-    limits: ['Real local PostgreSQL with synthetic JWT/roles; controlled native Auth/RPC transport.', 'No hosted PostgREST, native SQLite admission, renderer, ACK/completion or customer-to-POS acceptance.'],
+    limits: ['Real local PostgreSQL with synthetic JWT/roles; controlled native Auth/RPC transport.', 'No hosted PostgREST, native SQLite admission, renderer, ACK/completion or customer-to-desktop acceptance.'],
   };
   const target = path.resolve(__dirname, '../../staff-checkin-adapter-contract-20261019.json');
   fs.writeFileSync(target, JSON.stringify(proof, null, 2) + '\n');

@@ -10,7 +10,7 @@ const final=extra=>({originalVerifiedBookingCreditCents:4020,nativeCollectedNowC
 test('a void displays its final zero bill and original refund without presenting the legacy booking balance as collectible',()=>{
  const html=render({...booking,settlement:final()});assert.match(html,/Voided session/);assert.match(html,/Balance at checkout ₱0\.00/);assert.match(html,/Refund due at checkout ₱40\.20/);assert.doesNotMatch(html,/160\.80|Booking balance/);assert.match(html,/Verified booking payments ₱40\.20/);
 });
-test('a partially settled final bill distinguishes checkout debt from immutable booking credit and POS collection',()=>{
+test('a partially settled final bill distinguishes checkout debt from immutable booking credit and on-site collection',()=>{
  const html=render({...booking,settlement:final({allocation:'unallocated-partial',grandTotalCents:22600,nativeCollectedNowCents:100,remainingCents:18480,refundDueCents:0})});
  assert.match(html,/Total ₱226\.00/);assert.match(html,/Collected at checkout ₱1\.00/);assert.match(html,/Balance at checkout ₱184\.80/);assert.match(html,/Payment allocation requires review/);assert.match(html,/Verified booking payments ₱40\.20/);assert.doesNotMatch(html,/160\.80/);
 });

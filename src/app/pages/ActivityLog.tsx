@@ -1,3 +1,4 @@
+import { activityEventLabel } from '../utils/activityEventLabel';
 import { useState, useMemo, useRef } from 'react';
 import { useAppContext, Activity, ActivityType } from '../context/AppContext';
 import { 
@@ -21,7 +22,7 @@ export function ActivityLog() {
 
   const categoryMap: Record<string, ActivityType[]> = {
     'Table Management': ['table_assigned', 'table_freed', 'table_reserved', 'session_extended'],
-    'Point of Sale': ['pos_order', 'payment_received'],
+    'Orders & Payments': ['pos_order', 'payment_received'],
     'Reservations': ['reservation_created', 'reservation_updated', 'reservation_cancelled'],
     'Queue System': ['queue_added', 'queue_removed', 'queue_called'],
     'System Actions': ['admin_action', 'tako_action', 'promo_created'],
@@ -45,7 +46,7 @@ export function ActivityLog() {
   const getModuleIcon = (moduleName: string) => {
     switch (moduleName) {
       case 'Table Management': return <LayoutGrid size={12} className="text-blue-400" />;
-      case 'Point of Sale': return <ShoppingCart size={12} className="text-emerald-400" />;
+      case 'Orders & Payments': return <ShoppingCart size={12} className="text-emerald-400" />;
       case 'Reservations': return <CalendarDays size={12} className="text-purple-400" />;
       case 'Queue System': return <Users size={12} className="text-emerald-400" />;
       default: return <ShieldCheck size={12} className="text-rose-400" />;
@@ -53,7 +54,7 @@ export function ActivityLog() {
   };
 
   const getEventUI = (type: string) => {
-    const formattedText = type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    const formattedText = activityEventLabel(type).replace(/\b\w/g, l => l.toUpperCase());
     if (type.includes('created') || type.includes('added') || type === 'pos_order' || type.includes('received')) {
       return { icon: <PlusCircle size={14} className="text-emerald-500" />, text: formattedText };
     }
@@ -94,7 +95,7 @@ export function ActivityLog() {
         const formattedDate = `${dateObj.toLocaleDateString()} ${dateObj.toLocaleTimeString('en-US', {hour12:true})}`;
         const module = getModule(act.type);
         const actor = getActor(act);
-        const event = act.type.replace(/_/g, ' ');
+        const event = activityEventLabel(act.type);
         const details = cleanDescription(act.description);
         
         return [formattedDate, module, actor, event, details];
@@ -203,11 +204,7 @@ export function ActivityLog() {
           className="fixed top-6 right-6 z-[9999] animate-in slide-in-from-top-4 fade-in duration-300"
           style={{ animation: 'toast-fade-out 5s forwards' }}
         >
-          <div className={`relative overflow-hidden flex items-start gap-3 px-5 py-4 rounded-xl border shadow-2xl backdrop-blur-md min-w-[320px] max-w-md ${
-            toast.type === 'success' 
-              ? 'bg-emerald-950/90 border-emerald-900/50 text-emerald-400' 
-              : 'bg-rose-950/90 border-rose-900/50 text-rose-400'
-          }`}>
+          <div data-alert-kind={toast.type} className="relative overflow-hidden flex items-start gap-3 px-5 py-4 rounded-xl border shadow-2xl backdrop-blur-md min-w-[320px] max-w-md">
             <div className="mt-0.5 flex-shrink-0">
               {toast.type === 'success' ? <CheckCircle size={18} /> : <AlertTriangle size={18} />}
             </div>
@@ -271,7 +268,7 @@ export function ActivityLog() {
             <label className="text-[11px] font-bold text-neutral-500 tracking-wider">Events</label>
             <select value={eventFilter} onChange={(e) => setEventFilter(e.target.value)} className="w-full px-3 py-2 bg-neutral-900 border border-neutral-800 rounded-lg text-sm text-neutral-200 focus:outline-none focus:border-emerald-500 transition-colors">
               <option value="ALL">All events</option>
-              {uniqueEvents.map(evt => <option key={evt} value={evt}>{evt.replace(/_/g, ' ')}</option>)}
+              {uniqueEvents.map(evt => <option key={evt} value={evt}>{activityEventLabel(evt)}</option>)}
             </select>
           </div>
         </div>

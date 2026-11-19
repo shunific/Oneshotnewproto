@@ -74,7 +74,7 @@ USING (bucket_id <> 'oneshot-receipts');
 COMMIT;
 
 -- No customer UPDATE/DELETE/upsert grants and no staff reads are introduced.
--- Local POS users are NOT trusted Supabase memberships. Add a separately reviewed
+-- Local application users are NOT trusted Supabase memberships. Add a separately reviewed
 -- staff gateway/membership policy before staff receipt review can be released.
 -- Storage API enforces bucket limits. Header checks are only client defense in depth;
 -- server content inspection/malware scanning and owner-scoped orphan cleanup remain gates.

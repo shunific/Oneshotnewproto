@@ -903,13 +903,7 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
           className="fixed top-6 right-6 z-[99999] animate-in slide-in-from-top-4 fade-in duration-300"
           style={{ animation: toastState.type !== 'loading' ? 'toast-fade-out 5s forwards' : 'none' }}
         >
-          <div className={`relative overflow-hidden flex items-start gap-3 px-5 py-4 rounded-xl border shadow-2xl backdrop-blur-md min-w-[320px] max-w-md ${
-            toastState.type === 'success' 
-              ? 'bg-emerald-950/90 border-emerald-900/50 text-emerald-400' 
-              : toastState.type === 'loading'
-              ? 'bg-sky-950/90 border-sky-900/50 text-sky-400'
-              : 'bg-rose-950/90 border-rose-900/50 text-rose-400'
-          }`}>
+          <div data-alert-kind={toastState.type} className="relative overflow-hidden flex items-start gap-3 px-5 py-4 rounded-xl border shadow-2xl backdrop-blur-md min-w-[320px] max-w-md">
             <div className="mt-0.5 flex-shrink-0">
               {toastState.type === 'success' ? <CheckCircle size={18} /> : toastState.type === 'loading' ? <RefreshCw size={18} className="animate-spin" /> : <AlertTriangle size={18} />}
             </div>
@@ -1036,7 +1030,7 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
         </div>
       </div>
 
-      {/* POS SIDEBAR */}
+      {/* TABLE ORDER SIDEBAR */}
       {posTableId && posTable && (
         <div className="absolute right-0 top-0 bottom-0 w-[380px] bg-neutral-950 border-l border-neutral-800 flex flex-col shadow-2xl z-10 animate-in slide-in-from-right-10 duration-300">
           <div className="p-4 border-b border-neutral-800 flex justify-between items-start bg-neutral-900/50 flex-none">
@@ -2049,7 +2043,7 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
                     if (openTimeStop(tables.find((table:any)=>table.id===migratingTableId)?.session)?.reached) throw new Error('The play limit has been reached. End this session at checkout.');
                     await migrateSession(migratingTableId, migrateTargetId);
                     setMigratingTableId(null);
-                    setPosTableId(null); // Close the POS sidebar to refresh it
+                    setPosTableId(null); // Close the table order sidebar to refresh it
                     flash("Session successfully migrated.", "success");
                     } catch (error: any) { if(tables.find((table:any)=>table.id===migratingTableId)?.session?.pricingVersion===2)setMigratingTableId(null);flash(error?.message || 'Transfer could not be saved. Review both tables and retry.', 'error'); }
                     finally { sessionInFlight.current = false; setIsSavingSession(false); }

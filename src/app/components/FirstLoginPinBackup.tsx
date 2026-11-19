@@ -52,7 +52,7 @@ export function FirstLoginPinBackup({ pin, username, onContinue, onRestart }: {
     {action === 'copied' && <p role="status" className="text-sm text-emerald-400">PIN copied. Keep your private backup before continuing.</p>}
     <label className="flex gap-3 text-sm"><input type="checkbox" disabled={!action || busy} checked={confirmed} onChange={event => setConfirmed(event.target.checked)} />I have kept the copied PIN privately, or verified that the downloaded file was saved.</label>
     {error && <p role="alert" className="text-sm text-rose-400">{error}</p>}
-    <button type="button" disabled={!action || !confirmed || busy} onClick={complete} className="w-full rounded-xl bg-emerald-600 py-3 font-bold disabled:opacity-50">{busy ? 'Confirming…' : 'Continue to POS'}</button>
+    <button type="button" disabled={!action || !confirmed || busy} onClick={complete} className="w-full rounded-xl bg-emerald-600 py-3 font-bold disabled:opacity-50">{busy ? 'Confirming…' : 'Continue to dashboard'}</button>
     <button type="button" disabled={busy} onClick={restart} className="text-sm text-neutral-400 underline">Sign in again</button>
   </dialog>;
 }

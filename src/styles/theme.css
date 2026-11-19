@@ -1,5 +1,36 @@
 @custom-variant dark (&:is(.dark *));
 
+[data-alert-kind] {
+  background-color: var(--popover);
+  color: var(--popover-foreground);
+  border-color: var(--border);
+}
+
+[data-alert-kind] > button:hover {
+  color: var(--popover-foreground);
+}
+
+:is([data-alert-kind="success"], [data-sonner-toast][data-type="success"]) {
+  --alert-icon: var(--color-emerald-700);
+  @variant dark { --alert-icon: var(--color-emerald-400); }
+}
+
+:is([data-alert-kind="error"], [data-sonner-toast][data-type="error"]) {
+  --alert-icon: var(--color-rose-700);
+  @variant dark { --alert-icon: var(--color-rose-400); }
+}
+
+:is([data-alert-kind="loading"], [data-alert-kind="info"], [data-sonner-toast][data-type="info"]) {
+  --alert-icon: var(--color-sky-700);
+  @variant dark { --alert-icon: var(--color-sky-400); }
+}
+
+[data-alert-kind] > svg:first-child,
+[data-alert-kind] > div:first-child > svg,
+[data-sonner-toast] [data-icon] {
+  color: var(--alert-icon, currentColor);
+}
+
 :root {
   --font-size: 16px;
   --background: #ffffff;
@@ -651,7 +682,7 @@
 }
 
 /* ═════════════════════════════════════════════════════════════════
-   🖥️ LOCAL MACHINE POS & PORTAL LIGHT MODE OVERRIDES
+   🖥️ DESKTOP APP & PORTAL LIGHT MODE OVERRIDES
    ═════════════════════════════════════════════════════════════════ */
 .theme-light aside {
   background-color: #ffffff !important;

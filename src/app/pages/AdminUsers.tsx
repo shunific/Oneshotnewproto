@@ -225,10 +225,8 @@ export function AdminUsers() {
 
       {toast && (
         <div className="fixed top-6 right-6 z-[9999] animate-in slide-in-from-top-4 fade-in duration-300">
-          <div className={`px-5 py-3 rounded-xl border shadow-2xl backdrop-blur-md flex items-center gap-3 text-sm font-semibold ${
-            toast.type === 'error' ? 'bg-rose-950/90 border-rose-800 text-rose-200' : 'bg-emerald-950/90 border-emerald-800 text-emerald-200'
-          }`}>
-            {toast.type === 'error' ? <ShieldAlert size={18} className="text-rose-400" /> : <CheckCircle size={18} className="text-emerald-400" />}
+          <div data-alert-kind={toast.type} className="px-5 py-3 rounded-xl border shadow-2xl backdrop-blur-md flex items-center gap-3 text-sm font-semibold">
+            {toast.type === 'error' ? <ShieldAlert size={18} /> : <CheckCircle size={18} />}
             <span>{toast.msg}</span>
           </div>
         </div>

@@ -252,7 +252,7 @@ export function CloudStaffAccess({ localStaffId }: { localStaffId: string }) {
       <h3 className="text-lg font-bold text-white">Cloud staff access</h3>
       <p className="text-sm text-neutral-400">
         Connect your approved One Shot cloud staff account to review online
-        bookings and record payments you have verified. Local POS access and
+        bookings and record payments you have verified. Local staff access and
         cloud staff approval are separate.
       </p>
       {message && (

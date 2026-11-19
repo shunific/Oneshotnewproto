@@ -185,11 +185,7 @@ export function AdminDashboard() {
           className="fixed top-6 right-6 z-[9999] animate-in slide-in-from-top-4 fade-in duration-300"
           style={{ animation: 'toast-fade-out 5s forwards' }}
         >
-          <div className={`relative overflow-hidden flex items-start gap-3 px-5 py-4 rounded-xl border shadow-2xl backdrop-blur-md min-w-[320px] max-w-md ${
-            toast.type === 'success' 
-              ? 'bg-emerald-950/90 border-emerald-900/50 text-emerald-400' 
-              : 'bg-rose-950/90 border-rose-900/50 text-rose-400'
-          }`}>
+          <div data-alert-kind={toast.type} className="relative overflow-hidden flex items-start gap-3 px-5 py-4 rounded-xl border shadow-2xl backdrop-blur-md min-w-[320px] max-w-md">
             <div className="mt-0.5 flex-shrink-0">
               {toast.type === 'success' ? <CheckCircle size={18} /> : <AlertTriangle size={18} />}
             </div>
