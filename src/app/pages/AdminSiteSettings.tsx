@@ -1,3 +1,4 @@
+import { LoadingRing } from '../components/LoadingRing';
 import { TimeField } from '../components/ui/TimeField';
 import React, { useState, useEffect, useRef } from "react";
 import { useAppContext } from "../context/AppContext";
@@ -418,7 +419,7 @@ export function AdminSiteSettings() {
       {isProcessing && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="flex flex-col items-center gap-4 bg-neutral-950 p-8 rounded-2xl border border-neutral-800 shadow-2xl">
-            <div className="w-12 h-12 border-4 border-emerald-500/20 border-t-emerald-500 rounded-full animate-spin" />
+            <LoadingRing className="h-12 w-12" />
             <p className="text-xs font-bold text-emerald-400 uppercase tracking-widest animate-pulse">Synchronizing Settings...</p>
           </div>
         </div>

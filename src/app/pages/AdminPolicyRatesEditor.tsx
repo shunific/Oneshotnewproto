@@ -1,3 +1,4 @@
+import { LoadingRing } from '../components/LoadingRing';
 import { TimeField } from '../components/ui/TimeField';
 import { localFetch } from '../utils/localApi';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
@@ -358,7 +359,7 @@ export default function AdminPolicyRatesEditor() {
     return (
       <div className="min-h-[75vh] w-full flex flex-col items-center justify-center bg-neutral-950">
         <div className="flex flex-col items-center gap-4 bg-neutral-950 p-8 rounded-2xl border border-neutral-800 shadow-2xl">
-          <div className="w-12 h-12 border-4 border-sky-500/20 border-t-sky-500 rounded-full animate-spin"></div>
+          <LoadingRing className="h-12 w-12" />
           <p className="text-xs font-bold text-sky-400 uppercase tracking-widest animate-pulse">
             {isSaving ? "Saving Configuration..." : "Loading Policies & Rates..."}
           </p>
