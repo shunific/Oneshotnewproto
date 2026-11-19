@@ -1339,7 +1339,8 @@ export function HomePage() {
     <div className={`min-h-screen flex flex-col transition-colors duration-300 ${isLightMode ? 'theme-light bg-slate-50 text-slate-900' : 'bg-neutral-950 text-neutral-100'}`}>
 
       {/* ── Top Header ── */}
-      <header className="fixed top-0 left-0 right-0 z-50 h-[72px] bg-neutral-950/95 backdrop-blur-md border-b border-neutral-800/60 flex items-center overflow-visible">
+      <header className="fixed top-0 inset-x-0 z-50 h-[72px] bg-neutral-950/95 backdrop-blur-md border-b border-neutral-800/60">
+        <div className="flex h-full w-full items-center overflow-x-auto overscroll-x-contain sm:overflow-visible">
         <button
           onClick={() => handleNavClick('home')}
           className="brand-logo-btn h-full flex items-center px-5 pr-12 bg-emerald-700 hover:bg-emerald-600 transition-colors flex-shrink-0 relative z-10 cursor-pointer text-left"
@@ -1382,6 +1383,8 @@ export function HomePage() {
           <div className="relative" ref={notificationsRef}>
             <button
               onClick={() => setShowAnnouncements(!showAnnouncements)}
+              aria-label="Notifications"
+              aria-expanded={showAnnouncements}
               className="relative p-2 text-neutral-400 hover:text-white transition-colors rounded-full hover:bg-neutral-800"
             >
               <Bell size={20} />
@@ -1396,7 +1399,7 @@ export function HomePage() {
                   initial={{ opacity: 0, y: 10, scale: 0.95 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                  className="absolute top-full mt-2 right-0 w-80 sm:w-96 bg-neutral-950 border border-neutral-800 rounded-2xl shadow-2xl overflow-hidden z-50"
+                  className="fixed top-[72px] inset-x-2 mt-2 sm:absolute sm:top-full sm:left-auto sm:right-0 sm:w-96 bg-neutral-950 border border-neutral-800 rounded-2xl shadow-2xl overflow-hidden z-50"
                 >
                   <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-800 bg-neutral-900/50">
                     <h3 className="text-sm font-bold text-white flex items-center gap-2">
@@ -1457,14 +1460,15 @@ export function HomePage() {
             </div>
           ) : (
             <button onClick={() => { setAuthMode('options'); setShowAuthModal(true); }} className="flex items-center gap-1.5 text-xs text-white bg-emerald-600 hover:bg-emerald-500 px-5 py-2 rounded-full transition-all font-bold shadow-lg shadow-emerald-900/30">
-              <LogIn size={14} /> <span className="hidden sm:inline">Sign In</span>
+              <LogIn size={14} /> <span className="whitespace-nowrap">Sign In</span>
             </button>
           )}
+        </div>
         </div>
       </header>
 
       {/* ── Section Navigation ── */}
-      <nav className={`fixed top-[72px] left-0 right-0 z-40 backdrop-blur-sm border-b flex items-center justify-center gap-1 px-4 overflow-x-auto h-[54px] hide-scrollbar transition-colors ${
+      <nav className={`fixed top-[72px] left-0 right-0 z-40 backdrop-blur-sm border-b flex items-center justify-start sm:justify-center gap-1 px-4 overflow-x-auto h-[54px] hide-scrollbar transition-colors ${
         isLightMode ? 'bg-white/95 border-slate-200 shadow-xs' : 'bg-neutral-900/95 border-neutral-800/60'
       }`}>
         {allNavSections.map(({ id, label }) => (
