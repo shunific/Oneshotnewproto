@@ -579,11 +579,15 @@ export function HomePage() {
 
   const handleLoginSubmit = async () => {
     if (!checkRateLimit('login', 5, 5)) return setToastMsg({title:"Rate Limit Exceeded", desc:"Please wait 5 minutes before trying again.", type:"error"});
-    if (!loginForm.email || !loginForm.password) return setLoginForm(f => ({ ...f, error: 'Please fill all fields.' }));
+    const email = loginForm.email.trim();
+    if (!email || !loginForm.password) return setLoginForm(f => ({ ...f, error: 'Please fill all fields.' }));
     setLoginForm(f => ({ ...f, loading: true, error: '' }));
-    const { error } = await supabase.auth.signInWithPassword({ email: loginForm.email, password: loginForm.password });
+    const { error } = await supabase.auth.signInWithPassword({ email, password: loginForm.password });
     if (error) {
-      setLoginForm(f => ({ ...f, error: error.message, loading: false }));
+      const message = /invalid login credentials/i.test(error.message)
+        ? 'Incorrect email or password. If you just reset your password, sign in with the new one.'
+        : error.message;
+      setLoginForm(f => ({ ...f, error: message, loading: false }));
     } else {
       setShowAuthModal(false);
       setLoginForm({ email: '', password: '', showPw: false, error: '', loading: false });
@@ -817,17 +821,34 @@ export function HomePage() {
     return fmt12(dur);
   };
 
+  // Fri–Sun use the venue's weekend rate/hours (matches the footer schedule).
+  const isWeekendDay = (d: Date) => d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
+
+  const parseMins = (t: string) => {
+    const [hh = '0', mm = '0'] = (t || '').split(':');
+    return Number(hh) * 60 + Number(mm || 0);
+  };
+
+  // Opening hours are owned by the admin's Operating Hours settings. Every
+  // customer-facing booking rule reads them from here (instead of a hardcoded
+  // window) so an edit in the admin panel applies to reservations immediately.
+  const hoursWindow = (isWeekend: boolean) => {
+    const weekdayStart = rates?.weekdayStartTime || '12:00';
+    const weekdayEnd = rates?.weekdayEndTime || '02:00';
+    const start = isWeekend ? (rates?.weekendStartTime || weekdayStart) : weekdayStart;
+    const end = isWeekend ? (rates?.weekendEndTime || weekdayEnd) : weekdayEnd;
+    const startMins = parseMins(start);
+    let endMins = parseMins(end);
+    if (endMins <= startMins) endMins += 24 * 60;
+    return { startMins, endMins };
+  };
+
+  const windowForDate = (date: Date | null) => hoursWindow(!!date && isWeekendDay(date));
+
   const getOpenHoursDisplay = () => {
     try {
-      const currentDay = new Date().getDay();
-      const isWeekend = currentDay === 0 || currentDay === 5 || currentDay === 6; 
-      const openTime = isWeekend ? (rates?.weekendStartTime || '12:00') : (rates?.weekdayStartTime || '12:00');
-      const closeTime = isWeekend ? (rates?.weekendEndTime || '02:00') : (rates?.weekdayEndTime || '02:00');
-      const parseMins = (t: string) => { const [h, m] = (t || '0').split(':').map(Number); return h * 60 + (m || 0); };
-      const start = parseMins(openTime);
-      let end = parseMins(closeTime);
-      if (end <= start) end += 24 * 60;
-      return `${Math.floor((end - start) / 60)}+`;
+      const { startMins, endMins } = windowForDate(new Date());
+      return `${Math.floor((endMins - startMins) / 60)}+`;
     } catch (e) {
       return '15+';
     }
@@ -835,22 +856,20 @@ export function HomePage() {
 
   const bookingHoursDisplay = (() => {
     try {
-      const start = rates?.reservationStartTime || '12:00';
-      const end = rates?.reservationEndTime || '02:00';
-      const [sh, sm] = start.split(':').map(Number);
-      const [eh, em] = end.split(':').map(Number);
-      let startMins = sh * 60 + (sm || 0);
-      let endMins = eh * 60 + (em || 0);
-      if (endMins <= startMins) endMins += 24 * 60;
-      const cutoffMins = endMins - 60; 
-      if (cutoffMins <= startMins) return 'No online bookings';
-      return `${fmt12(start)} to ${fmt12(cutoffMins)}`;
+      const minHours = Math.max(1, Number(reservationTerms?.minHours) || 1);
+      const describe = (isWeekend: boolean) => {
+        const { startMins, endMins } = hoursWindow(isWeekend);
+        const latestStart = endMins - minHours * 60;
+        if (latestStart <= startMins) return 'No online bookings';
+        return `${fmt12(startMins)} to ${fmt12(latestStart)}`;
+      };
+      const weekday = describe(false);
+      const weekend = describe(true);
+      return weekday === weekend ? weekday : `Mon–Thu ${weekday} · Fri–Sun ${weekend}`;
     } catch (e) {
-      return `${rates?.reservationStartTime || '12:00'} to ${rates?.reservationEndTime || '02:00'}`;
+      return 'No online bookings';
     }
   })();
-
-  const isWeekendDay = (d: Date) => d.getDay() === 0 || d.getDay() === 5 || d.getDay() === 6;
 
   const getTermNum = (keys: string[], fallback: number) => {
     if (!reservationTerms) return fallback;
@@ -886,14 +905,13 @@ export function HomePage() {
   // Duration limits come from the booking grid itself: from opening time up to
   // closing, still capped by the venue's configured maximum.
   const getDurationLimits = () => {
-    const parseToMins = (t: string) => {
-      const [hh = '0', mm = '0'] = (t || '').split(':');
-      return Number(hh) * 60 + Number(mm || 0);
-    };
-    const startMins = parseToMins(rates?.reservationStartTime || '12:00');
-    let endMins = parseToMins(rates?.reservationEndTime || '02:00');
-    if (endMins <= startMins) endMins += 24 * 60;
-    const windowHours = Math.floor((endMins - startMins) / 60);
+    const weekdayWindow = hoursWindow(false);
+    const weekendWindow = hoursWindow(true);
+    // Use the tighter of the two schedules so the published limit is always bookable.
+    const windowHours = Math.min(
+      Math.floor((weekdayWindow.endMins - weekdayWindow.startMins) / 60),
+      Math.floor((weekendWindow.endMins - weekendWindow.startMins) / 60)
+    );
     const configuredMax = Number(reservationTerms?.maxHours) || 0;
     return {
       min: Math.max(1, Number(reservationTerms?.minHours) || 0),
@@ -902,19 +920,15 @@ export function HomePage() {
   };
 
   const getMaxDuration = () => {
-    if (!resForm.timeSlot) return reservationTerms?.maxHours || 6;
-    const parseToMins = (t: string) => {
-      const [hh = '0', mm = '0'] = (t || '').split(':');
-      return Number(hh) * 60 + Number(mm || 0);
-    };
-    const slotMins = parseToMins(resForm.timeSlot);
-    const startMins = parseToMins(rates?.reservationStartTime || '12:00');
-    let endMins = parseToMins(rates?.reservationEndTime || '02:00');
-    if (endMins <= startMins) endMins += 24 * 60;
+    const configuredMax = Number(reservationTerms?.maxHours) || 0;
+    if (!resForm.timeSlot) return configuredMax > 0 ? configuredMax : 6;
+    const { startMins, endMins } = windowForDate(selectedDate);
+    const slotMins = parseMins(resForm.timeSlot);
     let normalizedSlotMins = slotMins;
     if (slotMins < startMins) normalizedSlotMins += 24 * 60;
     const minsUntilClose = endMins - normalizedSlotMins;
-    return Math.max(1, Math.min(Math.floor(minsUntilClose / 60), reservationTerms?.maxHours || 6));
+    const windowHours = Math.max(1, Math.floor(minsUntilClose / 60));
+    return configuredMax > 0 ? Math.max(1, Math.min(windowHours, configuredMax)) : windowHours;
   };
 
   const maxAllowedDuration = getMaxDuration();
@@ -933,11 +947,7 @@ export function HomePage() {
   const validateTimeSlotHelper = (time: string, duration: number, dateObj: Date | null, tableId: string | null): string => {
     if (!time || !dateObj) return 'invalid';
     if (!tableId) return 'no_table';
-    const parseToMins = (t: string) => {
-      const [hh = '0', mm = '0'] = (t || '').split(':');
-      return Number(hh) * 60 + Number(mm || 0);
-    };
-    const slotMins = parseToMins(time);
+    const slotMins = parseMins(time);
     const requestedStart = new Date(dateObj);
     const [h, m] = time.split(':').map(Number);
     requestedStart.setHours(h, m, 0, 0);
@@ -949,9 +959,7 @@ export function HomePage() {
       if (slotMins < nowMins + 60) return 'advance';
     }
 
-    const startReserveMins = parseToMins(rates?.reservationStartTime || '12:00');
-    let endReserveMins = parseToMins(rates?.reservationEndTime || '02:00');
-    if (endReserveMins <= startReserveMins) endReserveMins += 24 * 60;
+    const { startMins: startReserveMins, endMins: endReserveMins } = windowForDate(dateObj);
 
     let normalizedSlot = slotMins;
     if (slotMins < startReserveMins) normalizedSlot += 24 * 60;
@@ -1397,19 +1405,28 @@ export function HomePage() {
                     )}
                   </div>
                   <div className="max-h-80 overflow-y-auto p-2">
-                    {unreadNotifications.length === 0 ? (
+                    {allNotifications.length === 0 ? (
                       <p className="text-xs text-neutral-500 text-center py-6">No recent notifications</p>
                     ) : (
-                      unreadNotifications.map((n: any) => (
-                        <div key={n.id} className="p-3.5 rounded-xl mb-1 bg-neutral-900/40 border border-neutral-800/80">
-                          <div className="flex items-center justify-between mb-1.5">
-                            <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">{n.type}</span>
-                            <span className="text-[10px] text-neutral-500">{format(new Date(n.createdAt), 'MMM d')}</span>
+                      allNotifications.map((n: any) => {
+                        const isUnread = !readAnnouncements.includes(n.id);
+                        return (
+                          <div
+                            key={n.id}
+                            className={`p-3.5 rounded-xl mb-1 border ${isUnread ? 'bg-neutral-900/60 border-neutral-700/80' : 'bg-neutral-900/20 border-neutral-800/60'}`}
+                          >
+                            <div className="flex items-center justify-between mb-1.5">
+                              <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                                {isUnread && <span className="w-1.5 h-1.5 bg-rose-500 rounded-full" />}
+                                {n.type}
+                              </span>
+                              <span className="text-[10px] text-neutral-500">{format(new Date(n.createdAt), 'MMM d')}</span>
+                            </div>
+                            <p className="text-xs font-bold text-white mb-0.5">{n.title}</p>
+                            <p className="text-xs text-neutral-400 line-clamp-2">{n.content}</p>
                           </div>
-                          <p className="text-xs font-bold text-white mb-0.5">{n.title}</p>
-                          <p className="text-xs text-neutral-400 line-clamp-2">{n.content}</p>
-                        </div>
-                      ))
+                        );
+                      })
                     )}
                   </div>
                 </motion.div>
@@ -3572,8 +3589,8 @@ export function HomePage() {
                     <Clock size={13} /> Venue Operating Hours
                   </p>
                   <div className="space-y-1 text-neutral-300">
-                    <p>• Weekdays: <span className="font-semibold">{fmt12(rates?.weekdayStartTime || '14:00')} – {fmt12(rates?.weekdayEndTime || '02:00')}</span></p>
-                    <p>• Weekends: <span className="font-semibold">{fmt12(rates?.weekendStartTime || '12:00')} – {fmt12(rates?.weekendEndTime || '03:00')}</span></p>
+                    <p>• Weekdays: <span className="font-semibold">{fmt12(hoursWindow(false).startMins)} – {fmt12(hoursWindow(false).endMins)}</span></p>
+                    <p>• Weekends: <span className="font-semibold">{fmt12(hoursWindow(true).startMins)} – {fmt12(hoursWindow(true).endMins)}</span></p>
                     <p className="text-[11px] text-neutral-400 pt-1">Online Booking Window: {bookingHoursDisplay}</p>
                   </div>
                 </div>
