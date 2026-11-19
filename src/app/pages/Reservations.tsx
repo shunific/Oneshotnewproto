@@ -7,7 +7,7 @@ import {
   FileText, QrCode, CalendarClock, ThumbsDown
 } from 'lucide-react';
 import { format, isToday, isTomorrow, isPast, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isBefore, startOfDay, addMonths, subMonths, differenceInSeconds, isThisWeek, addMinutes, differenceInHours, differenceInDays } from 'date-fns';
-import { useNavigate } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 import { supabase } from '../utils/supabase';
 import { motion, AnimatePresence } from 'motion/react';
 import { TimeField } from '../components/ui/TimeField';
@@ -154,6 +154,7 @@ export function Reservations() {
     lastSynced, forceFullSync, addWatchlistItem, staffProfile, availableTables, reservationMoveError
   } = useAppContext() as any;
   const navigate = useNavigate();
+  const { state } = useLocation();
   
   const safeAvailableTables = Array.isArray(availableTables)
     ? availableTables
@@ -174,7 +175,7 @@ export function Reservations() {
   // Actions Dropdown State
   const [openActionRowId, setOpenActionRowId] = useState<string | null>(null);
   
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(state?.reservationId ?? null);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [cancelTarget, setCancelTarget] = useState<string | null>(null);

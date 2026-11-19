@@ -1,4 +1,6 @@
 import { localFetch } from '../utils/localApi';
+import { useLocation } from 'react-router';
+import { isOvertimeTable } from '../utils/tableAvailability.js';
 import { loadOpenTimeAvailability, reviewedOpenTimeLimit, openTimeStop } from '../utils/openTimeAvailability.js';
 import { PendingQueueActions } from '../components/PendingQueueActions';
 import { previewSessionBill, selectWalkInStartPricing } from '../../../session-billing.mjs';
@@ -43,7 +45,7 @@ import {
 import { toast } from 'sonner';
 import { isToday, differenceInSeconds, addMinutes, isSameDay, format } from 'date-fns';
 
-type FilterStatus = 'all' | 'available' | 'occupied' | 'reserved' | 'maintenance';
+type FilterStatus = 'all' | 'available' | 'occupied' | 'reserved' | 'maintenance' | 'overtime';
 type PaymentMethod = 'gcash' | 'cash';
 type PaymentStatus = 'paid' | 'partial' | 'unpaid';
 
@@ -137,8 +139,9 @@ export function Tables() {
     return () => clearInterval(interval);
   }, [tables]);
   
-  const [filter, setFilter]       = useState<FilterStatus>('all');
-  const [search, setSearch]       = useState('');
+  const { state } = useLocation();
+  const [filter, setFilter] = useState<FilterStatus>(state?.filter ?? 'all');
+  const [search, setSearch] = useState<string>(state?.tableName ?? '');
   const [assigningTableId, setAssigningTableId] = useState<string | null>(null);
   const [extendingTableId, setExtendingTableId] = useState<string | null>(null);
   const [endingTableId,    setEndingTableId]    = useState<string | null>(null);
@@ -268,7 +271,8 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
   const maintenance  = displayTables.filter((t: any) => t.status === 'maintenance').length;
 
   const filtered = displayTables.filter((t: any) => {
-    const matchFilter = filter === 'all' || (t.status === filter&&(filter!=='available'||safeAvailableTables.some((a:any)=>a.id===t.id)));
+    const matchFilter = filter === 'all' || (filter === 'overtime' && isOvertimeTable(t)) ||
+      (t.status === filter && (filter !== 'available' || safeAvailableTables.some((a: any) => a.id === t.id)));
     const matchSearch = !search
       || t.name.toLowerCase().includes(search.toLowerCase())
       || (t.session?.customerName?.toLowerCase().includes(search.toLowerCase()));
@@ -874,6 +878,7 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
     { key: 'available',   label: 'Available',   count: available,           color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' },
     { key: 'occupied',    label: 'Occupied',    count: occupied,            color: 'bg-rose-500/10 text-rose-400 border-rose-500/30' },
     { key: 'reserved',    label: 'Reserved',    count: reserved,            color: 'bg-amber-500/10 text-amber-400 border-amber-500/30' },
+    { key: 'overtime',    label: 'Overtime / Open Time', count: activeTables.filter(isOvertimeTable).length, color: 'bg-rose-500/10 text-rose-400 border-rose-500/30' },
     { key: 'maintenance', label: 'Maintenance', count: maintenance,         color: 'bg-orange-500/10 text-orange-400 border-orange-500/30' },
   ];
 

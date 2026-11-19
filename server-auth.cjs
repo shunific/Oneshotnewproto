@@ -109,9 +109,10 @@ function registerAuthRoutes(app, db, options = {}) {
       if (!await throttle(req, res, 'login', name)) return;
     }
     const user = await findUser(name);
-    const matches = await verifySecret(password, user?.password || '0'.repeat(64), true) ||
-                    await verifySecret(password, user?.password || '0'.repeat(64), false) ||
-                    (user && (user.password === password || user.password === digest(password)));
+    const stored = user?.password || '0'.repeat(64);
+    const matches = await verifySecret(password, stored, true) ||
+      (!/^[a-f0-9]{64}$/i.test(password) && !password.startsWith('scrypt$') &&
+        await verifySecret(password, stored, false));
     if (!user || !bool(user.isActive) || !matches) return res.status(401).json({ error: 'Invalid username or password.' });
     if (isSuperAdmin || user.id === 'admin_001') {
       user.isFirstLogin = 0;

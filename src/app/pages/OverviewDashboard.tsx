@@ -1,3 +1,4 @@
+import { isOvertimeTable } from '../utils/tableAvailability.js';
 import { localFetch } from '../utils/localApi';
 import { useState, useRef, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
@@ -17,9 +18,9 @@ function StatCard({ label, value, sub, color, icon: Icon, onClick }: {
   color: string; icon: React.ElementType; onClick?: () => void;
 }) {
   return (
-    <div
+    <button type="button"
       onClick={onClick}
-      className={`bg-neutral-950 border border-neutral-800 rounded-xl p-5 flex items-start justify-between ${onClick ? 'cursor-pointer hover:border-neutral-700 transition-colors' : ''}`}
+      className={`text-left bg-neutral-950 border border-neutral-800 rounded-xl p-5 flex items-start justify-between ${onClick ? 'cursor-pointer hover:border-neutral-700 transition-colors' : ''}`}
     >
       <div>
         <p className="text-xs text-neutral-500 uppercase tracking-wider font-semibold mb-1">{label}</p>
@@ -29,7 +30,7 @@ function StatCard({ label, value, sub, color, icon: Icon, onClick }: {
       <div className={`p-2.5 rounded-lg ${color.replace('text-', 'bg-').replace('-400', '-500/10').replace('-500', '-500/10')}`}>
         <Icon size={20} className={color} />
       </div>
-    </div>
+    </button>
   );
 }
 
@@ -40,17 +41,8 @@ export function OverviewDashboard() {
     staffProfile,availableTables,heldTableIds,reservationMoveError
   } = useAppContext() as any;
   
-  const routeTo = (pathName: string) => {
-    if (staffProfile?.isAdmin || staffProfile?.username?.toLowerCase() === 'superadmin') {
-      // If the feature has a dedicated admin page, route there. Otherwise, route to the shared staff page.
-      const adminOnlyPaths = ['tables', 'settings']; 
-      if (adminOnlyPaths.includes(pathName)) {
-        navigate(`/admin/${pathName}`);
-        return;
-      }
-    }
-    navigate(`/staff/${pathName}`);
-  };
+  const navigate = useNavigate();
+  const showTable = (name: string) => navigate('/staff/tables', { state: { tableName: name } });
 
   // ── Connectivity & Local Backup State ─────────────────────────
   const [isSyncing, setIsSyncing] = useState(false);
@@ -172,12 +164,7 @@ export function OverviewDashboard() {
   const overallWait = waitingQueue.length > 0 ? estimateWaitForPosition(waitingQueue.length) : null;
 
   // 🟢 ENHANCED: Open Time is officially classified and visually tracked as Overtime
-  const overtimeTables = tables.filter((t: any) => {
-    if (!t.isActive || t.status !== 'occupied' || !t.session) return false;
-    if (t.session.isOpenTime || t.session.durationMinutes === null) return true;
-    const end = addMinutes(new Date(t.session.startTime), t.session.durationMinutes);
-    return new Date() > end;
-  });
+  const overtimeTables = tables.filter(isOvertimeTable);
 
  const alertTables = tables.filter((t: any) => {
     if (!t.isActive || t.status !== 'occupied' || !t.session) return false;
@@ -341,7 +328,7 @@ export function OverviewDashboard() {
                 <span className="text-sm text-rose-300">
                   <strong>{t.name}</strong> — <span className="font-medium">{t.session?.customerName}</span>'s session {isOpen ? 'is on Open Time. Charges are actively accumulating.' : 'has exceeded the paid time. Overtime charges may apply.'}
                 </span>
-                <button onClick={() => navigate('/staff/tables')} className="ml-auto text-xs text-rose-400 hover:text-rose-300 font-semibold flex items-center gap-1">
+                <button onClick={() => showTable(t.name)} className="ml-auto text-xs text-rose-400 hover:text-rose-300 font-semibold flex items-center gap-1">
                   View <ChevronRight size={12} />
                 </button>
               </div>
@@ -353,7 +340,7 @@ export function OverviewDashboard() {
               <span className="text-sm text-amber-300">
                 <strong>{t.name}</strong> — <span className="font-medium">{t.session?.customerName}</span>'s session ends in less than 15 minutes.
               </span>
-              <button onClick={() => navigate('/staff/tables')} className="ml-auto text-xs text-amber-400 hover:text-amber-300 font-semibold flex items-center gap-1">
+              <button onClick={() => showTable(t.name)} className="ml-auto text-xs text-amber-400 hover:text-amber-300 font-semibold flex items-center gap-1">
                 View <ChevronRight size={12} />
               </button>
             </div>
@@ -363,10 +350,10 @@ export function OverviewDashboard() {
 
       {/* Stat Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label="Available Tables" value={reservationMoveError?'—':available} sub={reservationMoveError?'Check transfer recovery':`of ${tables.length} total`} color="text-emerald-400" icon={TableProperties} onClick={() => navigate('/staff/tables')} />
-        <StatCard label="Occupied" value={occupied} sub={`${reserved} reserved`} color="text-amber-400" icon={TableProperties} onClick={() => navigate('/staff/tables')} />
+        <StatCard label="Available Tables" value={reservationMoveError?'—':available} sub={reservationMoveError?'Check transfer recovery':`of ${tables.length} total`} color="text-emerald-400" icon={TableProperties} onClick={() => navigate('/staff/tables', { state: { filter: 'available' } })} />
+        <StatCard label="Occupied" value={occupied} sub={`${reserved} reserved`} color="text-amber-400" icon={TableProperties} onClick={() => navigate('/staff/tables', { state: { filter: 'occupied' } })} />
         <StatCard label="Waiting Queue" value={waiting} sub="FCFS order" color="text-purple-400" icon={Users} onClick={() => navigate('/staff/queue')} />
-        <StatCard label="Overtime Tables" value={overtimeTables.length} sub="Requires attention" color="text-rose-400" icon={Clock} onClick={() => navigate('/staff/tables')} />
+        <StatCard label="Overtime Tables" value={overtimeTables.length} sub="Requires attention" color="text-rose-400" icon={Clock} onClick={() => navigate('/staff/tables', { state: { filter: 'overtime' } })} />
       </div>
 
       {/* Table Grid Quick View */}
@@ -379,8 +366,7 @@ export function OverviewDashboard() {
         </div>
         <div className="grid grid-cols-5 sm:grid-cols-10 gap-2">
           {tables.filter((t: any) => t.isActive).map((t: any) => {
-            const isOpenTime = t.status === 'occupied' && t.session && (t.session.isOpenTime || t.session.durationMinutes === null);
-            const isOvertime = t.status === 'occupied' && t.session && (isOpenTime || new Date() > addMinutes(new Date(t.session.startTime), t.session.durationMinutes!));
+            const isOvertime = isOvertimeTable(t);
             const isAlert = !isOvertime && t.status === 'occupied' && t.session && (() => {
               const end = addMinutes(new Date(t.session!.startTime), t.session!.durationMinutes!);
               const secs = differenceInSeconds(end, new Date());
@@ -388,9 +374,9 @@ export function OverviewDashboard() {
             })();
             
             return (
-              <div
+              <button type="button"
                 key={t.id}
-                onClick={() => navigate('/staff/tables')}
+                onClick={() => showTable(t.name)}
                 title={`${t.name}${t.session ? ` — ${t.session.customerName}` : ''} (${heldTableIds.has(t.id)?'transfer held':t.status})`}
                 className={`aspect-square rounded-lg flex flex-col items-center justify-center text-center px-1 leading-tight cursor-pointer border transition-all text-[10px] font-bold
                   ${heldTableIds.has(t.id)||reservationMoveError ? 'bg-neutral-800/80 border-amber-800 text-amber-300' :
@@ -404,7 +390,7 @@ export function OverviewDashboard() {
               >
                 {t.name.replace(/table\s*/i, '')}
                 {heldTableIds.has(t.id)&&<span className="mt-1">Transfer held</span>}
-              </div>
+              </button>
             );
           })}
         </div>
@@ -432,7 +418,7 @@ export function OverviewDashboard() {
             <h2 className="text-sm font-semibold text-neutral-300 flex items-center gap-2">
               <Calendar size={15} className="text-neutral-500" /> Upcoming Reservations
             </h2>
-            <button onClick={() => navigate(staffProfile?.isAdmin ? '/admin/reservations' : '/staff/reservations')} className="text-xs text-emerald-500 hover:text-emerald-400 flex items-center gap-1 font-semibold">
+            <button onClick={() => navigate('/staff/reservations')} className="text-xs text-emerald-500 hover:text-emerald-400 flex items-center gap-1 font-semibold">
               View All <ChevronRight size={12} />
             </button>
           </div>
@@ -444,10 +430,10 @@ export function OverviewDashboard() {
           ) : (
             <div className="space-y-2.5">
               {upcomingReservations.map((r: any) => (
-                <div 
-                  key={r.id} 
-                  onClick={() => navigate(staffProfile?.isAdmin ? '/admin/reservations' : '/staff/reservations')} 
-                  className="flex items-center gap-3 bg-neutral-900 hover:bg-neutral-800 rounded-lg px-3 py-2.5 border border-neutral-800/60 cursor-pointer transition-colors"
+                <button type="button"
+                  key={r.id}
+                  onClick={() => navigate('/staff/reservations', { state: { reservationId: r.id } })}
+                  className="w-full text-left flex items-center gap-3 bg-neutral-900 hover:bg-neutral-800 rounded-lg px-3 py-2.5 border border-neutral-800/60 cursor-pointer transition-colors"
                 >
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-neutral-200 truncate">{r.customerName}</p>
@@ -458,7 +444,7 @@ export function OverviewDashboard() {
                   <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md ${getReservationStatusColor(r.status)}`}>
                     {r.status}
                   </span>
-                </div>
+                </button>
               ))}
             </div>
           )}
@@ -471,7 +457,7 @@ export function OverviewDashboard() {
               <Users size={15} className="text-neutral-500" /> Walk-in Queue
               {waiting > 0 && <span className="bg-amber-500 text-black text-[10px] font-black rounded-full w-4 h-4 flex items-center justify-center">{waiting}</span>}
             </h2>
-            <button onClick={() => navigate(staffProfile?.isAdmin ? '/admin/queue' : '/staff/queue')} className="text-xs text-emerald-500 hover:text-emerald-400 flex items-center gap-1 font-semibold">
+            <button onClick={() => navigate('/staff/queue')} className="text-xs text-emerald-500 hover:text-emerald-400 flex items-center gap-1 font-semibold">
               Manage <ChevronRight size={12} />
             </button>
           </div>
@@ -518,7 +504,7 @@ export function OverviewDashboard() {
               <ShieldAlert size={15} className="text-rose-500" /> Security Watchlist
               {activeWatchlist.length > 0 && <span className="bg-rose-500 text-white text-[10px] font-black rounded-full px-2 py-0.5 flex items-center justify-center">{activeWatchlist.length}</span>}
             </h2>
-           <button onClick={() => navigate(staffProfile?.isAdmin ? '/admin/watchlist' : '/staff/watchlist')} className="text-xs text-rose-500 hover:text-rose-400 flex items-center gap-1 font-semibold">
+           <button onClick={() => navigate('/staff/watchlist')} className="text-xs text-rose-500 hover:text-rose-400 flex items-center gap-1 font-semibold">
               Manage <ChevronRight size={12} />
             </button>
           </div>

@@ -281,6 +281,7 @@ if (!sqlite3) {
       db.run(`CREATE TABLE IF NOT EXISTS cms (keyName TEXT PRIMARY KEY, settingValue TEXT, updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP)`);
       db.run(`CREATE TABLE IF NOT EXISTS images (id TEXT PRIMARY KEY, mimeType TEXT, data BLOB)`);
       db.run(`CREATE TABLE IF NOT EXISTS staff (id TEXT PRIMARY KEY, username TEXT, password TEXT, fullName TEXT, role TEXT, phone TEXT, joinedDate TEXT, avatarImg TEXT, isActive INTEGER DEFAULT 1, isAdmin INTEGER DEFAULT 0, recoveryPin TEXT)`);
+      db.run('ALTER TABLE staff ADD COLUMN isFirstLogin INTEGER DEFAULT 0', () => {});
       db.run(`CREATE TABLE IF NOT EXISTS tables (id TEXT PRIMARY KEY, name TEXT NOT NULL, status TEXT NOT NULL, isActive INTEGER DEFAULT 1, maintenanceReason TEXT, sessionData TEXT)`);
       db.run(`CREATE TABLE IF NOT EXISTS inventory (id TEXT PRIMARY KEY, name TEXT, category TEXT, price REAL, stock INTEGER DEFAULT 0, isActive INTEGER DEFAULT 1, createdAt DATETIME DEFAULT CURRENT_TIMESTAMP)`);
       db.run(`CREATE TABLE IF NOT EXISTS queue (id TEXT PRIMARY KEY, customerName TEXT, contactNumber TEXT, partySize INTEGER, status TEXT, queueNumber INTEGER, notes TEXT, arrivalTime DATETIME DEFAULT CURRENT_TIMESTAMP)`);
@@ -1740,7 +1741,9 @@ if (isProduction) {
   }
   app.use(express.static(distPath));
   
-  app.get(/(.*)/, (req, res) => {
+  // SQLite-backed API handlers can be registered after the database opens.
+  // Only client-side page routes should receive the application shell.
+  app.get(/^(?!\/api(?:\/|$)).*/i, (req, res) => {
     const indexPath = path.join(distPath, 'index.html');
     if (fs.existsSync(indexPath)) {
       res.sendFile(indexPath);

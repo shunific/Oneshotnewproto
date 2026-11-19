@@ -1,3 +1,4 @@
+import { authRequest } from '../utils/localApi';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
@@ -51,6 +52,7 @@ export function OfflineLogin() {
   // 🟢 Close Confirmation Modal State
   const [showCloseModal, setShowCloseModal] = useState(false);
 
+  const [adminSetup, setAdminSetup] = useState(false);
   const [pinSaved, setPinSaved] = useState(false);
   const [copied, setCopied] = useState(false);
   const [generatedPin, setGeneratedPin] = useState('');
@@ -103,15 +105,29 @@ export function OfflineLogin() {
     const isSuperAdmin = cleanUsername.toLowerCase() === 'superadmin';
     const targetUser = staffUsers.find((u: any) => u.username?.toLowerCase() === cleanUsername.toLowerCase());
     
-    if (!isSuperAdmin && targetUser && password === 'oneshotstaff') {
+    setAdminSetup(false);
+    if (!isSuperAdmin && targetUser && !targetUser.isAdmin && password === 'oneshotstaff') {
       switchView('force-change');
       setIsProcessing(false);
       return;
     }
 
-    const res = await (isSuperAdmin || targetUser?.isAdmin 
-      ? adminLogin(cleanUsername, password) 
-      : staffLogin(cleanUsername, password));
+    let res: boolean;
+    try {
+      res = isSuperAdmin || targetUser?.isAdmin
+        ? await adminLogin(cleanUsername, password)
+        : await staffLogin(cleanUsername, password);
+    } catch (error: any) {
+      if (error.code === 'ADMIN_SETUP_REQUIRED') {
+        setAdminSetup(true);
+        setPinSaved(false);
+        switchView('force-change');
+      } else {
+        setError(error.message);
+      }
+      setIsProcessing(false);
+      return;
+    }
       
     if (res) {
       setSuccessMsg('Authentication successful...');
@@ -134,6 +150,18 @@ export function OfflineLogin() {
 
     setIsProcessing(true);
     const targetUser = staffUsers.find((u: any) => u.username.toLowerCase() === username.toLowerCase());    
+    if (adminSetup) {
+      try {
+        const { recoveryPin } = await authRequest('setup', { currentPassword: password, newPassword });
+        setGeneratedPin(recoveryPin);
+        switchView('recovery-pin');
+      } catch (error: any) {
+        setError(error.message);
+      } finally {
+        setIsProcessing(false);
+      }
+      return;
+    }
     if (targetUser) {
       const freshPin = Math.floor(1000 + Math.random() * 9000).toString();
       setGeneratedPin(freshPin);
@@ -181,14 +209,21 @@ export function OfflineLogin() {
   const handleCompleteSetup = async () => {
     const targetUser = staffUsers.find((u: any) => u.username.toLowerCase() === username.toLowerCase());
     
-    // 🟢 FIXED: Actually authenticate the user into the session before navigating
-    if (targetUser?.isAdmin || username === 'superadmin') {
-      await adminLogin(username, newPassword);
-    } else {
-      await staffLogin(username, newPassword);
+    setIsProcessing(true);
+    try {
+      if (adminSetup) {
+        await authRequest('acknowledge-pin', { acknowledged: true });
+        setAdminSetup(false);
+      }
+      const admin = targetUser?.isAdmin || username.toLowerCase() === 'superadmin';
+      const signedIn = await (admin ? adminLogin : staffLogin)(username, newPassword);
+      if (signedIn) navigate(admin ? '/admin' : '/staff');
+      else { switchView('login'); setError('Sign in with your new password.'); }
+    } catch (error: any) {
+      setError(error.message);
+    } finally {
+      setIsProcessing(false);
     }
-    
-    navigate(targetUser?.isAdmin ? '/admin' : '/staff');
   };
 
   const handleConfirmReset = async (e: React.FormEvent) => {
@@ -541,7 +576,7 @@ export function OfflineLogin() {
 
                     <button 
                       onClick={handleCompleteSetup} 
-                      disabled={!pinSaved} 
+                      disabled={!pinSaved || isProcessing}
                       className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-600 text-white font-bold py-3.5 rounded-xl transition-all shadow-lg flex items-center justify-center gap-2"
                     >
                       Complete Setup & Enter System

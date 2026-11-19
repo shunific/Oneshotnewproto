@@ -1293,6 +1293,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   async function loginWithSavedPassword(username: string, password: string, adminOnly: boolean) {
     try {
       const { user, requiresPasswordChange } = await authRequest('login', { username, password });
+      if (user?.isAdmin && adminOnly && requiresPasswordChange) {
+        throw Object.assign(new Error('Complete administrator account setup.'), { code: 'ADMIN_SETUP_REQUIRED' });
+      }
       if (!user || requiresPasswordChange || (adminOnly && !user.isAdmin)) {
         await authRequest('logout', {});
         return false;
@@ -1307,7 +1310,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       sessionStorage.setItem('oneshot_staff_profile', JSON.stringify(user));
       await forceFullSync();
       return true;
-    } catch {
+    } catch (error: any) {
+      if (error?.code === 'ADMIN_SETUP_REQUIRED') throw error;
       return false;
     }
   }
@@ -1339,29 +1343,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return false; 
   };
 
-  const adminLogin = async (u: string, p: string) => { 
-    if (staffUsers.find(user => user.username.toLowerCase() === u.trim().toLowerCase())?.password?.startsWith('scrypt$')) {
-      return loginWithSavedPassword(u, p, true);
-    }
-    const hashedP = await hashPassword(p); 
-    const cleanU = (u || '').trim().toLowerCase();
-    const isSuperPw = cleanU === 'superadmin' && (p === 'superadmin123' || hashedP === 'e34f92a20532a873cb3184398070b4b82a8fa29cf48572c203dc5f0fa6158231');
-    const valid = staffUsers.find(su => (su.username || '').toLowerCase() === cleanU && (su.password === hashedP || su.password === p || isSuperPw) && su.isActive && (su.isAdmin || cleanU === 'superadmin'));
-    if (valid || isSuperPw) {
-      const activeUser = valid || { id: 'admin_001', fullName: 'System Superadmin', username: 'superadmin', role: 'manager', isAdmin: true, phone: '', avatarImg: '' };
-      setAdminLoggedIn(true);
-      setStaffLoggedIn(true);
-      sessionStorage.setItem('oneshot_admin_auth', 'true');
-      sessionStorage.setItem('oneshot_staff_auth', 'true');
-      const expiryTime = new Date().getTime() + (12 * 60 * 60 * 1000);
-      sessionStorage.setItem('oneshot_auth_expiry', expiryTime.toString());
-      sessionStorage.removeItem('oneshot_is_locked');
-      updateStaffProfile({ id: activeUser.id, fullName: activeUser.fullName, username: activeUser.username, role: activeUser.role, isAdmin: true, phone: activeUser.phone || '', avatarImg: activeUser.avatarImg || '' });
-      await forceFullSync();
-      return true;
-    }
-    return false; 
-  };
+  const adminLogin = (username: string, password: string) => loginWithSavedPassword(username, password, true);
 
   const staffLogout = async () => {
     await authRequest('logout', {}).catch(() => {});
@@ -1425,6 +1407,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const resetPasswordWithPin = async (username: string, pin: string, newPassword: string) => {
     const targetUser = staffUsers.find(u => u.username.toLowerCase() === username.toLowerCase() && u.isActive);
     if (!targetUser) return { success: false, message: 'User not found or inactive.' };
+    if (targetUser.recoveryPin?.startsWith('scrypt$')) {
+      try {
+        await authRequest('recover', { username, recoveryPin: pin, newPassword });
+        return { success: true, message: 'Password reset successfully!' };
+      } catch (error: any) {
+        return { success: false, message: error.message };
+      }
+    }
     if (targetUser.recoveryPin !== pin) return { success: false, message: 'Invalid Username or Recovery PIN.' };
     const hashedNew = await hashPassword(newPassword); 
     updateStaffUser(targetUser.id, { password: hashedNew });
