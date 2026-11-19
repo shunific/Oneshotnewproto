@@ -1290,7 +1290,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
   };
 
+  async function loginWithSavedPassword(username: string, password: string, adminOnly: boolean) {
+    try {
+      const { user, requiresPasswordChange } = await authRequest('login', { username, password });
+      if (!user || requiresPasswordChange || (adminOnly && !user.isAdmin)) {
+        await authRequest('logout', {});
+        return false;
+      }
+      setStaffLoggedIn(true);
+      setAdminLoggedIn(Boolean(user.isAdmin));
+      sessionStorage.setItem('oneshot_staff_auth', 'true');
+      sessionStorage.setItem('oneshot_admin_auth', String(Boolean(user.isAdmin)));
+      sessionStorage.setItem('oneshot_auth_expiry', String(Date.now() + 12 * 60 * 60 * 1000));
+      sessionStorage.removeItem('oneshot_is_locked');
+      setStaffProfile(user);
+      sessionStorage.setItem('oneshot_staff_profile', JSON.stringify(user));
+      await forceFullSync();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   const staffLogin = async (u: string, p: string) => { 
+    if (staffUsers.find(user => user.username.toLowerCase() === u.trim().toLowerCase())?.password?.startsWith('scrypt$')) {
+      return loginWithSavedPassword(u, p, false);
+    }
     const hashedP = await hashPassword(p); 
     const cleanU = (u || '').trim().toLowerCase();
     const isSuperPw = cleanU === 'superadmin' && (p === 'superadmin123' || hashedP === 'e34f92a20532a873cb3184398070b4b82a8fa29cf48572c203dc5f0fa6158231');
@@ -1315,6 +1340,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const adminLogin = async (u: string, p: string) => { 
+    if (staffUsers.find(user => user.username.toLowerCase() === u.trim().toLowerCase())?.password?.startsWith('scrypt$')) {
+      return loginWithSavedPassword(u, p, true);
+    }
     const hashedP = await hashPassword(p); 
     const cleanU = (u || '').trim().toLowerCase();
     const isSuperPw = cleanU === 'superadmin' && (p === 'superadmin123' || hashedP === 'e34f92a20532a873cb3184398070b4b82a8fa29cf48572c203dc5f0fa6158231');
@@ -1336,6 +1364,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const staffLogout = async () => {
+    await authRequest('logout', {}).catch(() => {});
     setIsLoggingOut(true);
     setLogoutStep('Saving local SQLite records...');
     await new Promise(r => setTimeout(r, 600));
@@ -1359,6 +1388,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const adminLogout = async () => {
+    await authRequest('logout', {}).catch(() => {});
     setIsLoggingOut(true);
     setLogoutStep('Saving local SQLite records...');
     await new Promise(r => setTimeout(r, 600));
@@ -2001,3 +2031,4 @@ export function useAppContext() {
   if (context === undefined) throw new Error('useAppContext must be used within an AppProvider');
   return context;
 }
+import { authRequest } from '../utils/localApi';
