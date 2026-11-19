@@ -388,15 +388,6 @@ if (!sqlite3) {
         `INSERT OR IGNORE INTO staff (id, username, password, fullName, role, phone, joinedDate, avatarImg, isActive, isAdmin, recoveryPin) VALUES ('admin_001', 'superadmin', ?, 'System Superadmin', 'manager', '', datetime('now'), '', 1, 1, '8492')`,
         [SUPERADMIN_SHA256]
       );
-      db.run(
-        `UPDATE staff SET password = ?, isActive = 1, isAdmin = 1 WHERE lower(username) = 'superadmin' OR id = 'admin_001'`,
-        [SUPERADMIN_SHA256]
-      );
-      // Auto-assign random 4-digit PIN for any staff account missing one or set to '0000'
-      db.run(
-        `UPDATE staff SET recoveryPin = abs(random() % 9000) + 1000 WHERE recoveryPin IS NULL OR recoveryPin = '' OR recoveryPin = '0000'`
-      );
-
       // Seed default systemSettings if empty or missing
       const defaultSettings = [
         ['weekdayStartTime', '12:00'],
@@ -481,13 +472,6 @@ setInterval(trainQueueAI, 1000 * 60 * 60 * 6);
 // ====================================================================
 // 🚀 READ ROUTES (GET)
 // ====================================================================
-app.get('/api/staff', (req, res) => {
-  db.all(`SELECT * FROM staff`, [], (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(rows.map(r => ({ ...r, isActive: r.isActive === 1, isAdmin: r.isAdmin === 1 })));
-  });
-});
-
 app.get('/api/promo-codes', (req, res) => {
   db.all(`SELECT * FROM promo_codes`, [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
@@ -1600,49 +1584,6 @@ app.delete('/api/promo-codes/:id', (req, res) => {
   db.run(`DELETE FROM promo_codes WHERE id = ?`, [req.params.id], function (err) {
     if (err) return res.status(500).json({ error: err.message });
     res.json({ message: "Promo deleted." });
-  });
-});
-
-app.post('/api/staff', (req, res) => {
-  const { id, username, password, fullName, role, phone, joinedDate, avatarImg, isActive, isAdmin, recoveryPin } = req.body;
-  let finalPin = recoveryPin;
-  if (!finalPin || finalPin === '0000' || !/^\d{4,12}$/.test(String(finalPin).trim())) {
-    finalPin = Math.floor(1000 + Math.random() * 9000).toString();
-  }
-  db.run(
-    `INSERT INTO staff (id, username, password, fullName, role, phone, joinedDate, avatarImg, isActive, isAdmin, recoveryPin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [id, username, password, fullName, role || 'cashier', phone || '', joinedDate || new Date().toISOString(), avatarImg || '', isActive ? 1 : 0, isAdmin ? 1 : 0, String(finalPin).trim()],
-    function (err) {
-      if (err) return res.status(500).json({ error: err.message });
-      res.status(201).json({ message: "Staff user created successfully.", id, recoveryPin: String(finalPin).trim() });
-    }
-  );
-});
-
-app.put('/api/staff/:id', (req, res) => {
-  const updates = req.body;
-
-  if (req.params.id === 'admin_001') {
-    delete updates.isActive; // Cannot deactivate
-    delete updates.isAdmin;  // Cannot remove admin rights
-    delete updates.role;     // Cannot change role
-    delete updates.username; // Cannot change root username
-  }
-
-  const keys = Object.keys(updates);
-  if (keys.length === 0) return res.json({ message: "Nothing to update" });
-
-  const setClause = keys.map((k) => `${k} = ?`).join(', ');
-  const values = keys.map((k) => {
-    const val = updates[k];
-    if (typeof val === 'boolean') return val ? 1 : 0;
-    return val;
-  });
-  values.push(req.params.id);
-
-  db.run(`UPDATE staff SET ${setClause} WHERE id = ?`, values, function (err) {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json({ message: "Staff user updated successfully." });
   });
 });
 

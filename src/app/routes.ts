@@ -2,6 +2,7 @@ import { createBrowserRouter, Navigate } from 'react-router';
 import { RootWrapper } from './RootWrapper';
 import { Layout } from './layout';
 import { AdminLayout } from './adminLayout';
+import { Legal } from './pages/Legal';
 import { OfflineLogin } from './pages/OfflineLogin';
 import { HomePage } from './pages/HomePage';
 import { LiveMonitor } from './pages/LiveMonitor';
@@ -36,6 +37,7 @@ export const router = createBrowserRouter([
       // 1. Force the root path to be the Offline Login
       { path: '/', Component: OfflineLogin },
       { path: '/home', Component: HomePage },
+      { path: '/legal', Component: Legal },
       { path: '/customer', Component: HomePage },
       { path: '/about', Component: HomePage },
       { path: '/feedback', Component: HomePage },

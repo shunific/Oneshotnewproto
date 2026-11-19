@@ -327,7 +327,6 @@ export function Layout() {
   const handleLogout = () => {
     setShowUserMenu(false);
     staffLogout();
-    navigate('/');
   };
 
   const openLiveMonitor = () => {

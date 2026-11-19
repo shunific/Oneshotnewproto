@@ -2,12 +2,10 @@ import { useState, useEffect, useRef } from 'react';
 import { Lock, Eye, EyeOff, ShieldAlert, User } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 
-// Legacy Super Admin credential accepted by the sign-in flow. Mirrors AppContext so the
-// terminal lock stays consistent with how staff actually authenticate.
-const SUPERADMIN_HASH = 'e34f92a20532a873cb3184398070b4b82a8fa29cf48572c203dc5f0fa6158231';
+import { authRequest } from '../utils/localApi';
 
 export function LockScreen({ onUnlock }: { onUnlock: () => void }) {
-  const { staffProfile, staffUsers, hashPassword } = useAppContext();
+  const { staffProfile } = useAppContext();
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const identity = useRef(staffProfile?.id);
@@ -46,27 +44,8 @@ export function LockScreen({ onUnlock }: { onUnlock: () => void }) {
       const originalIdentity = identity.current;
       const cleanUsername = (username || '').trim().toLowerCase();
 
-      if (administrator) {
-        if (!cleanUsername) throw new Error('Enter an administrator username.');
-        const hashed = await hashPassword(password);
-        const admin = (staffUsers || []).find((user: any) =>
-          (user.username || '').toLowerCase() === cleanUsername && user.isActive !== false && user.isAdmin
-        );
-        const isSuperAdmin = cleanUsername === 'superadmin' && (password === 'superadmin123' || hashed === SUPERADMIN_HASH);
-        if (!isSuperAdmin && (!admin || (admin.password !== password && admin.password !== hashed))) {
-          throw new Error('Administrator credentials are incorrect.');
-        }
-      } else {
-        const hashed = await hashPassword(password);
-        const signedIn = (staffUsers || []).find((user: any) =>
-          (user.username || '').toLowerCase() === (staffProfile?.username || '').toLowerCase() && user.isActive !== false
-        );
-        const isSuperAdmin = (staffProfile?.username || '').toLowerCase() === 'superadmin' &&
-          (password === 'superadmin123' || hashed === SUPERADMIN_HASH);
-        if (!isSuperAdmin && (!signedIn || (signedIn.password !== password && signedIn.password !== hashed))) {
-          throw new Error('That password does not match the account signed in on this terminal.');
-        }
-      }
+      if (administrator && !cleanUsername) throw new Error('Enter an administrator username.');
+      await authRequest('unlock', administrator ? { username: cleanUsername, password } : { password });
 
       if (!mounted.current) return;
       if (originalIdentity && identity.current !== originalIdentity) return;

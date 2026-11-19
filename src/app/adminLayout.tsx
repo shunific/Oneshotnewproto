@@ -231,7 +231,6 @@ export function AdminLayout() {
       return;
     }
     adminLogout();
-    navigate('/');
   };
 
   const handleSwitchToStaff = () => {
@@ -247,7 +246,6 @@ export function AdminLayout() {
     setHasUnsavedChanges(false);
     if (pendingNav === 'LOGOUT') {
       adminLogout();
-      navigate('/');
     } else if (pendingNav === 'STAFF_PORTAL') {
       sessionStorage.setItem('oneshot_staff_auth', 'true');
       navigate('/staff');

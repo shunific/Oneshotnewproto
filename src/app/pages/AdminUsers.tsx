@@ -17,7 +17,7 @@ type FormState = {
 const blankForm: FormState = { username: '', password: '', confirmPassword: '', fullName: '', role: 'manager', phone: '', isAdmin: false };
 
 export function AdminUsers() {
-  const { staffUsers, activities, addStaffUser, updateStaffUser, resetStaffUserPassword, hashPassword, staffProfile } = useAppContext() as any;
+  const { staffUsers, activities, addStaffUser, updateStaffUser, resetStaffUserPassword, staffProfile } = useAppContext() as any;
 
   const [editingEmployee, setEditingEmployee] = useState<StaffUser | null>(null);
   const [showForm, setShowForm]     = useState(false);
@@ -96,8 +96,8 @@ export function AdminUsers() {
       setShowForm(false);
       setForm(blankForm);
       flash(`User created successfully! ${payload.fullName} can set up their recovery PIN at first login.`, "success");
-    } catch {
-      flash('Staff account was not saved. Your form is preserved; please try again.', 'error');
+    } catch (error) {
+      flash(error instanceof Error ? error.message : 'Staff account could not be saved.', 'error');
     } finally {
       setIsLoading(false);
     }
@@ -107,12 +107,12 @@ export function AdminUsers() {
     setOpenDropdownId(null);
     if (window.confirm(`Are you sure you want to reset the password for ${name}? You will choose a unique temporary password; they must change it at next login.`)) {
       try {
-        await resetStaffUserPassword(id);
+        const temporaryPassword = await resetStaffUserPassword(id);
+        setResetMsg(`Temporary password for ${name}: ${temporaryPassword}`);
       } catch {
         flash('Password was not saved. Please try again.', 'error');
         return;
       }
-      setResetMsg(`Password for ${name} has been reset. Share the temporary password privately.`);
       setTimeout(() => setResetMsg(null), 8000);
     }
   };

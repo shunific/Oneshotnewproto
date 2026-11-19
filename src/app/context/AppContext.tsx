@@ -1,9 +1,8 @@
+import { authRequest, localFetch } from '../utils/localApi';
 import { bookingDay, bookingDayKey } from '../utils/bookingSchedule.js';
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef, useMemo } from 'react';
 import { toast } from 'sonner';
 import { publicSupabase, isAppHostValue } from '../utils/supabase';
-import { motion, AnimatePresence } from 'motion/react';
-import { KeyRound, CheckCircle2, Copy, Download } from 'lucide-react';
 import { previewSessionBill } from '../../../session-billing.mjs';
 
 // ── Types ──────────────────────────────────────────────────────
@@ -258,7 +257,7 @@ export type AppContextType = {
   tables: Table[]; queue: QueueItem[]; reservations: Reservation[]; feedback: Feedback[]; activities: Activity[]; promoCodes: PromoCode[]; staffUsers: StaffUser[]; inventory: InventoryItem[]; rates: RatesConfig; reservationTerms: ReservationTerms; announcements: Announcement[]; closedDates: ClosedDate[]; weather: WeatherData | null; updateWeatherLocation: (lat: string, lon: string, name: string) => void;
   activeAnnouncement: string; updateActiveAnnouncement: (msg: string) => void;
   staffLoggedIn: boolean; adminLoggedIn: boolean; staffProfile: StaffProfile;
-  staffLogin: (u: string, p: string) => Promise<boolean>; staffLogout: () => void; adminLogin: (u: string, p: string) => Promise<boolean>; adminLogout: () => void; updateStaffProfile: (profile: Partial<StaffProfile>) => void;
+  staffLogin: (u: string, p: string) => Promise<'setup' | 'staff' | 'admin'>; staffLogout: () => void; confirmPinBackup: () => Promise<'admin' | 'staff'>; adminLogout: () => void; updateStaffProfile: (profile: Partial<StaffProfile>) => void;
   assignTable: (id: string, s: Session) => void; freeTable: (id: string) => void; reserveTable: (id: string) => void; extendSession: (id: string, mins: number, pay: number) => void; migrateSession: (fromTableId: string, toTableId: string) => void; setTableMaintenance: (id: string, reason: string) => void; setTableEvent: (id: string, eventName: string) => void; addTable: (n: string) => void; updateTable: (id: string, n: string) => void; toggleTableActive: (id: string) => void; deleteTable: (id: string) => void;
   checkoutTable: (id: string, payload: any) => Promise<any>; seatQueueCustomer: (queueId: string, tableId: string, session: any) => Promise<any>; retryPendingOrder: (tableId: string, expectedSessionStartTime: string) => Promise<void>;
   addInventoryItem: (i: Omit<InventoryItem, 'id'>) => void; updateInventoryItem: (id: string, i: Partial<InventoryItem>) => void; deleteInventoryItem: (id: string) => void; submitTableOrders: (tableId: string, cart: SessionOrder[]) => void; voidTableOrder: (tableId: string, orderIndex: number, order: SessionOrder) => void;
@@ -267,7 +266,7 @@ export type AppContextType = {
   addFeedback: (i: Omit<Feedback, 'id'|'date'>) => void; resolveFeedback: (id: string, notes: string) => void; addActivity: (t: ActivityType, d: string, m?: Record<string, any>) => void;  
   addPromoCode: (i: Omit<PromoCode, 'id'|'createdAt'|'usageCount'>) => string; updatePromoCode: (id: string, u: Partial<Omit<PromoCode, 'id'|'createdAt'|'usageCount'>>) => void; togglePromoCode: (id: string) => void; deletePromoCode: (id: string) => void; applyPromoCode: (c: string) => PromoCode | null;
   events: Event[]; addEvent: (e: Omit<Event, 'id'>) => void; updateEvent: (id: string, updates: Partial<Omit<Event, 'id'>>) => void; deleteEvent: (id: string) => void;
-  addStaffUser: (u: Omit<StaffUser, 'id'|'createdAt'>) => void; updateStaffUser: (id: string, u: Partial<StaffUser>) => void; resetStaffUserPassword: (id: string) => Promise<void>; toggleStaffUserActive: (id: string) => void;
+  addStaffUser: (u: Omit<StaffUser, 'id'|'createdAt'>) => Promise<void>; updateStaffUser: (id: string, u: Partial<StaffUser>) => void; resetStaffUserPassword: (id: string) => Promise<string>; toggleStaffUserActive: (id: string) => void;
   updateRates: (r: Partial<RatesConfig>) => Promise<void>; updateReservationTerms: (t: Partial<ReservationTerms>) => Promise<void>; addAnnouncement: (a: Omit<Announcement, 'id'|'createdAt'>) => void; updateAnnouncement: (id: string, u: Partial<Announcement>) => void; deleteAnnouncement: (id: string) => void; toggleAnnouncement: (id: string) => void; addClosedDate: (c: Omit<ClosedDate, 'id'>) => void; removeClosedDate: (id: string) => void; updateClosedDate: (id: string, u: Partial<ClosedDate>) => void;
   siteConfig: any; updateSiteConfig: (config: any) => void; refreshLiveMonitor: () => void;
   lostItems: LostItem[];
@@ -299,7 +298,6 @@ export type AppContextType = {
   pendingReservationMoves: PendingReservationMove[];
   recoverReservationTransfer: (record: any, action: any) => Promise<any>;
   refreshReservationTransfers: () => Promise<void>;
-  resolveUserPin: (user?: any) => string;
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -349,26 +347,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const recoverReservationTransfer = useCallback(async () => ({ phase: 'aborted' }), []);
   const refreshReservationTransfers = useCallback(async () => {}, []);
 
-  const resolveUserPin = (user?: any) => {
-    let pin = user?.recoveryPin;
-    if (typeof pin === 'string' && pin && pin !== '0000' && !pin.startsWith('scrypt') && pin.length >= 4 && pin.length <= 12) {
-      return pin;
-    }
-    const freshPin = Math.floor(1000 + Math.random() * 9000).toString();
-    if (user && user.id) {
-      setTimeout(() => {
-        updateStaffUser(user.id, { recoveryPin: freshPin });
-      }, 0);
-    }
-    return freshPin;
-  };
-
-  // 🟢 Global Recovery PIN State
-  const [showRecoveryModal, setShowRecoveryModal] = useState(false);
-  const [pinCopied, setPinCopied] = useState(false);
-  const [hasInteractedWithPin, setHasInteractedWithPin] = useState(false);
-  const [pinSaved, setPinSaved] = useState(false);
-
   const [staffLoggedIn, setStaffLoggedIn] = useState(() => sessionStorage.getItem('oneshot_staff_auth') === 'true' || sessionStorage.getItem('oneshot_admin_auth') === 'true');
   const [adminLoggedIn, setAdminLoggedIn] = useState(() => sessionStorage.getItem('oneshot_admin_auth') === 'true');
   
@@ -386,22 +364,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       id: '', username: '', password: '', fullName: '', role: '', phone: '', joinedDate: '', isAdmin: false 
     };
   });
-
-  useEffect(() => {
-    if ((staffLoggedIn || adminLoggedIn) && staffProfile?.username) {
-      const isSuper = staffProfile.username.toLowerCase() === 'superadmin' || staffProfile.role === 'Super Admin' || staffProfile.isAdmin;
-      if (isSuper) {
-        setShowRecoveryModal(false);
-        return;
-      }
-      const isBackedUp = localStorage.getItem(`oneshot_pin_backed_up_${staffProfile.username}`);
-      if (!isBackedUp) {
-        setShowRecoveryModal(true);
-      }
-    } else {
-      setShowRecoveryModal(false);
-    }
-  }, [staffLoggedIn, adminLoggedIn, staffProfile]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -434,32 +396,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('oneshot_color', color);
   };
   
-  const handleDownloadPin = () => {
-    const targetUser = staffUsers.find((u: any) => u.username?.toLowerCase() === staffProfile?.username?.toLowerCase());
-    const pin = resolveUserPin(targetUser);
-    
-    const text = `ONE SHOT BAR & BILLIARDS\n=================================\nACCOUNT RECOVERY CREDENTIALS\n=================================\n\nAccount Name : ${targetUser?.fullName || staffProfile?.fullName || 'Staff User'}\nUsername     : ${targetUser?.username || staffProfile?.username || ''}\nRole         : ${(targetUser?.role || staffProfile?.role || 'Staff').toUpperCase()}\n\nOFFLINE RECOVERY PIN: ${pin}\n\n=================================\nIMPORTANT: Keep this file secure. Because this system operates offline, if you forget your password, you will strictly need this 4-digit PIN to recover your account without a Super Admin.\n`;
-    const blob = new Blob([text], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `oneshot-recovery-pin-${targetUser?.username || staffProfile?.username || 'staff'}.txt`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-    toast.success("Recovery PIN downloaded successfully!");
-    setHasInteractedWithPin(true);
-  };
-
-  const handleAcknowledgePin = () => {
-    if (staffProfile?.username) {
-      localStorage.setItem(`oneshot_pin_backed_up_${staffProfile.username}`, 'true');
-      setShowRecoveryModal(false);
-      toast.success("Recovery PIN safely backed up.");
-    }
-  };
-
   // Restore the last known site configuration immediately so a freshly opened
   // window (or an offline launch) never renders the site with blank imagery
   // while the cloud request is still in flight.
@@ -1291,136 +1227,77 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
   };
 
-  async function loginWithSavedPassword(username: string, password: string, adminOnly: boolean) {
-    try {
-      const { user, requiresPasswordChange } = await authRequest('login', { username, password });
-      if (user?.isAdmin && adminOnly && requiresPasswordChange) {
-        throw Object.assign(new Error('Complete administrator account setup.'), { code: 'ADMIN_SETUP_REQUIRED' });
-      }
-      if (!user || requiresPasswordChange || (adminOnly && !user.isAdmin)) {
-        await authRequest('logout', {});
-        return false;
-      }
-      setStaffLoggedIn(true);
-      setAdminLoggedIn(Boolean(user.isAdmin));
-      sessionStorage.setItem('oneshot_staff_auth', 'true');
-      sessionStorage.setItem('oneshot_admin_auth', String(Boolean(user.isAdmin)));
-      sessionStorage.setItem('oneshot_auth_expiry', String(Date.now() + 12 * 60 * 60 * 1000));
-      sessionStorage.removeItem('oneshot_is_locked');
-      setStaffProfile(user);
-      sessionStorage.setItem('oneshot_staff_profile', JSON.stringify(user));
-      await forceFullSync();
-      return true;
-    } catch (error: any) {
-      if (error?.code === 'ADMIN_SETUP_REQUIRED') throw error;
-      return false;
-    }
-  }
-
-  const staffLogin = async (u: string, p: string) => { 
-    if (staffUsers.find(user => user.username.toLowerCase() === u.trim().toLowerCase())?.password?.startsWith('scrypt$')) {
-      return loginWithSavedPassword(u, p, false);
-    }
-    const hashedP = await hashPassword(p); 
-    const cleanU = (u || '').trim().toLowerCase();
-    const isSuperPw = cleanU === 'superadmin' && (p === 'superadmin123' || hashedP === 'e34f92a20532a873cb3184398070b4b82a8fa29cf48572c203dc5f0fa6158231');
-    const valid = staffUsers.find(su => (su.username || '').toLowerCase() === cleanU && (su.password === hashedP || su.password === p || isSuperPw) && su.isActive); 
-    if (valid || isSuperPw) { 
-      const activeUser = valid || { id: 'admin_001', fullName: 'System Superadmin', username: 'superadmin', role: 'manager', isAdmin: true, phone: '', avatarImg: '' };
-      const grantsAdmin = Boolean(activeUser.isAdmin) || cleanU === 'superadmin';
-      setStaffLoggedIn(true); 
-      sessionStorage.setItem('oneshot_staff_auth', 'true');
-      if (grantsAdmin) {
-        setAdminLoggedIn(true);
-        sessionStorage.setItem('oneshot_admin_auth', 'true');
-      }
-      const expiryTime = new Date().getTime() + (12 * 60 * 60 * 1000);
-      sessionStorage.setItem('oneshot_auth_expiry', expiryTime.toString());
-      sessionStorage.removeItem('oneshot_is_locked'); 
-      updateStaffProfile({ id: activeUser.id, fullName: activeUser.fullName, username: activeUser.username, role: activeUser.role, isAdmin: grantsAdmin, phone: activeUser.phone || '', avatarImg: activeUser.avatarImg || '' });
-      await forceFullSync();
-      return true; 
-    }
-    return false; 
+  const enterSession = async (user: StaffProfile) => {
+    setStaffLoggedIn(true);
+    setAdminLoggedIn(Boolean(user.isAdmin));
+    setStaffProfile(user);
+    sessionStorage.setItem('oneshot_staff_profile', JSON.stringify(user));
+    sessionStorage.setItem('oneshot_staff_auth', 'true');
+    sessionStorage.setItem('oneshot_admin_auth', String(Boolean(user.isAdmin)));
+    sessionStorage.setItem('oneshot_auth_expiry', String(Date.now() + 12 * 60 * 60 * 1000));
+    sessionStorage.removeItem('oneshot_is_locked');
+    void forceFullSync();
   };
 
-  const adminLogin = (username: string, password: string) => loginWithSavedPassword(username, password, true);
+  const staffLogin = async (username: string, password: string) => {
+    const { user, requiresPasswordChange } = await authRequest('login', { username, password });
+    if (requiresPasswordChange) return 'setup';
+    await enterSession(user);
+    return user.isAdmin ? 'admin' : 'staff';
+  };
+
+  const confirmPinBackup = async () => {
+    const { user } = await authRequest('acknowledge-pin', { acknowledged: true });
+    await enterSession(user);
+    return user.isAdmin ? 'admin' : 'staff';
+  };
 
   const staffLogout = async () => {
-    await authRequest('logout', {}).catch(() => {});
+    if (isLoggingOut) return;
+    try {
+      await authRequest('logout', {});
+    } catch {
+      toast.error('Sign-out failed. Please try again.');
+      return;
+    }
     setIsLoggingOut(true);
     setLogoutStep('Saving local SQLite records...');
     await new Promise(r => setTimeout(r, 600));
 
     setLogoutStep('Backing up to online cloud database...');
     try {
-      await fetch('http://localhost:3001/api/sync-to-cloud', { method: 'POST' });
+      await localFetch('/api/sync-to-cloud', { method: 'POST', signal: AbortSignal.timeout(2500) });
     } catch (e) {
       setLogoutStep('Local data saved securely. Closing app...');
       await new Promise(r => setTimeout(r, 800));
     }
 
-    setStaffLoggedIn(false);
-    setAdminLoggedIn(false);
     sessionStorage.removeItem('oneshot_staff_auth');
     sessionStorage.removeItem('oneshot_admin_auth');
     sessionStorage.removeItem('oneshot_auth_expiry');
     sessionStorage.removeItem('oneshot_is_locked');
     sessionStorage.removeItem('oneshot_staff_profile'); 
-    window.location.reload(); 
+    sessionStorage.setItem('oneshot_signed_out', 'true');
+    window.location.replace('/');
   };
 
-  const adminLogout = async () => {
-    await authRequest('logout', {}).catch(() => {});
-    setIsLoggingOut(true);
-    setLogoutStep('Saving local SQLite records...');
-    await new Promise(r => setTimeout(r, 600));
-
-    setLogoutStep('Backing up to online cloud database...');
-    try {
-      await fetch('http://localhost:3001/api/sync-to-cloud', { method: 'POST' });
-    } catch (e) {
-      setLogoutStep('Local data saved securely. Closing app...');
-      await new Promise(r => setTimeout(r, 800));
-    }
-
-    setAdminLoggedIn(false);
-    setStaffLoggedIn(false);
-    sessionStorage.removeItem('oneshot_admin_auth');
-    sessionStorage.removeItem('oneshot_staff_auth');
-    sessionStorage.removeItem('oneshot_auth_expiry');
-    sessionStorage.removeItem('oneshot_is_locked'); 
-    sessionStorage.removeItem('oneshot_staff_profile'); 
-    window.location.reload(); 
-  };
-
- const resetStaffUserPassword = async (id: string) => {
-    try {
-      const targetUser = staffUsers.find(user => user.id === id);
-      const displayName = targetUser ? targetUser.fullName : id;
-      const hashedPw = await hashPassword('oneshotstaff'); 
-      setStaffUsers(prev => prev.map(u => u.id === id ? { ...u, password: hashedPw } : u));
-      syncToDB(`/api/staff/${id}`, 'PUT', { password: hashedPw }, `Reset staff password`).then(runCloudBackup).catch(()=>{});
-      addActivity('admin_action', `Reset password to default for: ${displayName}`);
-    } catch (error) { toast.error("Failed to reset password."); }
+  const resetStaffUserPassword = async (id: string) => {
+    const temporaryPassword = 'Temp1-' + crypto.randomUUID();
+    const response = await localFetch('/api/staff/' + encodeURIComponent(id) + '/reset-password', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ newPassword: temporaryPassword })
+    });
+    if (!response.ok) throw new Error('Password reset failed.');
+    return temporaryPassword;
   };
 
   const resetPasswordWithPin = async (username: string, pin: string, newPassword: string) => {
-    const targetUser = staffUsers.find(u => u.username.toLowerCase() === username.toLowerCase() && u.isActive);
-    if (!targetUser) return { success: false, message: 'User not found or inactive.' };
-    if (targetUser.recoveryPin?.startsWith('scrypt$')) {
-      try {
-        await authRequest('recover', { username, recoveryPin: pin, newPassword });
-        return { success: true, message: 'Password reset successfully!' };
-      } catch (error: any) {
-        return { success: false, message: error.message };
-      }
+    try {
+      await authRequest('recover', { username, recoveryPin: pin, newPassword });
+      return { success: true, message: 'Password reset successfully.' };
+    } catch (error) {
+      return { success: false, message: error instanceof Error ? error.message : 'Account recovery failed.' };
     }
-    if (targetUser.recoveryPin !== pin) return { success: false, message: 'Invalid Username or Recovery PIN.' };
-    const hashedNew = await hashPassword(newPassword); 
-    updateStaffUser(targetUser.id, { password: hashedNew });
-    addActivity('admin_action', `Password reset via Recovery PIN for user: ${username}`);
-    return { success: true, message: 'Password reset successfully!' };
   };
 
   const updateStaffProfile = (p: Partial<StaffProfile>) => {
@@ -1430,26 +1307,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return updated;
     });
 
-    const targetId = p.id || staffProfile.id;
-    if (targetId) {
-      const dbPayload: Partial<StaffUser> = {};
-      
-      if (p.username !== undefined) dbPayload.username = p.username;
-      if (p.password !== undefined) dbPayload.password = p.password;
-      if (p.fullName !== undefined) dbPayload.fullName = p.fullName;
-      if (p.phone !== undefined) dbPayload.phone = p.phone;
-      if (p.avatarImg !== undefined) dbPayload.avatarImg = p.avatarImg;
-
-      if (Object.keys(dbPayload).length > 0) {
-        setStaffUsers(prev => prev.map(u => u.id === targetId ? { ...u, ...dbPayload } : u));
-        
-        fetch(`http://localhost:3001/api/staff/${targetId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(dbPayload)
-        }).catch(() => {});
-      }
-    }
   };
 
   const addTable = (name: string) => {
@@ -1696,35 +1553,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }) || null;
   };
 
-  const addStaffUser = (u: Omit<StaffUser, 'id'|'createdAt'>) => {
-    const id = `su${Date.now()}`;
-    const rawPin = u.recoveryPin;
-    const recoveryPin = (typeof rawPin === 'string' && rawPin !== '0000' && /^\d{4,12}$/.test(rawPin.trim()))
-      ? rawPin.trim()
-      : '';
-    const newUser = { ...u, id, recoveryPin, createdAt: new Date() };
-    setStaffUsers(prev => [...prev, newUser]);
-    syncToDB('/api/staff', 'POST', newUser, `Added staff user`).then(runCloudBackup).catch(()=>{});
-    addActivity('admin_action', `Created new staff user: ${u.username}`);
+  const addStaffUser = async (account: Omit<StaffUser, 'id'|'createdAt'>) => {
+    const response = await localFetch('/api/staff', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...account, id: crypto.randomUUID() })
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Could not create the account.');
+    setStaffUsers(prev => [...prev.filter(user => user.id !== result.user.id), result.user]);
+    addActivity('admin_action', 'Created new staff user: ' + result.user.username);
   };
-  
-  const updateStaffUser = (id: string, u: Partial<StaffUser>) => {
-    const targetUser = staffUsers.find(user => user.id === id);
-    const displayName = targetUser ? targetUser.fullName : id;
-    setStaffUsers(prev => prev.map(user => user.id === id ? { ...user, ...u } : user));
-    syncToDB(`/api/staff/${id}`, 'PUT', u, `Updated staff user`).then(runCloudBackup).catch(()=>{});
-    addActivity('admin_action', `Updated details for: ${displayName}`);
+
+  const updateStaffUser = async (id: string, updates: Partial<StaffUser>) => {
+    const response = await localFetch('/api/staff/' + encodeURIComponent(id), {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updates)
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Could not update staff details.');
+    setStaffUsers(prev => prev.map(user => user.id === id ? result.user : user));
+    addActivity('admin_action', 'Updated details for: ' + result.user.fullName);
   };
-  
-  const toggleStaffUserActive = (id: string) => {
-    const target = staffUsers.find(u => u.id === id);
-    if (target) {
-      setStaffUsers(prev => prev.map(u => u.id === id ? { ...u, isActive: !u.isActive } : u));
-      syncToDB(`/api/staff/${id}`, 'PUT', { isActive: !target.isActive }, `Toggled staff active status`).then(runCloudBackup).catch(()=>{});
-      addActivity('admin_action', `Toggled active status for staff user: ${target.username}`);
-    }
+
+  const toggleStaffUserActive = async (id: string) => {
+    const user = staffUsers.find(user => user.id === id);
+    if (user) await updateStaffUser(id, { isActive: !user.isActive });
   };
-  
+
   const updateRates = async (r: Partial<RatesConfig>) => {
     const sanitized = { ...r } as Partial<RatesConfig>;
     setRates(prev => ({ ...prev, ...sanitized }));
@@ -1896,7 +1750,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       tables, queue, reservations, feedback, activities, promoCodes, staffUsers, inventory, rates, reservationTerms, announcements, closedDates, weather, updateWeatherLocation,
       activeAnnouncement, updateActiveAnnouncement,
       staffLoggedIn, adminLoggedIn, staffProfile,
-      staffLogin, staffLogout, adminLogin, adminLogout, updateStaffProfile,
+      staffLogin, staffLogout, confirmPinBackup, adminLogout: staffLogout, updateStaffProfile,
       assignTable, freeTable, reserveTable, extendSession, migrateSession, setTableMaintenance, setTableEvent, addTable, updateTable, toggleTableActive, deleteTable,
       checkoutTable, seatQueueCustomer, retryPendingOrder,
       addInventoryItem, updateInventoryItem, deleteInventoryItem, submitTableOrders, voidTableOrder,
@@ -1913,7 +1767,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       updateRefundStatus, acknowledgeRefund,
       isLoggingOut, logoutStep,
       lastSynced, forceFullSync,
-      availableTables, heldTableIds, reservationMoveError, pendingReservationMoves, recoverReservationTransfer, refreshReservationTransfers, resolveUserPin
+      availableTables, heldTableIds, reservationMoveError, pendingReservationMoves, recoverReservationTransfer, refreshReservationTransfers
     }}>
       {/* 🟢 Global Fullscreen Logout Overlay with Thread Loader */}
       {isLoggingOut && (
@@ -1931,86 +1785,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         </div>
       )}
 
-      {/* 🟢 Global First-Time Recovery PIN Modal */}
-      <AnimatePresence>
-        {showRecoveryModal && (() => {
-          const isSuper = staffProfile?.username?.toLowerCase() === 'superadmin' || staffProfile?.role === 'Super Admin' || staffProfile?.isAdmin;
-          if (isSuper) return null;
-          const targetUser = staffUsers.find((u: any) => u.username?.toLowerCase() === staffProfile?.username?.toLowerCase());
-          const displayPin = resolveUserPin(targetUser);
-          return (
-            <motion.div 
-              initial={{ opacity: 0 }} 
-              animate={{ opacity: 1 }} 
-              exit={{ opacity: 0 }} 
-              className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/80 backdrop-blur-sm px-4"
-            >
-              <motion.div 
-                initial={{ scale: 0.95, y: 20 }} 
-                animate={{ scale: 1, y: 0 }} 
-                className="bg-neutral-950 border border-amber-900/50 rounded-3xl max-w-md w-full shadow-2xl overflow-hidden p-8 text-center"
-              >
-                <div className="w-16 h-16 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mx-auto mb-4 text-amber-500">
-                  <KeyRound size={28} />
-                </div>
-                <h2 className="text-2xl font-black text-amber-400 tracking-wide uppercase mb-3">Save Your Recovery PIN</h2>
-                <p className="text-sm text-neutral-400 leading-relaxed mb-6">
-                  You haven't backed up your emergency access PIN. Because this system is designed to operate completely offline, this 4-digit PIN is the <strong>ONLY</strong> way to recover your account if you forget your password.
-                </p>
-                
-                <div className="bg-black/40 border border-black/50 rounded-xl p-6 mb-6">
-                  <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-bold mb-2">Your Unique PIN</p>
-                  <p className="text-6xl font-mono font-black text-white tracking-[0.2em]">{displayPin}</p>
-                </div>
-                
-                <div className="flex gap-3 mb-6">
-                  <button 
-                    onClick={() => { 
-                      navigator.clipboard.writeText(displayPin); 
-                      setPinCopied(true); 
-                      setHasInteractedWithPin(true);
-                      setTimeout(()=>setPinCopied(false), 2000); 
-                    }} 
-                    className="flex-1 py-3.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 rounded-xl text-xs font-bold transition-colors border border-neutral-800 flex items-center justify-center gap-2"
-                  >
-                    {pinCopied ? <CheckCircle2 size={16} className="text-emerald-400" /> : <Copy size={16} />} {pinCopied ? 'Copied!' : 'Copy PIN'}
-                  </button>
-                  <button 
-                    onClick={handleDownloadPin} 
-                    className="flex-1 py-3.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 rounded-xl text-xs font-bold transition-colors border border-neutral-800 flex items-center justify-center gap-2"
-                  >
-                    <Download size={16} /> Save as .txt
-                  </button>
-                </div>
-                
-                <label className={`flex items-start gap-3 p-4 rounded-xl border transition-colors mb-6 text-left ${hasInteractedWithPin ? 'border-neutral-800 bg-neutral-900/30 hover:bg-neutral-900/50 cursor-pointer' : 'border-rose-900/50 bg-rose-950/10 cursor-not-allowed opacity-80'}`}>
-                  <input 
-                    type="checkbox" 
-                    checked={pinSaved} 
-                    disabled={!hasInteractedWithPin}
-                    onChange={() => setPinSaved(!pinSaved)} 
-                    className={`mt-1 h-4 w-4 rounded border-neutral-700 bg-neutral-800 text-emerald-500 focus:ring-emerald-500 ${!hasInteractedWithPin ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`} 
-                  />
-                  <span className="text-xs text-neutral-400 leading-relaxed">
-                    {hasInteractedWithPin 
-                      ? "I confirm that I have safely copied or downloaded my recovery PIN." 
-                      : "⚠️ Action Required: You must Copy or Download your PIN to proceed."}
-                  </span>
-                </label>
-
-                <button 
-                  onClick={handleAcknowledgePin} 
-                  disabled={!pinSaved}
-                  className="w-full bg-amber-600 hover:bg-amber-500 disabled:bg-neutral-900 disabled:text-neutral-600 text-neutral-950 font-black py-4 rounded-xl transition-all shadow-lg shadow-amber-900/20 uppercase tracking-widest text-xs"
-                >
-                  Enter System
-                </button>
-              </motion.div>
-            </motion.div>
-          );
-        })()}
-      </AnimatePresence>
-        
       {children}
       
     </AppContext.Provider>
@@ -2022,4 +1796,3 @@ export function useAppContext() {
   if (context === undefined) throw new Error('useAppContext must be used within an AppProvider');
   return context;
 }
-import { authRequest } from '../utils/localApi';

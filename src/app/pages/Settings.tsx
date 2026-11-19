@@ -36,7 +36,7 @@ const COLOR_PALETTES = [
 ];
 
 export function SettingsPage() {
-  const { staffProfile, updateStaffProfile, activities, changeOwnCredentials, verifyPassword, staffUsers, updateStaffUser, theme, updateTheme, primaryColor, updatePrimaryColor, tables } = useAppContext();
+  const { staffProfile, updateStaffProfile, activities, updateStaffUser, theme, updateTheme, primaryColor, updatePrimaryColor, tables } = useAppContext();
   const navigate = useNavigate();
 
   const [activeSection, setActiveSection] = useState<Section>('overview');
@@ -140,13 +140,13 @@ export function SettingsPage() {
       }
 
       if (secForm.newPassword) {
-        await changeOwnCredentials({ currentPassword: secForm.currentPassword, newPassword: secForm.newPassword, recoveryPin: secForm.newRecoveryPin || undefined });
+        await authRequest('change-password', { currentPassword: secForm.currentPassword, newPassword: secForm.newPassword, recoveryPin: secForm.newRecoveryPin || undefined });
         passwordSaved = true;
         pinSaved = Boolean(secForm.newRecoveryPin);
       } else if (secForm.newRecoveryPin) {
         await authRequest('change-pin', { currentPassword: secForm.currentPassword, recoveryPin: secForm.newRecoveryPin });
         pinSaved = true;
-      } else if (!await verifyPassword(secForm.currentPassword)) { setSecError('Current password is incorrect.'); return; }
+      } else { await authRequest('verify', { password: secForm.currentPassword }); }
       if (secForm.username && secForm.username !== staffProfile.username) {
         const result = await authRequest('change-username', { username: secForm.username, currentPassword: secForm.newPassword || secForm.currentPassword });
         updateStaffProfile(result.user);

@@ -1,15 +1,17 @@
+import { FirstLoginPinBackup } from '../components/FirstLoginPinBackup';
+import { toast } from 'sonner';
 import { authRequest } from '../utils/localApi';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
-import { ShieldCheck, User, Lock, Eye, EyeOff, AlertTriangle, ArrowLeft, KeyRound, CheckCircle, TerminalSquare, X, Copy, Download } from 'lucide-react';
+import { ShieldCheck, User, Lock, Eye, EyeOff, AlertTriangle, ArrowLeft, KeyRound, CheckCircle, X } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import logoImg from 'figma:asset/40eb82831843e17a3c48a360fd80f0aaaa58ddc8.png';
 import heroFallbackImg from 'figma:asset/15fb8dcab89448c8f2ad20fb9946631b1c246968.png';
 import venueFallbackImg from 'figma:asset/622002b1a57eb609a09cacd650764fb95c911672.png';
 import playerFallbackImg from 'figma:asset/759b04149309a4f38a99d59a2ef822b4e59fd5d3.png';
 
-type FormView = 'login' | 'reset' | 'force-change' | 'recovery-pin' | 'god-mode';
+type FormView = 'login' | 'reset' | 'force-change' | 'recovery-pin';
 
 const getPasswordStrength = (pw: string) => {
   if (!pw) return { score: 0, color: 'bg-neutral-800/50', isValid: false };
@@ -23,12 +25,9 @@ const getPasswordStrength = (pw: string) => {
   return { score, color: 'bg-emerald-500', isValid: true };
 };
 
-// 🟢 THE MASTER RECOVERY KEY
-const MASTER_RECOVERY_KEY = 'OSB-MASTER-KEY';
-
 export function OfflineLogin() {
   const navigate = useNavigate();
-  const { staffLogin, adminLogin, siteConfig, resetPasswordWithPin, updateStaffUser, staffUsers, staffLogout, hashPassword, resetStaffUserPassword } = useAppContext() as any;
+  const { staffLogin, confirmPinBackup, siteConfig, resetPasswordWithPin } = useAppContext();
   
   const [view, setView] = useState<FormView>('login');
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -45,16 +44,9 @@ export function OfflineLogin() {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
-  // 🟢 God Mode State
-  const [logoClicks, setLogoClicks] = useState(0);
-  const [godKeyInput, setGodKeyInput] = useState('');
-
   // 🟢 Close Confirmation Modal State
   const [showCloseModal, setShowCloseModal] = useState(false);
 
-  const [adminSetup, setAdminSetup] = useState(false);
-  const [pinSaved, setPinSaved] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [generatedPin, setGeneratedPin] = useState('');
 
   // 🟢 SAFE PARSER: Prevents the .map() crash if database returns a string
@@ -82,62 +74,48 @@ export function OfflineLogin() {
     }
   }, [navigate]);
 
+  useEffect(() => {
+    if (sessionStorage.getItem('oneshot_signed_out')) {
+      sessionStorage.removeItem('oneshot_signed_out');
+      toast.success('Signed out successfully.');
+    }
+  }, []);
   const pwStrength = getPasswordStrength(newPassword);
 
   const switchView = (newView: FormView) => {
     setError(''); setSuccessMsg(''); setView(newView);
   };
 
-  const handleLogoClick = () => {
-    const newCount = logoClicks + 1;
-    setLogoClicks(newCount);
-    if (newCount === 7) {
-      switchView('god-mode');
-      setLogoClicks(0); 
-    }
+  const enterPortal = (portal: 'admin' | 'staff') => {
+    toast.success('Signed in successfully.');
+    navigate('/' + portal, { replace: true });
   };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(''); setIsProcessing(true);
-
-    const cleanUsername = username.trim();
-    const isSuperAdmin = cleanUsername.toLowerCase() === 'superadmin';
-    const targetUser = staffUsers.find((u: any) => u.username?.toLowerCase() === cleanUsername.toLowerCase());
-    
-    setAdminSetup(false);
-    if (!isSuperAdmin && targetUser && !targetUser.isAdmin && password === 'oneshotstaff') {
-      switchView('force-change');
-      setIsProcessing(false);
-      return;
-    }
-
-    let res: boolean;
+    setError('');
+    setIsProcessing(true);
     try {
-      res = isSuperAdmin || targetUser?.isAdmin
-        ? await adminLogin(cleanUsername, password)
-        : await staffLogin(cleanUsername, password);
-    } catch (error: any) {
-      if (error.code === 'ADMIN_SETUP_REQUIRED') {
-        setAdminSetup(true);
-        setPinSaved(false);
-        switchView('force-change');
-      } else {
-        setError(error.message);
-      }
-      setIsProcessing(false);
-      return;
-    }
-      
-    if (res) {
-      setSuccessMsg('Authentication successful...');
-      setTimeout(() => {
-        navigate(isSuperAdmin || targetUser?.isAdmin ? '/admin' : '/staff');
-      }, 1000);
-    } else {
-      setError('Invalid username or password.');
+      const result = await staffLogin(username.trim(), password);
+      if (result === 'setup') switchView('force-change');
+      else enterPortal(result);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Sign-in failed.');
+    } finally {
       setIsProcessing(false);
     }
+  };
+
+  const restartLogin = async () => {
+    try {
+      await authRequest('logout', {});
+      setGeneratedPin('');
+      setPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      switchView('login');
+      toast.success('Signed out successfully.');
+    } catch { toast.error('Sign-out failed. Please try again.'); }
   };
 
   const handleForceChange = async (e: React.FormEvent) => {
@@ -149,78 +127,15 @@ export function OfflineLogin() {
     if (newPassword !== confirmPassword) { setError('Passwords do not match.'); return; }
 
     setIsProcessing(true);
-    const targetUser = staffUsers.find((u: any) => u.username.toLowerCase() === username.toLowerCase());    
-    if (adminSetup) {
-      try {
-        const { recoveryPin } = await authRequest('setup', { currentPassword: password, newPassword });
-        setGeneratedPin(recoveryPin);
-        switchView('recovery-pin');
-      } catch (error: any) {
-        setError(error.message);
-      } finally {
-        setIsProcessing(false);
-      }
-      return;
-    }
-    if (targetUser) {
-      const freshPin = Math.floor(1000 + Math.random() * 9000).toString();
-      setGeneratedPin(freshPin);
-      const hashedNew = await hashPassword(newPassword);
-      updateStaffUser(targetUser.id, { password: hashedNew, recoveryPin: freshPin });
-      setSuccessMsg('Password updated. Generating recovery credentials...');
-      setTimeout(() => { switchView('recovery-pin'); setIsProcessing(false); }, 1500);
-    } else {
-      setError('User record not found.');
-      setIsProcessing(false);
-    }
-  };
-
-  const resolveDisplayPin = (user?: any) => {
-    if (generatedPin && /^\d{4}$/.test(generatedPin)) return generatedPin;
-    const raw = user?.recoveryPin;
-    if (typeof raw === 'string' && /^\d{4,12}$/.test(raw.trim()) && !raw.startsWith('scrypt$')) {
-      return raw.trim();
-    }
-    return '8492';
-  };
-
-  const handleCopyPin = (pin: string) => {
-    navigator.clipboard.writeText(pin);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const handleDownloadPin = () => {
-    const targetUser = staffUsers.find((u: any) => u.username.toLowerCase() === username.toLowerCase());
-    if (!targetUser) return;
-    const pinToSave = resolveDisplayPin(targetUser);
-    const text = `ONE SHOT BAR & BILLIARDS\n=================================\nACCOUNT RECOVERY CREDENTIALS\n=================================\n\nAccount Name : ${targetUser.fullName}\nUsername     : ${targetUser.username}\nRole         : ${targetUser.role.toUpperCase()}\n\nOFFLINE RECOVERY PIN: ${pinToSave}\n\n=================================\nIMPORTANT: Keep this file secure. Because this system operates offline, if you forget your password, you will strictly need this 4-digit PIN to recover your account without a Super Admin.\n`;
-    const blob = new Blob([text], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `oneshot-recovery-pin-${targetUser.username}.txt`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  };
-
-  const handleCompleteSetup = async () => {
-    const targetUser = staffUsers.find((u: any) => u.username.toLowerCase() === username.toLowerCase());
-    
-    setIsProcessing(true);
     try {
-      if (adminSetup) {
-        await authRequest('acknowledge-pin', { acknowledged: true });
-        setAdminSetup(false);
-      }
-      const admin = targetUser?.isAdmin || username.toLowerCase() === 'superadmin';
-      const signedIn = await (admin ? adminLogin : staffLogin)(username, newPassword);
-      if (signedIn) navigate(admin ? '/admin' : '/staff');
-      else { switchView('login'); setError('Sign in with your new password.'); }
-    } catch (error: any) {
-      setError(error.message);
+      const { recoveryPin } = await authRequest('setup', { currentPassword: password, newPassword });
+      setGeneratedPin(recoveryPin);
+      setPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      switchView('recovery-pin');
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Account setup failed.');
     } finally {
       setIsProcessing(false);
     }
@@ -232,7 +147,7 @@ export function OfflineLogin() {
     
     if (!pwStrength.isValid) { setError('Password does not meet security requirements.'); return; }
     if (newPassword !== confirmPassword) { setError('Passwords do not match.'); return; }
-    if (resetPin.length !== 4) { setError('Recovery PIN must be exactly 4 digits.'); return; }
+    if (resetPin.length < 4) { setError('Enter your recovery PIN (4–12 digits).'); return; }
 
     setIsProcessing(true);
     const res = await resetPasswordWithPin(resetUsername, resetPin, newPassword);
@@ -248,33 +163,6 @@ export function OfflineLogin() {
       setError(res.message);
     }
     setIsProcessing(false);
-  };
-
-  const handleGodModeSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    setIsProcessing(true);
-
-    if (godKeyInput === MASTER_RECOVERY_KEY) {
-      setSuccessMsg('MASTER OVERRIDE ACCEPTED. Resetting Super Admin...');
-      
-      const superAdmin = staffUsers.find((u: any) => u.username === 'superadmin');
-      if (superAdmin) {
-        await resetStaffUserPassword(superAdmin.id);
-        
-        setTimeout(async () => {
-          await adminLogin('superadmin', 'oneshotstaff');
-          navigate('/admin');
-        }, 2000);
-      } else {
-        setError('CRITICAL: Super Admin account not found in database.');
-        setIsProcessing(false);
-      }
-    } else {
-      setError('ACCESS DENIED.');
-      setGodKeyInput('');
-      setIsProcessing(false);
-    }
   };
 
   return (
@@ -337,7 +225,6 @@ export function OfflineLogin() {
             <img 
               src={logoImg} 
               alt="One Shot Logo" 
-              onClick={handleLogoClick}
               className="w-16 h-16 object-contain mb-5 rounded-2xl shadow-lg shadow-emerald-900/20 cursor-default" 
             />
             <h1 className="text-3xl font-black text-white tracking-tight leading-tight">ONE SHOT BAR</h1>
@@ -395,7 +282,7 @@ export function OfflineLogin() {
                         <h2 className="text-sm font-bold uppercase tracking-wider">Action Required</h2>
                       </div>
                       <p className="text-xs text-rose-200/80 leading-relaxed">
-                        Your password has been reset to the system default by an Administrator. You must set a new private password before you can access the dashboard.
+                        Choose a private password for this account. On the next screen, copy or save your four-digit recovery PIN.
                       </p>
                     </div>
 
@@ -430,10 +317,10 @@ export function OfflineLogin() {
                     </div>
 
                     <button type="submit" disabled={isProcessing || !pwStrength.isValid} className="w-full mt-4 bg-rose-600 hover:bg-rose-500 disabled:bg-rose-900/50 disabled:text-rose-400/50 text-white font-bold py-3.5 rounded-xl transition-all shadow-lg">
-                      {isProcessing ? 'Verifying...' : 'Set Password & Enter System'}
+                      {isProcessing ? 'Verifying...' : 'Set Password & Get PIN'}
                     </button>
                     
-                    <button type="button" disabled={isProcessing} onClick={() => { staffLogout(); switchView('login'); }} className="w-full text-xs text-neutral-500 hover:text-neutral-300 font-bold py-2 transition-all">
+                    <button type="button" disabled={isProcessing} onClick={restartLogin} className="w-full text-xs text-neutral-500 hover:text-neutral-300 font-bold py-2 transition-all">
                       Cancel & Log Out
                     </button>
                   </form>
@@ -456,8 +343,8 @@ export function OfflineLogin() {
                         <input type="text" required value={resetUsername} onChange={e => setResetUsername(e.target.value)} disabled={isProcessing} className="w-full bg-neutral-900/50 border border-neutral-800 rounded-xl px-3 py-3 text-sm text-white focus:outline-none focus:border-amber-500/50 transition-all" placeholder="Username" />
                       </div>
                       <div className="space-y-1.5">
-                        <label className="block text-[10px] text-neutral-500 font-bold uppercase tracking-widest pl-1 text-amber-500">4-Digit PIN</label>
-                        <input type="password" required maxLength={4} value={resetPin} onChange={e => setResetPin(e.target.value.replace(/\D/g, ''))} disabled={isProcessing} className="w-full bg-amber-950/20 border border-amber-900/50 rounded-xl px-3 py-3 text-lg font-mono text-center tracking-[0.2em] text-amber-400 focus:outline-none focus:border-amber-500 transition-all placeholder-amber-900/40" placeholder="••••" />
+                        <label className="block text-[10px] text-neutral-500 font-bold uppercase tracking-widest pl-1 text-amber-500">Recovery PIN</label>
+                        <input type="password" required inputMode="numeric" maxLength={12} value={resetPin} onChange={e => setResetPin(e.target.value.replace(/\D/g, ''))} disabled={isProcessing} className="w-full bg-amber-950/20 border border-amber-900/50 rounded-xl px-3 py-3 text-lg font-mono text-center tracking-[0.2em] text-amber-400 focus:outline-none focus:border-amber-500 transition-all placeholder-amber-900/40" placeholder="••••" />
                       </div>
                     </div>
 
@@ -488,102 +375,18 @@ export function OfflineLogin() {
                       </div>
                     </div>
 
-                    <button type="submit" disabled={isProcessing || !pwStrength.isValid || resetPin.length !== 4} className="w-full mt-4 bg-amber-600 hover:bg-amber-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white font-bold py-3.5 rounded-xl transition-all shadow-lg">
+                    <button type="submit" disabled={isProcessing || !pwStrength.isValid || resetPin.length < 4} className="w-full mt-4 bg-amber-600 hover:bg-amber-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white font-bold py-3.5 rounded-xl transition-all shadow-lg">
                       {isProcessing ? 'Saving...' : 'Confirm & Log In'}
                     </button>
                   </form>
                 </motion.div>
               )}
 
-              {/* ── GOD MODE RECOVERY VIEW ── */}
-              {view === 'god-mode' && (
-                <motion.div key="god-mode" initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} transition={{ duration: 0.4 }} className="w-full">
-                  <form onSubmit={handleGodModeSubmit} className="space-y-4">
-                    <button type="button" onClick={() => switchView('login')} className="flex items-center gap-2 text-xs font-bold text-neutral-400 hover:text-white mb-2 transition-colors"><ArrowLeft size={14} /> Back to Login</button>
-                    
-                    <div className="flex items-center gap-2 mb-2 text-rose-500">
-                      <TerminalSquare size={18} />
-                      <h2 className="text-sm font-bold uppercase tracking-widest">Master Terminal Override</h2>
-                    </div>
-                    
-                    <p className="text-xs text-rose-200/80 leading-relaxed mb-4 border-l-2 border-rose-500 pl-3">
-                      WARNING: You have initiated an Admin bypass. Enter the 16-character Cold Storage Master Key to reset the core Administrator account.
-                    </p>
-
-                    {error && <div className="flex items-center gap-2 bg-rose-950/40 border border-rose-800/50 text-rose-400 text-xs px-4 py-3 rounded-xl"><AlertTriangle size={14} className="flex-shrink-0" />{error}</div>}
-                    {successMsg && <div className="flex items-center gap-2 bg-emerald-950/40 border border-emerald-800/50 text-emerald-400 text-xs px-4 py-3 rounded-xl"><CheckCircle size={14} className="flex-shrink-0" />{successMsg}</div>}
-
-                    <div className="space-y-1.5 pt-2">
-                      <label className="block text-[10px] text-rose-500 font-bold uppercase tracking-widest pl-1">Master Recovery Key</label>
-                      <div className="relative">
-                        <div className="absolute left-4 top-1/2 -translate-y-1/2 text-rose-500/50"><KeyRound size={16} /></div>
-                        <input 
-                          type="password" 
-                          required 
-                          autoFocus 
-                          value={godKeyInput} 
-                          onChange={e => setGodKeyInput(e.target.value.toUpperCase())} 
-                          disabled={isProcessing} 
-                          className="w-full bg-rose-950/10 border border-rose-900/50 rounded-xl pl-11 pr-4 py-4 text-center text-sm font-mono tracking-[0.3em] text-rose-400 focus:outline-none focus:border-rose-500 transition-all placeholder-rose-900/30" 
-                          placeholder="XXXX-XXXX-XXXX-XXXX" 
-                        />
-                      </div>
-                    </div>
-
-                    <button type="submit" disabled={isProcessing || !godKeyInput} className="w-full mt-4 bg-rose-600 hover:bg-rose-500 disabled:bg-rose-900/50 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-rose-900/20 uppercase tracking-widest text-xs">
-                      {isProcessing ? 'Decrypting Key...' : 'Execute Override'}
-                    </button>
-                  </form>
-                </motion.div>
+              {view === 'recovery-pin' && (
+                <FirstLoginPinBackup pin={generatedPin} username={username.trim()}
+                  onContinue={async () => enterPortal(await confirmPinBackup())}
+                  onRestart={restartLogin} />
               )}
-
-              {/* ── RECOVERY PIN BACKUP VIEW ── */}
-              {view === 'recovery-pin' && (() => {
-                const targetUser = staffUsers.find((u: any) => u.username.toLowerCase() === username.toLowerCase());
-                const pinToShow = resolveDisplayPin(targetUser);
-                return (
-                  <motion.div key="recovery-pin" initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} transition={{ duration: 0.3 }} className="w-full">
-                    <div className="bg-amber-950/20 border border-amber-900/40 rounded-xl p-5 mb-5 text-center">
-                      <div className="w-12 h-12 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mx-auto mb-3 text-amber-500">
-                        <ShieldCheck size={24} />
-                      </div>
-                      <h2 className="text-lg font-black text-amber-400 tracking-wide uppercase mb-2">Save Your Recovery PIN</h2>
-                      <p className="text-xs text-amber-200/80 leading-relaxed mb-5">
-                        This system operates offline. If you forget your password, this 4-digit PIN is the <strong>ONLY</strong> way to recover your account without a Super Admin.
-                      </p>
-                      
-                      <div className="bg-black/40 border border-black/50 rounded-lg p-5 mb-5">
-                        <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-bold mb-1">Your Unique PIN</p>
-                        <p className="text-5xl font-mono font-black text-white tracking-[0.2em]">{pinToShow}</p>
-                      </div>
-                      
-                      <div className="flex gap-3">
-                        <button onClick={() => handleCopyPin(pinToShow)} className="flex-1 py-3 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 rounded-xl text-xs font-bold transition-colors border border-neutral-800 flex items-center justify-center gap-2">
-                          {copied ? <CheckCircle size={15} className="text-emerald-400" /> : <Copy size={15} />} {copied ? 'Copied!' : 'Copy PIN'}
-                        </button>
-                        <button onClick={handleDownloadPin} className="flex-1 py-3 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 rounded-xl text-xs font-bold transition-colors border border-neutral-800 flex items-center justify-center gap-2">
-                          <Download size={15} /> Save as .txt
-                        </button>
-                      </div>
-                    </div>
-
-                    <label className="flex items-start gap-3 cursor-pointer p-4 rounded-xl border border-neutral-800 bg-neutral-900/30 hover:bg-neutral-900/50 transition-colors mb-6">
-                      <input type="checkbox" checked={pinSaved} onChange={() => setPinSaved(!pinSaved)} className="mt-1 h-4 w-4 rounded border-neutral-700 bg-neutral-800 text-emerald-500 focus:ring-emerald-500" />
-                      <span className="text-xs text-neutral-400 leading-relaxed">
-                        I confirm that I have copied or downloaded my recovery PIN and stored it in a safe, private place.
-                      </span>
-                    </label>
-
-                    <button 
-                      onClick={handleCompleteSetup} 
-                      disabled={!pinSaved || isProcessing}
-                      className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-600 text-white font-bold py-3.5 rounded-xl transition-all shadow-lg flex items-center justify-center gap-2"
-                    >
-                      Complete Setup & Enter System
-                    </button>
-                  </motion.div>
-                );
-              })()}
 
             </AnimatePresence>
           </div>
