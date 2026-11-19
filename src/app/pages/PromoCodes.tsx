@@ -78,7 +78,7 @@ export function PromoCodesPage() {
                   <div className="flex items-center gap-4 text-[11px] text-neutral-600">
                     <span>Used: <strong className="text-neutral-400">{pc.usageCount}</strong> / {pc.isLimitedUses === false ? 'Unlimited' : pc.maxUsage}</span>
                     {pc.expiresAt && <span>Expires: <strong className="text-neutral-400">{format(new Date(pc.expiresAt), 'MMM d, yyyy')}</strong></span>}
-                    {pc.createdAt && {pc.createdAt && <span>Created: {format(new Date(pc.createdAt), 'MMM d')}</span>}}
+                    {pc.createdAt && <span>Created: {format(new Date(pc.createdAt), 'MMM d')}</span>}
                   </div>
                   {pc.isLimitedUses !== false && pc.maxUsage > 0 && (<div className="mt-2 h-1.5 bg-neutral-800 rounded-full overflow-hidden w-full max-w-xs">
                     <div className="h-full bg-violet-500 rounded-full transition-all" style={{ width: `${Math.min((pc.usageCount/pc.maxUsage)*100,100)}%` }} />
