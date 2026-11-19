@@ -255,7 +255,7 @@ async function loadConfig(db) {
   // would hammer Gmail with doomed logins (which can lock the mailbox), so treat
   // it as unconfigured and skip cleanly instead.
   const smtpReady = !!pick(process.env.SMTP_HOST, 'smtpHost')
-    && (!pick(process.env.SMTP_USER, 'smtpUser') || !!pick(process.env.SMTP_PASS, 'smtpPass'));
+    && (!pick(process.env.SMTP_USER, 'smtpUser') || !!pick(process.env.SMTP_PASS, 'smtpPass').replace(/\s+/g, ''));
 
   const provider = (() => {
     const explicit = pick(process.env.EMAIL_PROVIDER, 'emailProvider').toLowerCase();
@@ -279,7 +279,9 @@ async function loadConfig(db) {
     smtpPort: Number(pick(process.env.SMTP_PORT, 'smtpPort')) || 587,
     smtpSecure: ['1', 'true', 'yes'].includes(String(pick(process.env.SMTP_SECURE, 'smtpSecure')).toLowerCase()),
     smtpUser: pick(process.env.SMTP_USER, 'smtpUser'),
-    smtpPass: pick(process.env.SMTP_PASS, 'smtpPass'),
+    // Gmail shows App Passwords grouped as "abcd efgh ijkl mnop"; pasting them
+    // verbatim makes SMTP reject the login, so drop the spaces.
+    smtpPass: pick(process.env.SMTP_PASS, 'smtpPass').replace(/\s+/g, ''),
   };
 }
 
