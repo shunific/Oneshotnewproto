@@ -1172,8 +1172,6 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
                   )}
                   
                   <div className="space-y-2">
-                    {showArchivedMenu && <p className="text-[10px] text-neutral-500 font-bold uppercase tracking-wider mb-2">Archived Items (Hidden from POS)</p>}
-                    
                     {inventory.filter((i: any) => showArchivedMenu ? !i.isActive : i.isActive).map((item: any) => (
                       editingItem?.id === item.id ? (
                         <form key={`edit-${item.id}`} onSubmit={handleSaveMenuItem} className="bg-neutral-900 border border-amber-900/40 rounded-xl p-4 space-y-3">
