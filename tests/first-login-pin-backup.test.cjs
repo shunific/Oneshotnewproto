@@ -8,3 +8,18 @@ test('PIN view starts with acknowledgement disabled and successful copy still re
 test('clipboard failure cannot enable backup acknowledgement',async t=>{browser(t,{copyFails:true});const h=harness();await h.button('Copy PIN').props.onClick();assert.equal(h.checkbox().props.disabled,true);assert.equal(h.button('Continue to POS').props.disabled,true);assert.match(h.find(n=>n.props?.role==='alert').props.children,/Copy failed/);});
 test('requested download does not claim file saved or automatically acknowledge cancelled saves',t=>{const b=browser(t);const h=harness();h.button('Save as .txt').props.onClick();assert.equal(b.downloads(),1);assert.equal(h.checkbox().props.checked,false);assert.equal(h.button('Continue to POS').props.disabled,true);assert.match(h.find(n=>n.props?.role==='status').props.children,/download was requested.*Check that the file was saved.*cancelled/);assert.equal(h.completed(),0);});
 test('failed server confirmation keeps PIN visible and requires retry without duplicate in-flight acknowledgements',async t=>{browser(t);let calls=0,release;const wait=new Promise(resolve=>release=resolve);const h=harness({onContinue:async()=>{calls++;await wait;throw new Error('synthetic lost response');}});await h.button('Copy PIN').props.onClick();h.checkbox().props.onChange({target:{checked:true}});const button=h.button('Continue to POS');const first=button.props.onClick();await button.props.onClick();assert.equal(calls,1);assert.equal(h.checkbox().props.disabled,true);release();await first;assert.equal(h.find(n=>n.props?.['aria-label']==='Recovery PIN').props.children,'0732');assert.match(h.find(n=>n.props?.role==='alert').props.children,/not confirmed.*sign in again/);assert.equal(h.button('Continue to POS').props.disabled,false);});
+test('PIN backup opens a named modal and keeps it open on Escape until the user confirms or signs out', () => {
+  const h = harness();
+  const dialog = h.find(node => node.type === 'dialog');
+  assert.ok(dialog);
+  assert.equal(dialog.props['aria-labelledby'], h.find(node => node.type === 'h2').props.id);
+  let opened = 0;
+  const element = { open: false, showModal() { this.open = true; opened++; } };
+  const attach = dialog.ref;
+  attach(element);
+  attach(element);
+  assert.equal(opened, 1);
+  const escape = new Event('cancel', { cancelable: true });
+  dialog.props.onCancel(escape);
+  assert.equal(escape.defaultPrevented, true);
+});

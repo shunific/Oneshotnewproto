@@ -1,7 +1,11 @@
 import { useRef, useState } from 'react';
 
+function openPinDialog(dialog: HTMLDialogElement | null) {
+  if (dialog && !dialog.open) dialog.showModal();
+}
+
 export function FirstLoginPinBackup({ pin, username, onContinue, onRestart }: {
-  pin: string; username: string; onContinue: () => Promise<void>; onRestart: () => void;
+  pin: string; username: string; onContinue: () => Promise<void>; onRestart: () => Promise<void>;
 }) {
   const [action, setAction] = useState<'copied' | 'download' | null>(null);
   const [confirmed, setConfirmed] = useState(false);
@@ -27,9 +31,18 @@ export function FirstLoginPinBackup({ pin, username, onContinue, onRestart }: {
     catch { setError('Backup confirmation was not confirmed by the server. Retry, or sign in again.'); }
     finally { pending.current = false; setBusy(false); }
   };
-  return <section className="space-y-5">
-    <h2 className="text-xl font-bold">Keep your Recovery PIN</h2>
-    <p className="text-sm text-neutral-400">Use this four-digit PIN to recover your account if you forget your password. Copy it or save it privately before continuing.</p>
+  const restart = async () => {
+    if (pending.current) return;
+    pending.current = true; setBusy(true); setError('');
+    try { await onRestart(); }
+    catch { setError('Sign-out failed. Please try again.'); }
+    finally { pending.current = false; setBusy(false); }
+  };
+  return <dialog ref={openPinDialog} onCancel={event => event.preventDefault()}
+    aria-labelledby="pin-backup-title" aria-describedby="pin-backup-help"
+    className="m-auto w-[calc(100%-2rem)] max-w-md max-h-[90dvh] space-y-5 overflow-y-auto rounded-2xl border border-neutral-700 bg-neutral-900 p-6 text-white shadow-2xl backdrop:bg-black/75">
+    <h2 id="pin-backup-title" className="text-xl font-bold">Keep your Recovery PIN</h2>
+    <p id="pin-backup-help" className="text-sm text-neutral-400">Use this four-digit PIN to recover your account if you forget your password. Copy it or save it privately before continuing.</p>
     <p aria-label="Recovery PIN" className="text-center text-4xl font-mono tracking-[0.4em]">{pin}</p>
     <div className="flex gap-3">
       <button type="button" disabled={busy} onClick={copy} className="flex-1 rounded-xl bg-neutral-800 px-3 py-3">Copy PIN</button>
@@ -40,6 +53,6 @@ export function FirstLoginPinBackup({ pin, username, onContinue, onRestart }: {
     <label className="flex gap-3 text-sm"><input type="checkbox" disabled={!action || busy} checked={confirmed} onChange={event => setConfirmed(event.target.checked)} />I have kept the copied PIN privately, or verified that the downloaded file was saved.</label>
     {error && <p role="alert" className="text-sm text-rose-400">{error}</p>}
     <button type="button" disabled={!action || !confirmed || busy} onClick={complete} className="w-full rounded-xl bg-emerald-600 py-3 font-bold disabled:opacity-50">{busy ? 'Confirming…' : 'Continue to POS'}</button>
-    <button type="button" disabled={busy} onClick={onRestart} className="text-sm text-neutral-400 underline">Sign in again</button>
-  </section>;
+    <button type="button" disabled={busy} onClick={restart} className="text-sm text-neutral-400 underline">Sign in again</button>
+  </dialog>;
 }

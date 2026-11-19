@@ -11,7 +11,7 @@ import heroFallbackImg from 'figma:asset/15fb8dcab89448c8f2ad20fb9946631b1c24696
 import venueFallbackImg from 'figma:asset/622002b1a57eb609a09cacd650764fb95c911672.png';
 import playerFallbackImg from 'figma:asset/759b04149309a4f38a99d59a2ef822b4e59fd5d3.png';
 
-type FormView = 'login' | 'reset' | 'force-change' | 'recovery-pin';
+type FormView = 'login' | 'reset' | 'force-change';
 
 const getPasswordStrength = (pw: string) => {
   if (!pw) return { score: 0, color: 'bg-neutral-800/50', isValid: false };
@@ -100,7 +100,6 @@ export function OfflineLogin() {
       if (typeof result === 'object') {
         setPassword('');
         setGeneratedPin(result.recoveryPin);
-        switchView('recovery-pin');
       } else if (result === 'setup') switchView('force-change');
       else enterPortal(result);
     } catch (error) {
@@ -119,7 +118,10 @@ export function OfflineLogin() {
       setConfirmPassword('');
       switchView('login');
       toast.success('Signed out successfully.');
-    } catch { toast.error('Sign-out failed. Please try again.'); }
+    } catch (error) {
+      if (generatedPin) throw error;
+      toast.error('Sign-out failed. Please try again.');
+    }
   };
 
   const handleForceChange = async (e: React.FormEvent) => {
@@ -137,7 +139,7 @@ export function OfflineLogin() {
       setPassword('');
       setNewPassword('');
       setConfirmPassword('');
-      switchView('recovery-pin');
+      switchView('login');
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Account setup failed.');
     } finally {
@@ -171,6 +173,11 @@ export function OfflineLogin() {
 
   return (
     <div className="min-h-screen bg-neutral-950 flex flex-col lg:flex-row font-sans overflow-hidden relative">
+      {generatedPin && (
+        <FirstLoginPinBackup pin={generatedPin} username={username.trim()}
+          onContinue={async () => enterPortal(await confirmPinBackup())}
+          onRestart={restartLogin} />
+      )}
       
       {/* 🟢 CLOSE CONFIRMATION MODAL */}
       <AnimatePresence>
@@ -384,12 +391,6 @@ export function OfflineLogin() {
                     </button>
                   </form>
                 </motion.div>
-              )}
-
-              {view === 'recovery-pin' && (
-                <FirstLoginPinBackup pin={generatedPin} username={username.trim()}
-                  onContinue={async () => enterPortal(await confirmPinBackup())}
-                  onRestart={restartLogin} />
               )}
 
             </AnimatePresence>
