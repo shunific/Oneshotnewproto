@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase, publicSupabase } from '../utils/supabase';
-import { resolveMapEmbedUrl } from '../utils/maps';
+import { resolveMapEmbedUrl, resolveMapOpenUrl } from '../utils/maps';
 import { 
   addMinutes, format, isToday, isBefore, startOfDay, isSameDay, differenceInDays, differenceInMinutes 
 } from 'date-fns';
@@ -1100,7 +1100,10 @@ export function HomePage() {
     }
   };
 
+  const canManageBooking = (booking: any) => Boolean(currentUser?.email && booking?.email?.trim().toLowerCase() === currentUser.email.trim().toLowerCase());
+
   const handleCancelBooking = async (id: string, dateString: string, timeSlot: string) => {
+    if (!canManageBooking(reservations.find((row: any) => row.id === id))) return;
     let notice = '';
     try {
       const resDate = new Date(dateString);
@@ -1149,6 +1152,7 @@ export function HomePage() {
   };
 
   const handleRequestReschedule = async (id: string, r: any) => {
+    if (!canManageBooking(r)) return;
     if ((r.rescheduleCount || 0) >= 1) {
       setToastMsg({ title: "Limit Reached", desc: "Only 1 reschedule allowed per booking.", type: "error" });
       return;
@@ -1162,7 +1166,7 @@ export function HomePage() {
 
   const executeReschedule = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!rescheduleData?.newDate || !rescheduleData?.timeSlot || !rescheduleData.reservation) return;
+    if (!rescheduleData?.newDate || !rescheduleData?.timeSlot || !canManageBooking(rescheduleData.reservation)) return;
 
     const validation = validateTimeSlotHelper(rescheduleData.timeSlot, rescheduleData.reservation.durationHours, rescheduleData.newDate, rescheduleData.reservation.tableId);
     if (validation !== 'valid') {
@@ -1630,13 +1634,7 @@ export function HomePage() {
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="text-xl font-bold text-white">{cms.address || "Autobase OAX, Cainta"}</h3>
                     <a
-                      href={
-                        cms.googleMapsEmbedUrl && cms.googleMapsEmbedUrl.startsWith('http') && !cms.googleMapsEmbedUrl.includes('/maps/embed')
-                          ? cms.googleMapsEmbedUrl
-                          : (cms.address && cms.address.trim() !== ''
-                              ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(cms.address.trim())}`
-                              : `https://www.google.com/maps/search/?api=1&query=One%20Shot%20Bar%20and%20Billiards%20Cainta`)
-                      }
+                      href={resolveMapOpenUrl(cms.googleMapsEmbedUrl, cms.address)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1 transition-colors"
@@ -2524,7 +2522,7 @@ export function HomePage() {
                                           className="absolute right-0 top-full mt-2 w-48 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl shadow-2xl overflow-hidden z-50 flex flex-col py-1"
                                         >
                                           {/* Cancel / Request Refund */}
-                                          {(r.status === 'pending' || r.status === 'pending-reschedule' || r.status === 'confirmed') && currentUser && (
+                                          {(r.status === 'pending' || r.status === 'pending-reschedule' || r.status === 'confirmed') && canManageBooking(r) && (
                                             <button 
                                               onClick={(e) => { e.stopPropagation(); handleCancelBooking(r.id, r.date, r.timeSlot); setOpenActionRowId(null); }} 
                                               className="px-4 py-3 text-left text-xs font-bold text-rose-600 dark:text-rose-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors border-b border-neutral-100 dark:border-neutral-800/50 cursor-pointer"
@@ -2534,7 +2532,7 @@ export function HomePage() {
                                           )}
 
                                           {/* Request Reschedule */}
-                                          {(r.status === 'pending' || r.status === 'confirmed') && currentUser && (
+                                          {(r.status === 'pending' || r.status === 'confirmed') && canManageBooking(r) && (
                                              <button onClick={(e) => { e.stopPropagation(); handleRequestReschedule(r.id, r); setOpenActionRowId(null); }} className="px-4 py-3 text-left text-xs font-bold text-violet-600 dark:text-violet-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors border-b border-neutral-100 dark:border-neutral-800/50">
                                                Request Reschedule
                                              </button>

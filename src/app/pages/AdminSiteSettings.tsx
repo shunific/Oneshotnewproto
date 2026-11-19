@@ -1,3 +1,4 @@
+import { resolveMapEmbedUrl, resolveMapOpenUrl } from "../utils/maps";
 import React, { useState, useEffect, useRef } from "react";
 import { useAppContext } from "../context/AppContext";
 import { 
@@ -700,7 +701,7 @@ export function AdminSiteSettings() {
           </div>
           <div className="flex items-end">
             <a 
-              href={`https://www.google.com/maps/search/?api=1&query=${mapsQuery}`} 
+              href={resolveMapOpenUrl(locationForm.googleMapsEmbedUrl, locationForm.address || decodeURIComponent(mapsQuery))} 
               target="_blank" 
               rel="noopener noreferrer"
               className="w-full py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors border border-neutral-700"
@@ -747,7 +748,7 @@ export function AdminSiteSettings() {
               height="100%" 
               style={{ border: 0, filter: "invert(90%) hue-rotate(180deg)" }} 
               loading="lazy" 
-              src={`https://maps.google.com/maps?q=${mapsQuery}&t=&z=15&ie=UTF8&iwloc=&output=embed`}
+              src={resolveMapEmbedUrl(locationForm.googleMapsEmbedUrl, decodeURIComponent(mapsQuery))}
             />
           </div>
         </div>

@@ -1,50 +1,36 @@
-export function resolveMapEmbedUrl(rawUrl: string, fallbackAddress: string = ''): string {
-  const cleanInput = (rawUrl || '').trim();
-  
-  if (cleanInput) {
-    // 1. Extract from <iframe src="...">
-    const iframeMatch = cleanInput.match(/src=["']([^"']+)["']/i);
-    const candidate = iframeMatch ? iframeMatch[1] : cleanInput;
+function googleMapInput(raw: string): URL | undefined {
+  const value = (raw.match(/<iframe\b[^>]*?\bsrc\s*=\s*["']([^"']+)/i)?.[1] || raw).replace(/&amp;/gi, '&').trim();
+  try {
+    const url = new URL(value);
+    if (url.protocol === 'https:' && /^(?:(?:(?:www|maps)\.)?google\.(?:com|com\.ph)|maps\.app\.goo\.gl|goo\.gl)$/.test(url.hostname)) return url;
+  } catch { /* A saved address can be plain text. */ }
+}
 
-    // 2. If it is already an official Google Maps embed URL
-    if (candidate.includes('/maps/embed') || candidate.includes('output=embed')) {
-      return candidate;
-    }
+const defaultPlace = 'One Shot Bar and Billiards, Cainta, Rizal';
 
-    // 3. If it contains @lat,lng
-    const atCoords = candidate.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
-    if (atCoords) {
-      return `https://maps.google.com/maps?q=${atCoords[1]},${atCoords[2]}&t=&z=16&ie=UTF8&iwloc=&output=embed`;
-    }
+function mapQuery(url: URL | undefined, address: string, raw: string): string {
+  const pin = url?.searchParams.get('pb')?.match(/!3d(-?[\d.]+)!4d(-?[\d.]+)/);
+  return url?.searchParams.get('q') || url?.searchParams.get('query') || url?.searchParams.get('center')
+    || (pin && pin[1] + ',' + pin[2]) || address.trim()
+    || (!/[<>]|^https?:/i.test(raw) && raw.trim()) || defaultPlace;
+}
 
-    // 4. If it has /place/Place+Name
-    const placeMatch = candidate.match(/\/place\/([^/@?]+)/);
-    if (placeMatch) {
-      const decoded = decodeURIComponent(placeMatch[1].replace(/\+/g, ' '));
-      return `https://maps.google.com/maps?q=${encodeURIComponent(decoded)}&t=&z=16&ie=UTF8&iwloc=&output=embed`;
-    }
+export function resolveMapOpenUrl(raw = '', address = ''): string {
+  const url = googleMapInput(raw);
+  if (url && !url.pathname.startsWith('/maps/embed') && url.searchParams.get('output') !== 'embed') return url.href;
+  const query = mapQuery(url, address, raw);
+  return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(query);
+}
 
-    // 5. If it has ?q=query
-    const qMatch = candidate.match(/[?&]q=([^&]+)/);
-    if (qMatch) {
-      const decoded = decodeURIComponent(qMatch[1].replace(/\+/g, ' '));
-      return `https://maps.google.com/maps?q=${encodeURIComponent(decoded)}&t=&z=16&ie=UTF8&iwloc=&output=embed`;
-    }
-
-    // 6. Generic URLs or queries (e.g. share link maps.app.goo.gl or place name)
-    if (candidate.startsWith('http://') || candidate.startsWith('https://')) {
-      if (fallbackAddress && fallbackAddress.trim()) {
-        return `https://maps.google.com/maps?q=${encodeURIComponent(fallbackAddress.trim())}&t=&z=16&ie=UTF8&iwloc=&output=embed`;
-      }
-    } else {
-      return `https://maps.google.com/maps?q=${encodeURIComponent(candidate)}&t=&z=16&ie=UTF8&iwloc=&output=embed`;
-    }
+export function resolveMapEmbedUrl(raw = '', address = ''): string {
+  const url = googleMapInput(raw);
+  if (url && (url.pathname.startsWith('/maps/embed') || url.searchParams.get('output') === 'embed')) return url.href;
+  const coords = url?.pathname.match(/@(-?[\d.]+),(-?[\d.]+)/);
+  const place = url?.pathname.match(/\/place\/([^/@]+)/)?.[1];
+  let label = '';
+  if (place) {
+    try { label = decodeURIComponent(place.replace(/\+/g, ' ')); } catch { label = ''; }
   }
-
-  // Fallback to address
-  if (fallbackAddress && fallbackAddress.trim()) {
-    return `https://maps.google.com/maps?q=${encodeURIComponent(fallbackAddress.trim())}&t=&z=16&ie=UTF8&iwloc=&output=embed`;
-  }
-
-  return 'https://maps.google.com/maps?q=One%20Shot%20Bar%20and%20Billiards%20Cainta&t=&z=16&ie=UTF8&iwloc=&output=embed';
+  const query = label || (coords && coords[1] + ',' + coords[2]) || mapQuery(url, address, raw);
+  return 'https://maps.google.com/maps?output=embed&q=' + encodeURIComponent(query);
 }
