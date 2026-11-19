@@ -255,6 +255,43 @@ export function isServedFromLocalMachine(): boolean {
   return protocol === 'file:' || hostname === '' || hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
 }
 
+function cloudFloorTables(rows: any[]): Table[] {
+  const mappedCloudTables: Table[] = rows.map(t => {
+    let session: any = undefined;
+    const rawSession = t.sessionData || t.sessiondata || t.session;
+    if (rawSession) {
+      try {
+        session = typeof rawSession === 'string' ? JSON.parse(rawSession) : rawSession;
+      } catch (e) {
+        session = undefined;
+      }
+    }
+    const rawActive = t.isActive ?? t.isactive ?? t.is_active;
+    const isActive = rawActive !== undefined ? (rawActive === 1 || rawActive === true || rawActive === 'true') : true;
+
+    return {
+      id: String(t.id),
+      name: t.name || `Table ${t.id}`,
+      status: (t.status as TableStatus) || 'available',
+      isActive,
+      maintenanceReason: t.maintenanceReason || t.maintenancereason || undefined,
+      session
+    };
+  });
+  return selectCanonicalTables(mappedCloudTables);
+}
+
+async function loadPublicQueue(): Promise<QueueItem[] | null> {
+  const { data } = await publicSupabase.from('queue')
+    .select('id,status,partySize,partysize,queueNumber,queuenumber,arrivalTime,arrivaltime')
+    .in('status', ['waiting', 'called']);
+  return data && data.map(row => {
+    const queueNumber = row.queueNumber ?? row.queuenumber;
+    return { id: row.id, status: row.status, queueNumber, partySize: row.partySize ?? row.partysize,
+      arrivalTime: new Date(row.arrivalTime ?? row.arrivaltime), customerName: 'Party #' + queueNumber, contactNumber: '' };
+  }).sort((a,b) => a.queueNumber - b.queueNumber);
+}
+
 export function AppProvider({ children }: { children: ReactNode }) {
   const [isInitializing, setIsInitializing] = useState(true);
 
@@ -435,7 +472,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(interval);
   }, []);
 
-  const refreshLiveMonitor = async () => {
+  const refreshLiveMonitor = useCallback(async () => {
+    if (!isServedFromLocalMachine()) {
+      const [floor, waiting] = await Promise.all([publicSupabase.from('tables').select('*'), loadPublicQueue()]);
+      if (floor.data) setTables(cloudFloorTables(floor.data));
+      if (waiting) setQueue(waiting);
+      return;
+    }
     try {
       const [tablesRes, queueRes, resRes] = await Promise.all([ 
         fetch('http://localhost:3001/api/tables').catch(() => null), 
@@ -452,7 +495,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (queueRes && queueRes.ok) { const newQueue = await queueRes.json(); setQueue(prev => JSON.stringify(prev) !== JSON.stringify(newQueue) ? newQueue : prev); }
       if (resRes && resRes.ok) { const newRes = await resRes.json(); setReservations(prev => JSON.stringify(prev) !== JSON.stringify(newRes) ? newRes : prev); }
     } catch (error) {}
-  };
+  }, []);
 
   // Safely read a JSON response. Static hosts (Vercel) rewrite unknown
   // /api/* routes to index.html, so blindly calling .json() throws and used to
@@ -518,45 +561,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const [
         { data: resData, error: resErr }, { data: annData }, { data: cmsData }, 
         { data: settingsData }, { data: closedDatesData }, { data: promoData }, { data: eventsData }, { data: feedData },
-        { data: cloudTablesData }
+        { data: cloudTablesData }, cloudWaiting
       ] = await Promise.all([
         publicSupabase.from('reservations').select('*'), publicSupabase.from('announcements').select('*'), 
         publicSupabase.from('cms').select('*'), publicSupabase.from('system_settings').select('*'), 
         publicSupabase.from('closed_dates').select('*'), publicSupabase.from('promo_codes').select('*'), 
         publicSupabase.from('events').select('*'), publicSupabase.from('feedback').select('*'),
-        publicSupabase.from('tables').select('*')
+        publicSupabase.from('tables').select('*'), Array.isArray(localQueue) ? null : loadPublicQueue()
       ]);
+      if (cloudWaiting) setQueue(cloudWaiting);
 
       if (resErr) {
         console.warn("Supabase reservations notice:", resErr.message || resErr);
       }
 
       if (cloudTablesData && (cloudTablesData as any[]).length > 0) {
-        const mappedCloudTables: Table[] = (cloudTablesData as any[]).map(t => {
-          let session: any = undefined;
-          const rawSession = t.sessionData || t.sessiondata || t.session;
-          if (rawSession) {
-            try {
-              session = typeof rawSession === 'string' ? JSON.parse(rawSession) : rawSession;
-            } catch (e) {
-              session = undefined;
-            }
-          }
-          const rawActive = t.isActive ?? t.isactive ?? t.is_active;
-          const isActive = rawActive !== undefined ? (rawActive === 1 || rawActive === true || rawActive === 'true') : true;
-
-          return {
-            id: String(t.id),
-            name: t.name || `Table ${t.id}`,
-            status: (t.status as TableStatus) || 'available',
-            isActive,
-            maintenanceReason: t.maintenanceReason || t.maintenancereason || undefined,
-            session
-          };
-        });
-        // Keep the 8 canonical venue tables only (cloud contains duplicate test rows).
-        const canonicalCloudTables = selectCanonicalTables(mappedCloudTables);
-
+        const canonicalCloudTables = cloudFloorTables(cloudTablesData);
         setTables(prev => {
           // If local tables fetch failed (like when viewing customer facing site without local machine running),
           // adopt cloud tables from Supabase!
