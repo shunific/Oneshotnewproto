@@ -103,7 +103,7 @@ export function Legal() {
               </ul>
 
               <h2 className="text-xl font-bold text-white mt-8 mb-4 border-b border-neutral-800 pb-2">3. Data Security & Storage</h2>
-              <p>Your data is securely stored using industry-standard encryption via Supabase. We do not sell, rent, or share your personal data with third-party advertisers. Supabase Auth manages customer passwords. Staff cannot view them in the POS.</p>
+              <p>Your data is securely stored using industry-standard encryption via Supabase. We do not sell, rent, or share your personal data with third-party advertisers. Supabase Auth manages customer passwords. Staff cannot view customer passwords.</p>
 
               <h2 className="text-xl font-bold text-white mt-8 mb-4 border-b border-neutral-800 pb-2">4. Account Deletion</h2>
               <p>Choose “Delete Account” in your account settings to mark your account for deletion. The system replaces the name and phone number in your profile and retains historical transaction records.</p>

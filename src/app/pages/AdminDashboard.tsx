@@ -192,7 +192,7 @@ export function AdminDashboard() {
     const recentVoids = activities.filter((a: any) => a.type === 'admin_action' && a.description.includes('Voided') && new Date(a.timestamp).getTime() > Date.now() - 86400000);
     if (recentVoids.length > 5) {
        alerts.push({
-         id: 'alert_voids', title: 'Unusual POS Activity',
+         id: 'alert_voids', title: 'Unusual Order Activity',
          desc: `Detected ${recentVoids.length} voided transactions in the last 24 hours. Please review the system logs.`,
          style: { box: 'bg-rose-950/20 border-rose-900/30', dot: 'bg-rose-500', title: 'text-rose-400', btn: 'bg-rose-600/20 text-rose-400 hover:bg-rose-600/30 border-rose-500/20' },
          action: { label: 'View Logs', onClick: () => navigate('/admin/activity') }

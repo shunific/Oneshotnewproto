@@ -247,7 +247,7 @@ export function selectCanonicalTables<T extends { id?: any; name?: any }>(rows: 
   return [...byNumber.entries()].sort((a, b) => a[0] - b[0]).map(([, row]) => row);
 }
 
-// The customer site is also deployed statically (Vercel). The POS API only
+// The customer site is also deployed statically (Vercel). The desktop API only
 // exists on the venue's machine, so asking the static host for /api/* answers
 // with 405 and floods the console. Only talk to it when served locally.
 export function isServedFromLocalMachine(): boolean {
@@ -508,7 +508,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try { return await response.json(); } catch { return null; }
   };
 
-  // Local POS API: try the same-origin route first, then the local machine.
+  // Local management API: try the same-origin route first, then the local machine.
   // Returns null (never throws) when the route is unavailable or not JSON.
   const fetchLocalJson = async (path: string) => {
     let servedStaticHtml = false;
@@ -755,7 +755,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setReservations(mappedRes);
 
         // 3. CACHE RESERVATIONS TO LOCAL SQLITE FOR OFFLINE FALLBACK
-        // Only the local POS serves this endpoint; skip it on the static
+        // Only the desktop app serves this endpoint; skip it on the static
         // deployment instead of letting it 405 on every sync.
         if (isServedFromLocalMachine()) {
           fetch('http://localhost:3001/api/cache-reservations', {

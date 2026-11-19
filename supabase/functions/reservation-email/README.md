@@ -1,9 +1,9 @@
 # Reservation email worker
 
-Sends reservation emails from Supabase, so the POS app does not need to be open.
+Sends reservation emails from Supabase, so the desktop app does not need to be open.
 
 ```
-website / POS
+website / desktop app
       │  insert or update public.reservations
       ▼
 reservation_mail.enqueue_reservation_emails()   (DB trigger)
@@ -100,13 +100,13 @@ website's current contact details.
    # {"smtp":"ready"}
    ```
 
-7. Disable the POS sender to avoid duplicate emails:
+7. Disable the desktop sender to avoid duplicate emails:
 
    ```dotenv
    EMAIL_NOTIFICATIONS_ENABLED=false
    ```
 
-   Restart the POS after changing its `.env`.
+   Restart the desktop app after changing its `.env`.
 
 ## Monitoring
 

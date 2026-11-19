@@ -2,7 +2,7 @@
 -- Reservation email queue
 --
 -- Every reservation change in public.reservations is written by both the
--- website and the POS. This trigger records the customer's address and queues
+-- website and the desktop app. This trigger records the customer's address and queues
 -- one email per meaningful change. A cron job invokes the reservation-email
 -- Edge Function once a minute; the function leases a small batch and sends it
 -- over Gmail SMTP (port 465).
