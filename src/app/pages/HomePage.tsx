@@ -1,3 +1,5 @@
+import { BookingCalendar } from '../components/BookingCalendar';
+import { bookingDayKey, slotCapacity } from '../utils/bookingSchedule.js';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
@@ -18,122 +20,23 @@ import { useAppContext, HOURLY_RATE, DOWN_PAYMENT_RATE, selectCanonicalTables } 
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
 import { ReservationStatusBadge } from '../components/ReservationStatusBadge';
 import {
-  eventForTable as findEventForTable, isSlotBlockedByEvent,
+  eventForTable as findEventForTable,
   isTableBlockedAllDay, formatEventWindow,
 } from '../utils/eventAvailability.js';
 
 import logoImg from 'figma:asset/40eb82831843e17a3c48a360fd80f0aaaa58ddc8.png';
 import heroImg1 from 'figma:asset/15fb8dcab89448c8f2ad20fb9946631b1c246968.png';
 
-const DAYS_OF_WEEK = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-
 const todayStart = startOfDay(new Date());
 
 type Section = 'home' | 'reservations' | 'events' | 'rates' | 'about' | 'feedback';
-
-function MiniCalendar({ selectedDate, onSelect, reservedDates, closedDates, onClosedClick, minDate = new Date() }: { selectedDate: Date | null; onSelect: (d: Date) => void; reservedDates: Date[]; closedDates: any[]; onClosedClick?: (d: Date, reason: string) => void; minDate?: Date }) {
-  const today = minDate;
-  today.setHours(0, 0, 0, 0);
-  
-  const maxDate = new Date(today);
-  maxDate.setDate(today.getDate() + 30);
-
-  const [viewDate, setViewDate] = useState(() => { const d = new Date(today); d.setDate(1); d.setHours(0, 0, 0, 0); return d; });
-
-  const year = viewDate.getFullYear();
-  const month = viewDate.getMonth();
-  const firstDayOfMonth = new Date(year, month, 1).getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const daysInPrevMonth = new Date(year, month, 0).getDate();
-
-  const cells: Array<{ day: number; currentMonth: boolean; date: Date }> = [];
-  for (let i = firstDayOfMonth - 1; i >= 0; i--) { const d = new Date(year, month - 1, daysInPrevMonth - i); cells.push({ day: daysInPrevMonth - i, currentMonth: false, date: d }); }
-  for (let d = 1; d <= daysInMonth; d++) { cells.push({ day: d, currentMonth: true, date: new Date(year, month, d) }); }
-  const remaining = 42 - cells.length;
-  for (let d = 1; d <= remaining; d++) { cells.push({ day: d, currentMonth: false, date: new Date(year, month + 1, d) }); }
-
-  const isReserved = (date: Date) => reservedDates.some(rd => { const d = new Date(rd); d.setHours(0, 0, 0, 0); return d.getTime() === date.getTime(); });
-  
-  // 🟢 Fixed: Properly compares closed dates using isSameDay for reliable matching
-  // 🟢 Fixed: Parses "YYYY-MM-DD" strictly into local time to prevent UTC timezone shifting bugs
-  const getClosedData = (date: Date) => (closedDates || []).find((cd: any) => { 
-    if (cd.type === 'weekly') return date.getDay() === cd.dayOfWeek;
-    
-    // Safety fallback to support different database column names
-    const targetStr = cd.date || cd.closedDate || cd.closed_date;
-    if (!targetStr) return false;
-    
-    // Extract exact local YYYY-MM-DD without UTC conversion
-    const [y, m, d] = targetStr.split('T')[0].split('-').map(Number);
-    return date.getFullYear() === y && date.getMonth() === (m - 1) && date.getDate() === d; 
-  });
-
-  const isPast = (date: Date) => date < today;
-  const isSelected = (date: Date) => selectedDate ? date.getTime() === (() => { const s = new Date(selectedDate); s.setHours(0,0,0,0); return s.getTime(); })() : false;
-  const isTodayDate = (date: Date) => date.getTime() === today.getTime();
-
-  return (
-    <div className="bg-transparent rounded-2xl select-none">
-      <div className="flex items-center justify-between mb-4 px-1">
-        <button type="button" onClick={() => setViewDate(d => new Date(d.getFullYear(), d.getMonth() - 1))} className="p-1 rounded text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"><ChevronLeft size={16} /></button>
-        <span className="text-xs font-bold text-white">{MONTHS[month]} {year}</span>
-        <button type="button" onClick={() => setViewDate(d => new Date(d.getFullYear(), d.getMonth() + 1))} className="p-1 rounded text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"><ChevronRight size={16} /></button>
-      </div>
-      <div className="grid grid-cols-7 mb-2">
-        {DAYS_OF_WEEK.map(d => <div key={d} className="text-center text-[8px] text-neutral-500 font-bold uppercase tracking-widest">{d}</div>)}
-      </div>
-      <div className="grid grid-cols-7 gap-y-1">
-        {cells.map(({ day, currentMonth, date }, idx) => {
-          const past = isPast(date); 
-          const tooFar = date > maxDate; 
-          const selected = isSelected(date); 
-          const today_ = isTodayDate(date);
-          const closedData = getClosedData(date);
-          const closed = !!closedData && currentMonth;
-          const reserved = isReserved(date) && currentMonth; 
-          
-          const disabled = !currentMonth || (past && !closed) || tooFar;
-
-          const handleCellClick = () => {
-            if (disabled) return;
-            if (closed) {
-              onClosedClick?.(date, closedData.reason || 'Closed for maintenance or private event.');
-            } else if (!past && currentMonth) {
-              onSelect(date);
-            }
-          };
-
-          return (
-            <div key={idx} className="flex justify-center">
-              <div 
-                onClick={handleCellClick} 
-                className={`relative flex flex-col items-center justify-center w-8 h-8 rounded-full text-xs transition-all 
-                  ${!currentMonth || tooFar ? 'opacity-20 cursor-default' : ''} 
-                  ${past && currentMonth && !closed ? 'opacity-30 cursor-default text-neutral-600' : ''} 
-                  ${closed && !tooFar ? 'bg-rose-500/10 text-rose-500 border border-rose-500/30 hover:bg-rose-500/20 cursor-pointer' : ''} 
-                  ${selected && !closed ? 'bg-emerald-500 text-white shadow-md cursor-pointer' : ''} 
-                  ${!selected && today_ && !closed ? 'border border-emerald-500 text-emerald-400 cursor-pointer' : ''} 
-                  ${!selected && !disabled && !closed && !today_ ? 'text-neutral-300 hover:bg-neutral-800 cursor-pointer' : ''}`}
-                title={tooFar ? "Advance booking limit reached (30 Days Max)" : closed ? "Venue Closed" : ""}
-              >
-                <span className={`pointer-events-none ${selected ? 'font-bold' : 'font-medium'}`}>{day}</span>
-                {reserved && !selected && !closed && !tooFar && <span className="absolute bottom-0.5 w-1 h-1 rounded-full bg-amber-400 pointer-events-none" />}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
 
 export function HomePage() {
   const navigate = useNavigate();
   const { 
     siteConfig, announcements, tables, reservations, events, 
     closedDates, reservationTerms, rates, addReservation, cancelReservation, 
-    updateReservation, updateReservationStatus, addFeedback, applyPromoCode,
+    forceFullSync, addFeedback, applyPromoCode,
     queue
   } = useAppContext() as any;
 
@@ -919,19 +822,11 @@ export function HomePage() {
     };
   };
 
-  const getMaxDuration = () => {
-    const configuredMax = Number(reservationTerms?.maxHours) || 0;
-    if (!resForm.timeSlot) return configuredMax > 0 ? configuredMax : 6;
-    const { startMins, endMins } = windowForDate(selectedDate);
-    const slotMins = parseMins(resForm.timeSlot);
-    let normalizedSlotMins = slotMins;
-    if (slotMins < startMins) normalizedSlotMins += 24 * 60;
-    const minsUntilClose = endMins - normalizedSlotMins;
-    const windowHours = Math.max(1, Math.floor(minsUntilClose / 60));
-    return configuredMax > 0 ? Math.max(1, Math.min(windowHours, configuredMax)) : windowHours;
-  };
-
-  const maxAllowedDuration = getMaxDuration();
+  const bookingSettings = { rates, reservations, events, closedDates, maxHours: reservationTerms?.maxHours };
+  const capacity = (day: Date | null, time: string, id: string, excludeId?: string) =>
+    slotCapacity(day, time, venueTables.find(t => t.id === id), bookingSettings, excludeId);
+  const maxAllowedDuration = selectedDate && resForm.timeSlot && selectedTableId
+    ? capacity(selectedDate,resForm.timeSlot,selectedTableId) : Number(reservationTerms?.maxHours) || 6;
 
   // STRICTLY 1 hour advance notice
   const ADVANCE_NOTICE_MINS = 60;
@@ -944,57 +839,12 @@ export function HomePage() {
     return `${h}:${m}`;
   }, [selectedDate]);
 
-  const validateTimeSlotHelper = (time: string, duration: number, dateObj: Date | null, tableId: string | null): string => {
-    if (!time || !dateObj) return 'invalid';
-    if (!tableId) return 'no_table';
-    const slotMins = parseMins(time);
-    const requestedStart = new Date(dateObj);
-    const [h, m] = time.split(':').map(Number);
-    requestedStart.setHours(h, m, 0, 0);
-    const requestedEnd = addMinutes(requestedStart, duration * 60);
-
-    if (isToday(requestedStart)) {
-      const nowMins = new Date().getHours() * 60 + new Date().getMinutes();
-      if (slotMins <= nowMins) return 'past'; 
-      if (slotMins < nowMins + 60) return 'advance';
-    }
-
-    const { startMins: startReserveMins, endMins: endReserveMins } = windowForDate(dateObj);
-
-    let normalizedSlot = slotMins;
-    if (slotMins < startReserveMins) normalizedSlot += 24 * 60;
-    if (normalizedSlot < startReserveMins || normalizedSlot >= endReserveMins) return 'closed';
-
-    const sameTableRes = reservations.filter((r: any) => 
-      r.tableId === tableId && 
-      r.status !== 'cancelled' && 
-      r.status !== 'completed' && 
-      isSameDay(new Date(r.date), requestedStart)
-    );
-
-    for (const r of sameTableRes) {
-      const rStart = new Date(r.date);
-      const [rH, rM] = r.timeSlot.split(':').map(Number);
-      rStart.setHours(rH, rM, 0, 0);
-      const rEnd = addMinutes(rStart, r.durationHours * 60);
-      if (requestedStart < rEnd && requestedEnd > rStart) return 'table_conflict';
-    }
-
-    // Timed events only block their allocated tables during the event window.
-    const requestedEndMins = slotMins + duration * 60;
-    if (isSlotBlockedByEvent(events, tableId, requestedStart, slotMins, requestedEndMins)) return 'event_blocked';
-
-    if (isToday(requestedStart)) {
-      const targetTable = tables.find((t: any) => t.id === tableId);
-      if (targetTable?.status === 'occupied' && targetTable.session?.startTime && targetTable.session?.durationMinutes) {
-         const sessionEnd = addMinutes(new Date(targetTable.session.startTime), targetTable.session.durationMinutes);
-         if (requestedStart < sessionEnd) return 'active_conflict';
-      }
-    }
-
-    return 'valid';
+  const validateTimeSlotHelper = (time: string, duration: number, day: Date | null, tableId: string | null, excludeId?: string) => {
+    if (!day || !time || !(duration > 0)) return 'invalid';
+    if (!tableId && !excludeId) return 'no_table';
+    const eligible = tableId ? venueTables.filter(t => t.id === tableId) : venueTables;
+    return eligible.some(t => capacity(day,time,t.id,excludeId) >= duration) ? 'valid' : 'unavailable';
   };
-
   const validateTimeSlot = (time: string, duration: number) => validateTimeSlotHelper(time, duration, selectedDate, selectedTableId);
   const timeValidation = validateTimeSlot(resForm.timeSlot, resForm.duration);
   const [isVerifying, setIsVerifying] = useState(false);
@@ -1125,29 +975,13 @@ export function HomePage() {
     }
 
     try {
-      // 1. Sync to local backend database
-      await fetch(`/api/reservations/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'pending-refund', cancellationReason: 'Customer requested cancellation & refund' })
-      }).catch(() => {});
-
-      // 2. Sync to Supabase
-      await publicSupabase.from('reservations').update({ 
-        status: 'pending-refund',
-        cancellation_reason: 'Customer requested cancellation & refund',
-        cancellationreason: 'Customer requested cancellation & refund'
-      }).eq('id', id).catch(() => {});
-
-      // 3. Update local states
-      setTrackedReservations(prev => prev ? prev.map(r => r.id === id ? { ...r, status: 'pending-refund' } : r) : null);
-      if (typeof updateReservationStatus === 'function') {
-        updateReservationStatus(id, 'pending-refund' as any);
-      }
-
-      setToastMsg({ title: "Booking Cancelled", desc: "Marked as Pending Refund. Please contact staff to verify GCash details.", type: 'success' });
-    } catch (err: any) {
-      setToastMsg({ title: "Request Submitted", desc: "Cancellation request received and pending staff review.", type: 'info' });
+      const { data, error } = await supabase.rpc('request_booking_change', { booking_id: id, request_kind: 'refund' });
+      if (error || data !== 'pending-refund') throw new Error(error?.message || 'No booking was updated.');
+      setTrackedReservations(prev => prev?.map(r => r.id === id ? { ...r, status: data, refundStatus: 'pending' } : r) ?? null);
+      setToastMsg({ title: 'Request Submitted', desc: 'Your cancellation and refund request is pending staff review.', type: 'success' });
+      await forceFullSync();
+    } catch (error: any) {
+      setToastMsg({ title: 'Request could not be saved', desc: error.message || 'Please refresh and try again.', type: 'error' });
     }
   };
 
@@ -1168,9 +1002,9 @@ export function HomePage() {
     e.preventDefault();
     if (!rescheduleData?.newDate || !rescheduleData?.timeSlot || !canManageBooking(rescheduleData.reservation)) return;
 
-    const validation = validateTimeSlotHelper(rescheduleData.timeSlot, rescheduleData.reservation.durationHours, rescheduleData.newDate, rescheduleData.reservation.tableId);
+    const validation = validateTimeSlotHelper(rescheduleData.timeSlot, rescheduleData.reservation.durationHours, rescheduleData.newDate, rescheduleData.reservation.tableId, rescheduleData.reservation.id);
     if (validation !== 'valid') {
-      setToastMsg({ title: "Invalid Schedule", desc: "Please pick a valid available time slot.", type: "error" });
+      setToastMsg({ title: "Invalid Schedule", desc: "That table cannot fit the full session at this time. Check opening hours, existing bookings and the one-hour advance notice.", type: "error" });
       return;
     }
 
@@ -1180,7 +1014,7 @@ export function HomePage() {
     }
 
     setIsReporting(true);
-    const newDateStr = rescheduleData.newDate.toISOString();
+    const newDateStr = bookingDayKey(rescheduleData.newDate);
     // Reuse cancellation_reason to carry the request payload (no schema change needed).
     const marker = `__RESCHEDULE_REQUEST__${JSON.stringify({
       requestedDate: newDateStr,
@@ -1189,19 +1023,11 @@ export function HomePage() {
     })}`;
 
     try {
-      await fetch(`/api/reservations/${rescheduleData.reservation.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'pending-reschedule', cancellationReason: marker })
-      }).catch(() => {});
-
-      const { error } = await publicSupabase.from('reservations').update({
-        status: 'pending-reschedule',
-        cancellation_reason: marker,
-        cancellationreason: marker
-      }).eq('id', rescheduleData.reservation.id);
-
-      if (error) throw error;
+      const { data, error } = await supabase.rpc('request_booking_change', {
+        booking_id: rescheduleData.reservation.id, request_kind: 'reschedule',
+        requested_day: newDateStr, requested_time: rescheduleData.timeSlot, request_reason: rescheduleData.reason.trim()
+      });
+      if (error || data !== 'pending-reschedule') throw new Error(error?.message || 'No booking was updated.');
 
       if (trackForm.reservationId || currentUser) {
         setTrackedReservations(prev => prev ? prev.map(r => r.id === rescheduleData.reservation.id ? {
@@ -1212,8 +1038,9 @@ export function HomePage() {
       }
       setToastMsg({ title: "Request Submitted", desc: "Your reschedule request is pending staff approval.", type: 'success' });
       setRescheduleData(null);
+      await forceFullSync();
     } catch (error) {
-      setToastMsg({ title: "Error", desc: "Failed to submit reschedule request.", type: 'error' });
+      setToastMsg({ title: "Error", desc: error instanceof Error ? error.message : 'Failed to submit reschedule request.', type: 'error' });
     } finally {
       setIsReporting(false);
     }
@@ -1324,7 +1151,6 @@ export function HomePage() {
     }
   };
 
-  const reservedDates = reservations?.filter((r: any) => r.status !== 'cancelled').map((r: any) => new Date(r.date)) || [];
 
   const allNavSections: { id: string; label: string }[] = [
     { id: 'home', label: 'Home' },
@@ -1778,7 +1604,7 @@ export function HomePage() {
                         <AnimatePresence>
                           {isCalendarExpanded && (
                             <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="p-4 border-t border-neutral-800/60 bg-neutral-950/40">
-                              <MiniCalendar
+                              <BookingCalendar
                                 selectedDate={selectedDate}
                                 onSelect={(d) => {
                                   setSelectedDate(d);
@@ -1790,8 +1616,7 @@ export function HomePage() {
                                     setResForm(f => ({ ...f, pax: Math.max(minP, Math.min(maxP, f.pax)) }));
                                   }
                                 }}
-                                reservedDates={reservedDates}
-                                closedDates={closedDates || []}
+                                tables={venueTables} settings={bookingSettings}
                                 onClosedClick={(d, reason) => {
                                   setClosureAlert({ date: d, reason });
                                   setSelectedDate(null); // Clear invalid date
@@ -2128,9 +1953,10 @@ export function HomePage() {
                                           }
                                         }
                                       }
-                                      setResForm(f => ({ ...f, timeSlot: val }));
+                                      const cap = selectedTableId ? capacity(selectedDate,val,selectedTableId) : 0;
+                                      setResForm(f => ({ ...f, timeSlot: val, duration: cap>0 ? Math.min(f.duration,cap) : f.duration }));
                                     }} 
-                                    className={`w-full bg-neutral-950 border rounded-xl px-3 py-2.5 text-sm text-neutral-100 text-center outline-none ${['closed', 'happyhour', 'full', 'table_conflict', 'active_conflict', 'past', 'advance'].includes(timeValidation) ? 'border-rose-500/50 text-rose-200' : 'border-neutral-800 focus:border-emerald-500'}`} 
+                                    className={`w-full bg-neutral-950 border rounded-xl px-3 py-2.5 text-sm text-neutral-100 text-center outline-none ${timeValidation === 'unavailable' ? 'border-rose-500/50 text-rose-200' : 'border-neutral-800 focus:border-emerald-500'}`}
                                   />
                                 </div>
                                 <div className="col-span-1">
@@ -2140,7 +1966,7 @@ export function HomePage() {
                                   </label>
                                   <div className="relative">
                                     <select 
-                                      value={resForm.duration} 
+                                      disabled={maxAllowedDuration === 0} value={resForm.duration}
                                       onChange={e => setResForm(f => ({ ...f, duration: parseInt(e.target.value) }))} 
                                       className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-100 outline-none focus:border-emerald-500 text-center appearance-none cursor-pointer pr-8"
                                     >
@@ -2154,7 +1980,8 @@ export function HomePage() {
                               </div>
 
                               <div className="mt-2 space-y-1">
-                                {timeValidation === 'past' && <p className="text-[10px] text-rose-400 font-semibold flex items-center gap-1"><XCircle size={10} /> This time slot has already passed.</p>}
+                                {timeValidation === 'unavailable' && <p className="text-xs text-rose-400">Choose an available time within operating hours with room for the full duration and at least one hour of notice.</p>}
+                              {timeValidation === 'past' && <p className="text-[10px] text-rose-400 font-semibold flex items-center gap-1"><XCircle size={10} /> This time slot has already passed.</p>}
                                 {timeValidation === 'advance' && <p className="text-[10px] text-amber-500 font-semibold flex items-center gap-1"><AlertTriangle size={10} /> Requires at least 1 hour advance notice.</p>}
                                 {timeValidation === 'closed' && <p className="text-[10px] text-rose-400 font-semibold flex items-center gap-1"><XCircle size={10} /> Outside operating hours.</p>}
                                 {timeValidation === 'happyhour' && <p className="text-[10px] text-amber-500 font-semibold flex items-center gap-1"><AlertTriangle size={10} /> Happy Hour is strictly walk-in only.</p>}
@@ -3041,7 +2868,7 @@ export function HomePage() {
                       </div>
                       <div className="flex justify-between font-bold mt-2">
                         <span>STATUS</span>
-                        <span className={voided ? 'text-rose-600' : settled ? 'text-emerald-600' : 'text-amber-600'}>{String(viewingReceipt.status || '').replace(/-/g, ' ').toUpperCase() || 'PENDING'}</span>
+                        <span className={voided ? 'text-rose-600' : settled ? 'text-emerald-600' : 'text-amber-600'}>{['no-show','noshow','no_show'].includes(st) ? 'ARCHIVED' : String(viewingReceipt.status || '').replace(/-/g, ' ').toUpperCase() || 'PENDING'}</span>
                       </div>
                     </div>
 
@@ -3204,19 +3031,18 @@ export function HomePage() {
               
               <form onSubmit={executeReschedule} className="space-y-4">
                 <div className="bg-neutral-900/50 p-3 rounded-xl border border-neutral-800">
-                  <MiniCalendar
+                  <BookingCalendar
                     selectedDate={rescheduleData.newDate}
-                    minDate={new Date()}
                     onSelect={(d) => setRescheduleData(prev => prev ? ({ ...prev, newDate: d }) : null)}
-                    reservedDates={reservedDates}
-                    closedDates={closedDates || []}
+                    tables={rescheduleData.reservation.tableId ? venueTables.filter(t => t.id === rescheduleData.reservation.tableId) : venueTables}
+                    settings={bookingSettings} hours={rescheduleData.reservation.durationHours} excludeId={rescheduleData.reservation.id}
                     onClosedClick={(d, r) => setToastMsg({ title: "Closed", desc: r, type: 'error' })}
                   />
                 </div>
                 
                 <div>
                   <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end">
-                    <span>New Time Slot (Duration: {rescheduleData.reservation.durationHours}h) *</span>
+                    <span>New Time Slot{rescheduleData.newDate ? " · " + format(rescheduleData.newDate,"MMM d, yyyy") : ""} ({rescheduleData.reservation.durationHours}h) *</span>
                     {rescheduleData.newDate && isToday(rescheduleData.newDate) && (
                       <span className="text-[9px] text-amber-500 font-semibold">Min: {fmt12(format(addMinutes(new Date(), 60), 'HH:mm'))}</span>
                     )}

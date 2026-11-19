@@ -1,3 +1,4 @@
+import { bookingDay, bookingDayKey } from '../utils/bookingSchedule.js';
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef, useMemo } from 'react';
 import { toast } from 'sonner';
 import { publicSupabase } from '../utils/supabase';
@@ -749,7 +750,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       if (resData && (resData as any[]).length > 0) {
         const mappedRes = (resData as any[]).map(r => ({
-          id: r.id, customerName: r.customerName || r.customer_name, contactNumber: r.contactNumber || r.contact_number, email: r.email, date: new Date(r.date), timeSlot: r.timeSlot || r.time_slot, durationHours: r.durationHours || r.duration_hours, partySize: r.partySize || r.party_size, tableId: r.tableId || r.table_id, status: r.status, totalAmount: r.totalAmount || r.total_amount, downPaymentAmount: r.downPaymentAmount || r.down_payment_amount, downPaymentPaid: !!r.downPaymentPaid || !!r.down_payment_paid, balancePaid: !!r.balancePaid || !!r.balance_paid, createdAt: new Date(r.createdAt || r.created_at), cancellationReason: r.cancellationReason || r.cancellation_reason, refundStatus: r.refundStatus || r.refund_status, refundMethod: r.refundMethod || r.refund_method, refundNotes: r.refundNotes || r.refund_notes, paymentRef: r.paymentRef || r.payment_ref, receiptImg: r.receiptImg || r.receipt_img_url, promoCode: r.promoCode || r.promocode || r.promo_code || null, discountAmount: r.discountAmount || r.discountamount || r.discount_amount || 0, rescheduleCount: Number(r.rescheduleCount ?? r.reschedule_count ?? 0) || 0
+          id: r.id, customerName: r.customerName || r.customer_name, contactNumber: r.contactNumber || r.contact_number, email: r.email, date: bookingDay(r.date), timeSlot: r.timeSlot || r.time_slot, durationHours: r.durationHours || r.duration_hours, partySize: r.partySize || r.party_size, tableId: r.tableId || r.table_id, status: r.status, totalAmount: r.totalAmount || r.total_amount, downPaymentAmount: r.downPaymentAmount || r.down_payment_amount, downPaymentPaid: !!r.downPaymentPaid || !!r.down_payment_paid, balancePaid: !!r.balancePaid || !!r.balance_paid, createdAt: new Date(r.createdAt || r.created_at), cancellationReason: r.cancellationReason || r.cancellation_reason, refundStatus: r.refundStatus || r.refund_status, refundMethod: r.refundMethod || r.refund_method, refundNotes: r.refundNotes || r.refund_notes, paymentRef: r.paymentRef || r.payment_ref, receiptImg: r.receiptImg || r.receipt_img_url, promoCode: r.promoCode || r.promocode || r.promo_code || null, discountAmount: r.discountAmount || r.discountamount || r.discount_amount || 0, rescheduleCount: Number(r.rescheduleCount ?? r.reschedule_count ?? 0) || 0
         }));
         setReservations(mappedRes);
 
@@ -767,7 +768,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // Fallback to local reservations from SQLite if Supabase returns 0 rows (e.g. user auth change)
         const localRes = await fetchLocalJson('/api/reservations');
         if (Array.isArray(localRes) && localRes.length > 0) {
-          setReservations(localRes.map((r: any) => ({ ...r, date: new Date(r.date), createdAt: new Date(r.createdAt || Date.now()) })));
+          setReservations(localRes.map((r: any) => ({ ...r, date: bookingDay(r.date), createdAt: new Date(r.createdAt || Date.now()) })));
         }
       }
       
@@ -1315,7 +1316,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       customerName: newRes.customerName,
       contactNumber: newRes.contactNumber,
       email: newRes.email || null,
-      date: newRes.date.toISOString(),
+      date: bookingDayKey(newRes.date),
       timeSlot: newRes.timeSlot,
       durationHours: newRes.durationHours,
       partySize: newRes.partySize,
@@ -1392,7 +1393,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     syncToDB(`/api/reservations/${id}`, 'PUT', u, `Reservation updated`).then(runCloudBackup).catch(()=>{});
     
     const dbUpdates: any = {};
-    if (u.date) dbUpdates.date = new Date(u.date).toISOString();
+    if (u.date) dbUpdates.date = bookingDayKey(u.date);
     if (u.timeSlot) dbUpdates.timeSlot = u.timeSlot;
     if (u.durationHours) dbUpdates.durationHours = u.durationHours;
     if (u.partySize) dbUpdates.partySize = u.partySize;
