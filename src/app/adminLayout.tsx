@@ -1,3 +1,4 @@
+import { eventReservationName } from './utils/eventReservation';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router';
 import {
@@ -154,7 +155,7 @@ export function AdminLayout() {
     
     (reservations || []).forEach((r: any) => {
       if (r.customerName.toLowerCase().includes(query) || r.id.toLowerCase().includes(query)) {
-         results.push({ type: 'Reservation', label: `${r.customerName} - ${r.id}`, link: '/admin' }); // Routing to dashboard since admin has no specific reservation page
+         results.push({ type: 'Reservation', label: eventReservationName(r) ?? `${r.customerName} - ${r.id}`, link: '/admin' }); // Routing to dashboard since admin has no specific reservation page
       }
     });
     

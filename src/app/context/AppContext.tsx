@@ -163,7 +163,7 @@ export type AppContextType = {
   assignTable: (id: string, s: Session) => void; freeTable: (id: string) => void; reserveTable: (id: string) => void; extendSession: (id: string, mins: number, pay: number) => void; migrateSession: (fromTableId: string, toTableId: string) => void; setTableMaintenance: (id: string, reason: string) => void; setTableEvent: (id: string, eventName: string) => void; addTable: (n: string) => void; updateTable: (id: string, n: string) => void; toggleTableActive: (id: string) => void; deleteTable: (id: string) => void;
   addInventoryItem: (i: Omit<InventoryItem, 'id'>) => void; updateInventoryItem: (id: string, i: Partial<InventoryItem>) => void; deleteInventoryItem: (id: string) => void; submitTableOrders: (tableId: string, cart: SessionOrder[]) => void; voidTableOrder: (tableId: string, orderIndex: number, order: SessionOrder) => void;
   addToQueue: (i: Omit<QueueItem, 'id'|'arrivalTime'|'status'|'queueNumber'>) => void; removeFromQueue: (id: string) => void; callQueueItem: (id: string) => void;
-  addReservation: (i: Omit<Reservation, 'id'|'createdAt'>) => string; updateReservationStatus: (id: string, s: ReservationStatus) => void; updateReservation: (id: string, u: Partial<Reservation>) => void; cancelReservation: (id: string, r: string) => void; updateDownPayment: (id: string, p: boolean) => void; updateBalance: (id: string, p: boolean) => void;
+  addReservation: (i: Omit<Reservation, 'id'|'createdAt'>) => Promise<string>; updateReservationStatus: (id: string, s: ReservationStatus) => void; updateReservation: (id: string, u: Partial<Reservation>) => void; cancelReservation: (id: string, r: string) => void; updateDownPayment: (id: string, p: boolean) => void; updateBalance: (id: string, p: boolean) => void;
   addFeedback: (i: Omit<Feedback, 'id'|'date'>) => void; resolveFeedback: (id: string, notes: string) => void; addActivity: (t: ActivityType, d: string, m?: Record<string, any>) => void;  
   addPromoCode: (i: Omit<PromoCode, 'id'|'createdAt'|'usageCount'>) => string; updatePromoCode: (id: string, u: Partial<Omit<PromoCode, 'id'|'createdAt'|'usageCount'>>) => void; togglePromoCode: (id: string) => void; deletePromoCode: (id: string) => void; applyPromoCode: (c: string) => PromoCode | null;
   events: Event[]; addEvent: (e: Omit<Event, 'id'>) => void; updateEvent: (id: string, updates: Partial<Omit<Event, 'id'>>) => void; deleteEvent: (id: string) => void;
@@ -555,17 +555,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       if (feedData) setFeedback((feedData as any[]).map(f => ({ ...f, tags: typeof f.tags === 'string' ? JSON.parse(f.tags || '[]') : (f.tags || []) })) as Feedback[]);
       if (promoData) {
-        const countFromRes = (code: string) => {
-          if (!resData || !code) return 0;
-          return (resData as any[]).filter(r => {
-            const pCode = (r.promoCode || r.promocode || r.promo_code || '').trim().toUpperCase();
-            return pCode === code.trim().toUpperCase();
-          }).length;
-        };
-
         setPromoCodes((promoData as any[]).map(r => {
-          const resCount = countFromRes(r.code);
-          const effectiveUsage = Math.max(r.usage_count ?? r.usageCount ?? 0, resCount);
           return {
             id: r.id,
             code: r.code,
@@ -574,7 +564,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             isActive: r.is_active === 1 || r.is_active === true || r.isActive === true || r.isActive === 1,
             isLimitedUses: r.is_limited_uses === 1 || r.is_limited_uses === true || r.isLimitedUses === true,
             maxUsage: r.max_usage ?? r.maxUsage ?? 0,
-            usageCount: effectiveUsage,
+            usageCount: Number(r.usage_count ?? r.usageCount) || 0,
             startDate: r.start_date || r.startDate || null,
             expiresAt: r.expires_at || r.expiresAt || null
           };
@@ -1225,14 +1215,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     addActivity('admin_action', `Deleted menu item ID: ${id}`);
   };
 
-  const addReservation = (i: Omit<Reservation, 'id'|'createdAt'>): string => {
+  const addReservation = async (i: Omit<Reservation, 'id'|'createdAt'>): Promise<string> => {
     const id = Math.random().toString(36).substring(2, 8).toUpperCase();
     const newRes = { ...i, id, createdAt: new Date() };
-    
-    setReservations(prev => [...prev, newRes as Reservation]);
-    addActivity('reservation_created', `New reservation created for ${i.customerName} (${id})`); 
-    
-    syncToDB('/api/reservations', 'POST', newRes, `Reservation ${id} added`).then(runCloudBackup).catch(() => {});
     
     const supabasePayload = {
       id: newRes.id,
@@ -1256,9 +1241,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
       createdAt: newRes.createdAt.toISOString()
     };
     
-    publicSupabase.from('reservations').insert([supabasePayload]).then(({ error }) => {
-      if (error) console.error("Supabase insert error:", error);
-    });
+    const { error } = await publicSupabase.from('reservations').insert([supabasePayload]);
+    if (error) throw new Error(error.message);
+    setReservations(prev => [...prev, newRes as Reservation]);
+    if (i.promoCode) {
+      const promo = promoCodes.find(p => p.code === i.promoCode);
+      if (promo) {
+        void publicSupabase.from('promo_codes').select('usage_count').eq('id', promo.id).maybeSingle().then(({ data }) => {
+          if (data) setPromoCodes(prev => prev.map(p => p.id === promo.id
+            ? { ...p, usageCount: Math.max(p.usageCount, Number(data.usage_count) || 0) } : p));
+        });
+      }
+    }
+    if (isServedFromLocalMachine()) {
+      syncToDB('/api/reservations', 'POST', newRes, 'Cache booking').catch(() => {});
+      addActivity('reservation_created', `New reservation created for ${i.customerName} (${id})`);
+    }
     
     return id;
   };

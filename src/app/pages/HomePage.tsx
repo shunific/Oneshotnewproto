@@ -1,3 +1,4 @@
+import { eventReservationName } from '../utils/eventReservation';
 import { completedReservationStats, openTimeRemaining } from '../utils/waitHistory';
 import { RefundRequestDialog, type RefundBooking } from '../components/RefundRequestDialog';
 import { clockLabel, clockRangeLabel } from '../utils/clockDisplay';
@@ -926,12 +927,12 @@ export function HomePage() {
         rescheduleCount: 0
       });
 
-      setGeneratedResId(newId || Math.random().toString(36).substring(2, 8).toUpperCase());
+      setGeneratedResId(newId);
       setReservationStep(3);
-      setToastMsg({ title: "Booking Successful", desc: `Reservation ${newId} confirmed!`, type: 'success' });
+      setToastMsg({ title: "Booking Successful", desc: `Reservation ${newId} received.`, type: 'success' });
     } catch (error) {
       console.error("Payment Confirmation Error:", error);
-      setToastMsg({ title: "Error", desc: "Failed to confirm reservation. Please try again.", type: 'error' });
+      setToastMsg({ title: "Error", desc: error instanceof Error && error.message.includes("promo code") ? error.message : "Could not save your reservation. Please try again.", type: 'error' });
     } finally {
       setIsVerifying(false);
       setConfirmingPayment(false);
@@ -1746,7 +1747,7 @@ export function HomePage() {
                                             className="flex items-center gap-3 bg-purple-950/40 p-2.5 rounded-lg border border-purple-800/60 cursor-pointer hover:bg-purple-900/50 transition-colors"
                                           >
                                             <div className="w-2 h-2 rounded-full bg-purple-400 animate-pulse shadow-[0_0_8px_rgba(168,85,247,0.6)]" />
-                                            <span className="text-purple-200 text-xs font-bold">EVENT: {eventForTable.title || eventForTable.customerName?.replace(/^EVENT:\s*/, '')}{eventWindowLabel}</span>
+                                            <span className="text-purple-200 text-xs font-bold">{eventForTable.title || eventReservationName(eventForTable)}{eventWindowLabel}</span>
                                             <span className="text-purple-400 text-[10px] font-bold ml-auto flex items-center gap-1">View Details &rarr;</span>
                                           </div>
                                         )}
@@ -1767,9 +1768,9 @@ export function HomePage() {
                                           const [rH, rM] = r.timeSlot.split(':').map(Number);
                                           rStart.setHours(rH, rM, 0, 0);
                                           const rEnd = addMinutes(rStart, r.durationHours * 60);
-                                          const isEventRes = r.customerName?.startsWith('EVENT:') || r.id?.startsWith('EVT-') || r.paymentRef === 'EVENT';
+                                          const eventName = eventReservationName(r);
 
-                                          if (isEventRes) {
+                                          if (eventName) {
                                             return (
                                               <div 
                                                 key={r.id} 
@@ -1779,7 +1780,7 @@ export function HomePage() {
                                                 <div className="w-2 h-2 rounded-full bg-purple-400 animate-pulse shadow-[0_0_8px_rgba(168,85,247,0.6)]" />
                                                 <span className="text-purple-200 text-xs font-semibold">{format(rStart, 'h:mm a')} - {format(rEnd, 'h:mm a')}</span>
                                                 <span className="text-purple-300 group-hover:text-white text-[10px] font-bold ml-auto px-2 py-0.5 rounded bg-purple-900/60 border border-purple-700/50 flex items-center gap-1">
-                                                  EVENT &rarr;
+                                                  {eventName} &rarr;
                                                 </span>
                                               </div>
                                             );
@@ -1898,7 +1899,7 @@ export function HomePage() {
                                   <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end">
                                     <span>Start Time *</span>
                                     {selectedDate && isToday(selectedDate) && minAllowedTime && (
-                                      <span className="text-[9px] text-amber-500 font-semibold">Min: {fmt12(minAllowedTime)}</span>
+                                      <span className="text-[9px] text-amber-500 font-semibold">{fmt12(minAllowedTime)}</span>
                                     )}
                                   </label>
                                   <input type="time" aria-label="Start time"
@@ -2259,7 +2260,7 @@ export function HomePage() {
                               <div key={r.id} className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm">
                                 <div>
                                   <div className="flex items-center gap-2 mb-1">
-                                    <span className="text-xs font-black text-neutral-900 dark:text-white font-mono bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 rounded border border-neutral-300 dark:border-neutral-700">{r.id}</span>
+                                    <span className="text-xs font-black text-neutral-900 dark:text-white font-mono bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 rounded border border-neutral-300 dark:border-neutral-700">{eventReservationName(r) ?? r.id}</span>
                                     <ReservationStatusBadge status={r.status} />
                                   </div>
                                   {r.refundStatus === 'declined' && (
@@ -2786,7 +2787,7 @@ export function HomePage() {
 
                     {/* Invoice Meta */}
                     <div className="space-y-1 text-[9px] font-bold text-neutral-600 mb-3 border-b border-dashed border-neutral-400 pb-3">
-                      <div className="flex justify-between"><span>BOOKING NO.</span><span>{String(viewingReceipt.id || '').toUpperCase()}</span></div>
+                      <div className="flex justify-between"><span>{eventReservationName(viewingReceipt) ? 'EVENT' : 'BOOKING NO.'}</span><span>{eventReservationName(viewingReceipt) ?? String(viewingReceipt.id || '').toUpperCase()}</span></div>
                       <div className="flex justify-between"><span>DATE ISSUED</span><span>{format(new Date(viewingReceipt.date), 'dd/MM/yyyy')}</span></div>
                       <div className="flex justify-between"><span>TIME SLOT</span><span>{fmt12(viewingReceipt.timeSlot)}</span></div>
                       <div className="flex justify-between"><span>TABLE</span><span>{receiptTableName}</span></div>
@@ -2935,7 +2936,7 @@ export function HomePage() {
               <div className="flex justify-between items-start mb-2">
                 <div>
                   <h3 className="text-lg font-black text-violet-400 flex items-center gap-2"><Calendar size={18} /> Request Reschedule</h3>
-                  <p className="text-xs text-neutral-500 mt-1">Reservation #{rescheduleData.reservation.id.toUpperCase()}</p>
+                  <p className="text-xs text-neutral-500 mt-1">{eventReservationName(rescheduleData.reservation) ?? `Reservation #${rescheduleData.reservation.id.toUpperCase()}`}</p>
                 </div>
                 <button onClick={() => setRescheduleData(null)} className="text-neutral-500 hover:text-white transition-colors"><X size={18} /></button>
               </div>
@@ -2955,7 +2956,7 @@ export function HomePage() {
                   <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end">
                     <span>New Time Slot{rescheduleData.newDate ? " · " + format(rescheduleData.newDate,"MMM d, yyyy") : ""} ({rescheduleData.reservation.durationHours}h) *</span>
                     {rescheduleData.newDate && isToday(rescheduleData.newDate) && (
-                      <span className="text-[9px] text-amber-500 font-semibold">Min: {fmt12(format(addMinutes(new Date(), 60), 'HH:mm'))}</span>
+                      <span className="text-[9px] text-amber-500 font-semibold">{fmt12(format(addMinutes(new Date(), 60), 'HH:mm'))}</span>
                     )}
                   </label>
                   <input type="time" aria-label="New time"
