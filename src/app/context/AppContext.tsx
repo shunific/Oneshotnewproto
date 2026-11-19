@@ -1,3 +1,4 @@
+import { LoadingRing } from '../components/LoadingRing';
 import { bookingDay, bookingDayKey } from '../utils/bookingSchedule.js';
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef, useMemo } from 'react';
 import { toast } from 'sonner';
@@ -1684,10 +1685,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   if (isInitializing) {
     return (
       <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center">
-        <div className="relative w-16 h-16 mb-6">
-          <div className="absolute inset-0 border-4 border-neutral-800 rounded-full"></div>
-          <div className="absolute inset-0 border-4 border-emerald-500 rounded-full border-t-transparent animate-spin"></div>
-        </div>
+        <LoadingRing className="h-16 w-16 mb-6" />
         <h1 className="text-2xl font-black text-white tracking-widest">ONE SHOT</h1>
       </div>
     );
@@ -1719,10 +1717,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       {/* 🟢 Global Fullscreen Logout Overlay with Thread Loader */}
       {isLoggingOut && (
         <div className="fixed inset-0 z-[99999] bg-neutral-950/90 backdrop-blur-md flex flex-col items-center justify-center animate-fade-in">
-          <div className="relative w-16 h-16 mb-5">
-            <div className="absolute inset-0 border-4 border-neutral-800 rounded-full"></div>
-            <div className="absolute inset-0 border-4 border-emerald-500 rounded-full border-t-transparent animate-spin"></div>
-          </div>
+          <LoadingRing className="h-16 w-16 mb-5" />
           <h2 className="text-lg font-black text-white uppercase tracking-widest mb-1">
             Safeguarding Venue Records
           </h2>

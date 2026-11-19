@@ -1,3 +1,4 @@
+import { LoadingRing } from '../components/LoadingRing';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { supabase } from '../utils/supabase';
@@ -140,7 +141,7 @@ export function ResetPassword() {
           </div>
         ) : status === 'checking' ? (
           <div className="text-center py-10">
-            <div className="w-10 h-10 border-2 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin mx-auto mb-4" />
+            <LoadingRing className="h-10 w-10 mx-auto mb-4" />
             <p className="text-sm text-neutral-400">Checking your reset link...</p>
           </div>
         ) : status === 'expired' ? (

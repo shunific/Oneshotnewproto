@@ -1,3 +1,4 @@
+import { RefundRequestDialog, type RefundBooking } from '../components/RefundRequestDialog';
 import { clockLabel, clockRangeLabel } from '../utils/clockDisplay';
 import { TimeField } from '../components/ui/TimeField';
 import { BookingCalendar } from '../components/BookingCalendar';
@@ -205,6 +206,7 @@ export function HomePage() {
   const [feedbackForm, setFeedbackForm] = useState({ name: '', contact: '', type: '', customType: '', message: '', reservationId: '' });
   const [feedbackSent, setFeedbackSent] = useState(false);
 
+  const [refundBooking, setRefundBooking] = useState<RefundBooking | null>(null);
   const [rescheduleData, setRescheduleData] = useState<{ show: boolean, reservation: any, newDate: Date | null, timeSlot: string, reason: string } | null>(null);
 
   const [reportModalResId, setReportModalResId] = useState<string | null>(null);
@@ -954,37 +956,13 @@ export function HomePage() {
 
   const canManageBooking = (booking: any) => Boolean(currentUser?.email && booking?.email?.trim().toLowerCase() === currentUser.email.trim().toLowerCase());
 
-  const handleCancelBooking = async (id: string, dateString: string, timeSlot: string) => {
-    if (!canManageBooking(reservations.find((row: any) => row.id === id))) return;
-    let notice = '';
-    try {
-      const resDate = new Date(dateString);
-      if (timeSlot) {
-        const [hours = '0', minutes = '0'] = timeSlot.split(':');
-        resDate.setHours(Number(hours), Number(minutes), 0, 0);
-        const minsUntilRes = (resDate.getTime() - Date.now()) / 60000;
-        if (minsUntilRes < 60 && minsUntilRes > 0) {
-          notice = '\n\nNote: This cancellation is requested within 1 hour of the reservation time. Staff review will be required for refund approval.';
-        } else if (minsUntilRes <= 0) {
-          notice = '\n\nNote: The scheduled reservation time has already passed. Cancellation will be submitted for staff review.';
-        }
-      }
-    } catch {}
-
-    const hotline = cms?.phone ? cms.phone.split('|')[0].trim() : 'our customer hotline';
-    if (!window.confirm(`Are you sure you want to cancel this booking and request a refund?${notice}\n\nREFUND NOTICE: Your booking will be marked as "Pending Refund". To expedite your GCash refund, you can contact staff at ${hotline} with your Reservation ID.`)) {
-      return;
-    }
-
-    try {
-      const { data, error } = await supabase.rpc('request_booking_change', { booking_id: id, request_kind: 'refund' });
-      if (error || data !== 'pending-refund') throw new Error(error?.message || 'No booking was updated.');
-      setTrackedReservations(prev => prev?.map(r => r.id === id ? { ...r, status: data, refundStatus: 'pending' } : r) ?? null);
-      setToastMsg({ title: 'Request Submitted', desc: 'Your cancellation and refund request is pending staff review.', type: 'success' });
-      await forceFullSync();
-    } catch (error: any) {
-      setToastMsg({ title: 'Request could not be saved', desc: error.message || 'Please refresh and try again.', type: 'error' });
-    }
+  const submitRefund = async (booking: RefundBooking) => {
+    if (!canManageBooking(booking)) throw new Error('Sign in to manage this reservation.');
+    const { data, error } = await supabase.rpc('request_booking_change', { booking_id: booking.id, request_kind: 'refund' });
+    if (error || data !== 'pending-refund') throw new Error(error?.message || 'Your request could not be saved. Please try again.');
+    setTrackedReservations(prev => prev?.map(r => r.id === booking.id ? { ...r, status: data, refundStatus: 'pending' } : r) ?? null);
+    setToastMsg({ title: 'Request Submitted', desc: 'Your cancellation and refund request is pending staff review.', type: 'success' });
+    void forceFullSync().catch(error => console.error("Could not refresh bookings after refund request", error));
   };
 
   const handleRequestReschedule = async (id: string, r: any) => {
@@ -2356,7 +2334,7 @@ export function HomePage() {
                                           {/* Cancel / Request Refund */}
                                           {(r.status === 'pending' || r.status === 'pending-reschedule' || r.status === 'confirmed') && canManageBooking(r) && (
                                             <button 
-                                              onClick={(e) => { e.stopPropagation(); handleCancelBooking(r.id, r.date, r.timeSlot); setOpenActionRowId(null); }} 
+                                              onClick={(e) => { e.stopPropagation(); setRefundBooking(r); setOpenActionRowId(null); }}
                                               className="px-4 py-3 text-left text-xs font-bold text-rose-600 dark:text-rose-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors border-b border-neutral-100 dark:border-neutral-800/50 cursor-pointer"
                                             >
                                               Cancel / Request Refund
@@ -3016,6 +2994,11 @@ export function HomePage() {
               </div>
             </motion.div>
           </motion.div>
+        )}
+
+        {refundBooking && canManageBooking(refundBooking) && (
+          <RefundRequestDialog booking={refundBooking} phone={cms?.phone}
+            onClose={() => setRefundBooking(null)} onSubmit={() => submitRefund(refundBooking)} />
         )}
 
         {/* 🟢 RESCHEDULE MODAL */}
