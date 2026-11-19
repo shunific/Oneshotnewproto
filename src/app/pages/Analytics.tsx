@@ -1,5 +1,5 @@
 import { exportCsv } from '../utils/csvExport.js';
-import { sessionFinancials, summarizeSessionFinancials } from '../utils/sessionFinancials.js';
+import { recordedLegacyBill, sessionFinancials, summarizeSessionFinancials } from '../utils/sessionFinancials.js';
 import { useState, useMemo } from 'react';
 import {
   AreaChart, Area, LineChart, Line,
@@ -19,20 +19,6 @@ const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && isVali
 const COLORS = ['#10b981', '#f59e0b', '#ef4444', '#3b82f6', '#8b5cf6'];
 
 const formatPHP = (amount: number) => `₱${amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
-
-const exactCents = (value: any) => typeof value === 'number' && Number.isFinite(value) && value >= 0
-  && Number.isSafeInteger(Math.round(value * 100)) && Math.abs(value * 100 - Math.round(value * 100)) <= 0.000001
-  ? Math.round(value * 100) : null;
-
-// Sessions written before receipts existed have no canonical snapshot to verify. Their recorded
-// money still counts toward the trend instead of silently vanishing from it. An overpayment cannot
-// be reconciled without a receipt, so it stays in the review bucket rather than being drawn as cash.
-const recordedLegacyBill = (record: any) => {
-  if (!record || sessionFinancials(record)) return null;
-  const bill = exactCents(record.totalAmount);
-  const paid = exactCents(record.amountPaid);
-  return bill === null || paid === null || paid > bill ? null : bill;
-};
 
 const statusConfig: Record<string, { label: string; color: string }> = {
   pending:      { label: 'Pending',    color: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },

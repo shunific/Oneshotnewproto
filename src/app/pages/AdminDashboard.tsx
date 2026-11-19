@@ -1,4 +1,4 @@
-import { summarizeSessionFinancials } from '../utils/sessionFinancials.js';
+import { recordedLegacyBill, summarizeSessionFinancials } from '../utils/sessionFinancials.js';
 import { localFetch } from '../utils/localApi';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
@@ -151,9 +151,9 @@ export function AdminDashboard() {
     const days = eachDayOfInterval({ start, end });
     const history = sessionHistory || [];
     return days.map(day => {
-      const daySessions = history.filter((h: any) => isSameDay(new Date(h.startTime || h.endTime), day));
-      // Receipt-backed bills only; unmatched/legacy rows are excluded by the summary helper.
-      const rev = summarizeSessionFinancials(daySessions).billedCents / 100;
+      const daySessions = history.filter((h: any) => isSameDay(new Date(h.endTime || h.startTime), day));
+      const legacyCents = daySessions.reduce((sum: number, row: any) => sum + (recordedLegacyBill(row) ?? 0), 0);
+      const rev = (summarizeSessionFinancials(daySessions).billedCents + legacyCents) / 100;
       return {
         label: format(day, "EEE"),
         date: format(day, "MMM dd"),
@@ -164,7 +164,7 @@ export function AdminDashboard() {
   }, [sessionHistory]);
 
   const todayCompletedSessions = useMemo(() => {
-    return (sessionHistory || []).filter((h: any) => isToday(new Date(h.startTime || h.endTime))).length;
+    return (sessionHistory || []).filter((h: any) => isToday(new Date(h.endTime || h.startTime))).length;
   }, [sessionHistory]);
 
   const tableUtilizationRate = useMemo(() => {
@@ -413,7 +413,7 @@ export function AdminDashboard() {
 
         {/* 7-Day Revenue Trend Chart */}
         <div className="space-y-2 pt-2">
-          <p className="text-xs font-bold text-neutral-400 uppercase tracking-wider">7-Day Revenue Trend (₱)</p>
+          <p className="text-xs font-bold text-neutral-400 uppercase tracking-wider">7-Day Revenue Trend (₱ billed at session close)</p>
           <div className="h-56 w-full pt-2">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={analytics7Days} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
@@ -431,7 +431,7 @@ export function AdminDashboard() {
                       return (
                         <div className="bg-neutral-900 border border-neutral-700 rounded-lg p-2.5 shadow-xl text-xs">
                           <p className="text-neutral-400 font-bold mb-1">{payload[0]?.payload?.date}</p>
-                          <p className="text-emerald-400 font-bold">Revenue: ₱{Number(payload[0]?.value).toLocaleString()}</p>
+                          <p className="text-emerald-400 font-bold">Billed: ₱{Number(payload[0]?.value).toLocaleString()}</p>
                           <p className="text-purple-400 font-semibold">{payload[0]?.payload?.sessions} sessions</p>
                         </div>
                       );

@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { supabase } from "../utils/supabase"; 
 
-import { resolveMapEmbedUrl } from "../utils/maps";
+import { resolveMapEmbedUrl, resolveMapOpenUrl } from "../utils/maps";
 
 export function AdminSiteSettings() {
   const { 
@@ -861,7 +861,7 @@ export function AdminSiteSettings() {
             <div className="flex justify-between items-center mb-1">
               <label className="text-[11px] text-neutral-400 font-medium">Google Maps Embed URL / Share Link / Copy Link</label>
               <a 
-                href={locationForm.googleMapsEmbedUrl?.startsWith('http') ? locationForm.googleMapsEmbedUrl : `https://www.google.com/maps/search/?api=1&query=${mapsQuery}`} 
+                href={resolveMapOpenUrl(locationForm.googleMapsEmbedUrl, locationForm.address || decodeURIComponent(mapsQuery))} 
                 target="_blank" 
                 rel="noopener noreferrer"
                 className="text-[10px] text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1 transition-colors"

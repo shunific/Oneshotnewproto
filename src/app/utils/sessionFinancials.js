@@ -26,3 +26,17 @@ export function summarizeSessionFinancials(records) {
   }
   return summary;
 }
+
+const exactCents = (value) => typeof value === 'number' && Number.isFinite(value) && value >= 0
+  && Number.isSafeInteger(Math.round(value * 100)) && Math.abs(value * 100 - Math.round(value * 100)) <= 0.000001
+  ? Math.round(value * 100) : null;
+
+// Sessions written before receipts existed have no canonical snapshot to verify. Their recorded
+// money still counts toward the trend instead of silently vanishing from it. An overpayment cannot
+// be reconciled without a receipt, so it stays in the review bucket rather than being drawn as cash.
+export const recordedLegacyBill = (record) => {
+  if (!record || record.receipt || (record.status && record.status !== "completed")) return null;
+  const bill = exactCents(record.totalAmount);
+  const paid = exactCents(record.amountPaid);
+  return bill === null || paid === null || paid > bill ? null : bill;
+};
