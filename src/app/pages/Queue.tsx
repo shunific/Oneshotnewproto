@@ -2,7 +2,7 @@ import { completedReservationStats } from '../utils/waitHistory';
 import { clockLabel } from '../utils/clockDisplay';
 import { PendingQueueActions } from '../components/PendingQueueActions';
 import { localFetch } from '../utils/localApi';
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { 
   UserPlus, X, Bell, CheckCircle, Clock, Users, ChevronDown, ChevronUp, 
@@ -53,7 +53,7 @@ export function Queue() {
 
   // Priority queue: checked-in reservation customers jump ahead
   const checkedInReservations = reservations.filter((r: any) => r.status === 'checked-in');
-  const waiting = queue.filter((q: any) => q.status === 'waiting');
+  const waiting = useMemo(() => queue.filter((q: any) => q.status === 'waiting'), [queue]);
   const called = queue.filter((q: any) => q.status === 'called');
 
   // ========================================================================
@@ -62,7 +62,8 @@ export function Queue() {
   const [aiWaitTime, setAiWaitTime] = useState<string>('Analyzing data...');
   const [isAILoading, setIsAILoading] = useState(true);
 
-  const fetchAIPrediction = useCallback(async () => {
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const fetchAIPrediction = useCallback(async (signal: AbortSignal) => {
     if(reservationMoveError||heldTableIds.size){setAiWaitTime('Check transfer recovery');setIsAILoading(false);return;}
     setIsAILoading(true);
     try {
@@ -82,6 +83,7 @@ export function Queue() {
       // 2. Send local venue state to the Brain.js Neural Network
       const res = await localFetch('http://localhost:3001/api/ai/predict-wait-time', {
         method: 'POST',
+        signal,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           partySize: nextPartySize, 
@@ -92,9 +94,10 @@ export function Queue() {
       });
       
       const data = await res.json();
+      if (signal.aborted) return;
       
       // 3. Find the table finishing closest to now
-      const elapsedTimes = activeTables.map((t: any) => differenceInMinutes(now, new Date(t.session.startTime)));
+      const elapsedTimes = activeTables.map((t: any) => differenceInMinutes(Date.now(), new Date(t.session.startTime)));
       const maxElapsed = Math.max(...elapsedTimes, 0); 
       
       // 4. Calculate Base Wait (AI Prediction minus Time Already Spent)
@@ -111,18 +114,18 @@ export function Queue() {
       }
       
     } catch (e) {
+      if (signal.aborted) return;
       console.error("AI Predict Error:", e);
       setAiWaitTime("~45 mins (Fallback)"); 
     }
     setIsAILoading(false);
-  }, [tables, availableTables, heldTableIds, reservationMoveError, reservations, waiting, now]);
+  }, [tables, availableTables, heldTableIds, reservationMoveError, reservations, waiting]);
 
-  // Poll the AI engine every 30 seconds for dynamic adjustments
   useEffect(() => {
-    fetchAIPrediction();
-    const aiInterval = setInterval(fetchAIPrediction, 30000);
-    return () => clearInterval(aiInterval);
-  }, [fetchAIPrediction]);
+    const request = new AbortController();
+    void fetchAIPrediction(request.signal);
+    return () => request.abort();
+  }, [fetchAIPrediction, refreshVersion]);
 
 
   // Get upcoming reservations (today and future)
@@ -469,7 +472,7 @@ export function Queue() {
                 {reservationMoveError||heldTableIds.size?'Check transfer recovery':aiWaitTime}
               </span>
               <div className="flex flex-col items-end mt-1 space-y-1.5">
-                <span className="text-[9px] text-emerald-500/60 font-medium uppercase">Updates Live</span>
+                <button type="button" disabled={isAILoading} onClick={() => setRefreshVersion(value => value + 1)} className="text-xs text-emerald-400 underline disabled:opacity-50">Refresh estimate</button>
                 {/* 🟢 THE NEAREST END TIME BADGE */}
                 {getNearestEndTime() && availableTables.length === 0 && (
                   <span className="text-[10px] text-emerald-300/90 font-semibold bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/50 flex items-center gap-1.5 shadow-sm">
