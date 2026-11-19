@@ -1272,14 +1272,14 @@ export function HomePage() {
       </header>
 
       {/* ── Section Navigation ── */}
-      <nav className={`fixed top-[72px] left-0 right-0 z-40 backdrop-blur-sm border-b flex items-center justify-start sm:justify-center gap-1 px-4 overflow-x-auto h-[54px] hide-scrollbar transition-colors ${
+      <nav className={`fixed top-[72px] left-0 right-0 z-40 backdrop-blur-sm border-b flex items-center justify-start sm:justify-center gap-1 px-2 overflow-x-auto h-[54px] hide-scrollbar transition-colors ${
         isLightMode ? 'bg-white/95 border-slate-200 shadow-xs' : 'bg-neutral-900/95 border-neutral-800/60'
       }`}>
         {allNavSections.map(({ id, label }) => (
           <button
             key={id}
             onClick={() => handleNavClick(id)}
-            className={`relative px-4 py-3 text-xs font-semibold whitespace-nowrap transition-all ${
+            className={`relative px-7 py-3 text-xs font-semibold whitespace-nowrap transition-all ${
               activeSection === id 
                 ? (isLightMode ? 'text-emerald-700 font-bold' : 'text-emerald-400 font-bold') 
                 : (isLightMode ? 'text-slate-600 hover:text-slate-950' : 'text-neutral-500 hover:text-neutral-300')
