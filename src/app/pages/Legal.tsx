@@ -1,10 +1,17 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router';
+import { useAppContext } from '../context/AppContext';
 import { ChevronLeft, Shield, FileText } from 'lucide-react';
 
 export function Legal() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const { reservationTerms, rates, siteConfig } = useAppContext();
+  const venueName = siteConfig?.venueName || siteConfig?.venuename || siteConfig?.venue_name || siteConfig?.name || 'One Shot Bar & Billiards';
+  const contactEmail = siteConfig?.contactEmail || siteConfig?.contactemail || siteConfig?.contact_email || siteConfig?.email;
+  const contactNumber = siteConfig?.contactNumber || siteConfig?.contactnumber || siteConfig?.contact_number || siteConfig?.phone;
+  const cancellationPolicy = reservationTerms.cancellationPolicy?.trim();
+  const generalTerms = reservationTerms.termsAndConditions?.trim();
   const [activeTab, setActiveTab] = useState<'terms' | 'privacy'>('terms');
 
   useEffect(() => {
@@ -52,27 +59,31 @@ export function Legal() {
         <div className="prose prose-invert prose-emerald max-w-none">
           {activeTab === 'terms' ? (
             <div className="space-y-6 text-sm leading-relaxed">
-              <p className="text-xs uppercase tracking-widest text-emerald-500 font-bold mb-2">Last Updated: September 2026</p>
               
               <h2 className="text-xl font-bold text-white mt-8 mb-4 border-b border-neutral-800 pb-2">1. Acceptance of Terms</h2>
-              <p>By accessing and using the One Shot Bar & Billiards reservation system, you agree to be bound by these Terms of Service. If you do not agree to these terms, please refrain from using our online booking platform.</p>
+              <p>By accessing and using the {venueName} reservation system, you agree to be bound by these Terms of Service. If you do not agree to these terms, please refrain from using our online booking platform.</p>
 
               <h2 className="text-xl font-bold text-white mt-8 mb-4 border-b border-neutral-800 pb-2">2. Reservations and Down Payments</h2>
               <ul className="list-disc pl-5 space-y-2 text-neutral-400">
-                <li>All reservations require a standard down payment (unless waived by Trusted Customer status) to secure the selected table and time slot.</li>
-                <li>Down payments are processed via GCash. Uploaded receipts are verified by staff. Fraudulent receipt uploads will result in permanent account suspension.</li>
+                <li>The booking form shows the table rate and down payment{Number(rates.downPaymentPercent) > 0 ? ` (${rates.downPaymentPercent}% of the table fee)` : ''}. Eligible Trusted Customers receive a waiver for bookings of up to three hours.</li>
+                <li>Down payments are processed via GCash. Uploaded receipts are verified by staff.</li>
                 <li>The remaining balance of the table rate and any associated Food & Beverage orders must be settled at the venue.</li>
               </ul>
 
-              <h2 className="text-xl font-bold text-white mt-8 mb-4 border-b border-neutral-800 pb-2">3. Cancellations & No-Shows</h2>
-              <p>Cancellations must be made within the grace period specified by the venue. No-shows will forfeit their down payment, and repeated no-shows will negatively impact the user's Net Trust Score, revoking any VIP or Trusted Customer privileges.</p>
+              <h2 className="text-xl font-bold text-white mt-8 mb-4 border-b border-neutral-800 pb-2">3. Cancellations, Refunds & Rescheduling</h2>
+              <p>Sign in to the account used to book to request a cancellation or reschedule. Staff review each request.</p>
+              {Number(reservationTerms.cancellationHours) > 0 && <p>Cancellation notice: {reservationTerms.cancellationHours} hours before the scheduled booking.</p>}
+              {cancellationPolicy && <p className="whitespace-pre-line">{cancellationPolicy}</p>}
 
               <h2 className="text-xl font-bold text-white mt-8 mb-4 border-b border-neutral-800 pb-2">4. User Accounts</h2>
-              <p>Users are responsible for maintaining the confidentiality of their account credentials. One Shot reserves the right to terminate accounts that violate our community guidelines or exploit the reservation system.</p>
+              <p>Users are responsible for maintaining the confidentiality of their account credentials. {venueName} reserves the right to terminate accounts that violate our community guidelines or exploit the reservation system.</p>
+              {generalTerms && <>
+                <h2 className="text-xl font-bold text-white mt-8 mb-4 border-b border-neutral-800 pb-2">5. General Terms & Conditions</h2>
+                <p className="whitespace-pre-line">{generalTerms}</p>
+              </>}
             </div>
           ) : (
             <div className="space-y-6 text-sm leading-relaxed">
-              <p className="text-xs uppercase tracking-widest text-emerald-500 font-bold mb-2">Last Updated: September 2026</p>
 
               <h2 className="text-xl font-bold text-white mt-8 mb-4 border-b border-neutral-800 pb-2">1. Information We Collect</h2>
               <p>To provide a seamless booking experience, we collect the following information:</p>
@@ -92,11 +103,16 @@ export function Legal() {
               </ul>
 
               <h2 className="text-xl font-bold text-white mt-8 mb-4 border-b border-neutral-800 pb-2">3. Data Security & Storage</h2>
-              <p>Your data is securely stored using industry-standard encryption via Supabase. We do not sell, rent, or share your personal data with third-party advertisers. Account passwords are encrypted and never visible to our staff.</p>
+              <p>Your data is securely stored using industry-standard encryption via Supabase. We do not sell, rent, or share your personal data with third-party advertisers. Supabase Auth manages customer passwords. Staff cannot view them in the POS.</p>
 
               <h2 className="text-xl font-bold text-white mt-8 mb-4 border-b border-neutral-800 pb-2">4. Account Deletion</h2>
-              <p>You have the right to delete your account and associated data at any time. To request data deletion, open your account settings and navigate to the "Delete Account" option.</p>
+              <p>Choose “Delete Account” in your account settings to mark your account for deletion. The system replaces the name and phone number in your profile and retains historical transaction records.</p>
             </div>
+          )}
+          {(contactEmail || contactNumber) && (
+            <p className="mt-8 border-t border-neutral-800 pt-4 text-sm">
+              Questions about these policies? Contact {venueName} at {contactEmail && <a href={`mailto:${contactEmail}`}>{contactEmail}</a>}{contactEmail && contactNumber && ' or '}{contactNumber}.
+            </p>
           )}
         </div>
       </main>
