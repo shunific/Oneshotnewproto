@@ -1,3 +1,5 @@
+import { clockLabel, clockRangeLabel } from '../utils/clockDisplay';
+import { TimeField } from '../components/ui/TimeField';
 import { BookingCalendar } from '../components/BookingCalendar';
 import { bookingDayKey, slotCapacity } from '../utils/bookingSchedule.js';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -424,7 +426,7 @@ export function HomePage() {
         title: isDeclined ? 'Reschedule Request Declined' : 'Reschedule Approved',
         content: isDeclined
           ? `Your reschedule request for booking ${r.id.toUpperCase()}${requestedSchedule} was rejected. Your original schedule on ${format(new Date(r.date), 'MMM d, yyyy')} at ${fmt12(r.timeSlot)} is retained.${decision.reason ? ` Reason: ${decision.reason}` : ''}`
-          : `Your booking ${r.id.toUpperCase()} has been rescheduled to ${format(new Date(r.date), 'MMM d, yyyy')} at ${r.timeSlot}.${decision.reason ? ` Note: ${decision.reason}` : ''}`,
+          : `Your booking ${r.id.toUpperCase()} has been rescheduled to ${format(new Date(r.date), 'MMM d, yyyy')} at ${clockLabel(r.timeSlot)}.${decision.reason ? ` Note: ${decision.reason}` : ''}`,
         createdAt: r.createdAt
       };
     })
@@ -1923,13 +1925,12 @@ export function HomePage() {
                                       <span className="text-[9px] text-amber-500 font-semibold">Min: {fmt12(minAllowedTime)}</span>
                                     )}
                                   </label>
-                                  <input 
-                                    type="time" 
+                                  <TimeField label="Start time"
                                     min={selectedDate && isToday(selectedDate) ? minAllowedTime : undefined}
                                     style={{ colorScheme: isLightMode ? 'light' : 'dark' }} 
                                     value={resForm.timeSlot} 
-                                    onChange={e => {
-                                      const val = e.target.value;
+                                    onChange={newValue => {
+                                      const val = newValue;
                                       if (!val) {
                                         setResForm(f => ({ ...f, timeSlot: '' }));
                                         return;
@@ -2469,7 +2470,7 @@ export function HomePage() {
                         <span className="text-xs font-bold text-neutral-400 whitespace-nowrap">{fmtEventDates(event.date)}</span>
                       </div>
                       <h4 className="text-lg font-bold mb-2 text-white">{event.title}</h4>
-                      {event.duration && <p className="text-[11px] text-neutral-500 font-medium mb-2 flex items-center gap-1.5"><Clock size={11} /> {event.duration}</p>}
+                      {event.duration && <p className="text-[11px] text-neutral-500 font-medium mb-2 flex items-center gap-1.5"><Clock size={11} /> {clockRangeLabel(event.duration)}</p>}
                       <p className="text-xs text-neutral-400 leading-relaxed">{event.description}</p>
 
                       {event.registrationLink && (
@@ -3047,14 +3048,13 @@ export function HomePage() {
                       <span className="text-[9px] text-amber-500 font-semibold">Min: {fmt12(format(addMinutes(new Date(), 60), 'HH:mm'))}</span>
                     )}
                   </label>
-                  <input 
-                    type="time" 
+                  <TimeField label="New time"
                     required 
                     min={rescheduleData.newDate && isToday(rescheduleData.newDate) ? format(addMinutes(new Date(), 60), 'HH:mm') : undefined}
                     style={{ colorScheme: 'dark' }}
                     value={rescheduleData.timeSlot} 
-                    onChange={e => {
-                      const val = e.target.value;
+                    onChange={newValue => {
+                      const val = newValue;
                       const minTime = format(addMinutes(new Date(), 60), 'HH:mm');
                       if (rescheduleData.newDate && isToday(rescheduleData.newDate) && val && val < minTime) {
                         setToastMsg({ title: "1-Hour Advance Required", desc: "Cannot reschedule to a time less than 1 hour from now.", type: 'error' });
