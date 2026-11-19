@@ -12,7 +12,7 @@ export function HistoryReceiptSummary({record,receipt,state}:{record:any;receipt
    <p>RECORDED END: {savedTime(record.endTime)}</p>
    <p>RECORDED DURATION: {Number.isSafeInteger(record.durationMinutes)&&record.durationMinutes>=0?`${record.durationMinutes} mins`:'Unavailable'}</p>
    <div className="flex justify-between font-bold"><span>RECORDED BILL</span><span>{recorded(record.totalAmount)}</span></div>
-   <div className="flex justify-between"><span>RECORDED PAID</span><span>{recorded(record.source==='table_session'?record.amountPaid:undefined)}</span></div>
+   <div className="flex justify-between"><span>RECORDED PAID</span><span>{recorded(record.amountPaid)}</span></div>
    {['voided','voided_refund_pending','refund_pending'].includes(record.status)&&<p className="font-bold">{record.status==='voided'?'Voided':record.status==='voided_refund_pending'?'Voided · Return review':'Return review'}</p>}
   </section>;
  }

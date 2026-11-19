@@ -212,14 +212,6 @@ export function AdminAnnouncements() {
         </div>
       )}
 
-      {/* 🟢 Informational Context Banner */}
-      <div className="bg-amber-950/20 border border-amber-900/30 rounded-xl p-4 flex items-start gap-3">
-        <Megaphone size={15} className="text-amber-500 flex-shrink-0 mt-0.5" />
-        <p className="text-xs text-amber-400/80 leading-relaxed">
-          <strong>Local announcement records:</strong> These records are saved on this POS. Publishing updates to the customer website requires secure hosted publishing, which is not configured here.
-        </p>
-      </div>
-
       {/* 🟢 Dynamic Stats (Based on Active/Drafts List) */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4 text-center">

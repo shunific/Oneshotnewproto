@@ -1,3 +1,4 @@
+import { bookingDay, bookingDayKey } from '../utils/bookingSchedule.js';
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef, useMemo } from 'react';
 import { toast } from 'sonner';
 import { publicSupabase, isAppHostValue } from '../utils/supabase';
@@ -132,7 +133,7 @@ const mapCloudReservation = (r: any) => ({
   customerName: r.customerName || r.customer_name || r.customername,
   contactNumber: r.contactNumber || r.contact_number || r.contactnumber,
   email: r.email,
-  date: new Date(r.date),
+  date: bookingDay(r.date),
   timeSlot: r.timeSlot || r.time_slot || r.timeslot,
   durationHours: r.durationHours || r.duration_hours || r.durationhours,
   partySize: r.partySize || r.party_size || r.partysize,
@@ -788,7 +789,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           if (localRes && localRes.ok) {
             const rows = await localRes.json();
             if (Array.isArray(rows) && rows.length > 0) {
-              setReservations(rows.map((r: any) => ({ ...r, date: new Date(r.date), createdAt: new Date(r.createdAt || Date.now()) })));
+              setReservations(rows.map((r: any) => ({ ...r, date: bookingDay(r.date), createdAt: new Date(r.createdAt || Date.now()) })));
             }
           }
         } catch {}
@@ -1512,7 +1513,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       customerName: newRes.customerName,
       contactNumber: newRes.contactNumber,
       email: newRes.email || null,
-      date: newRes.date.toISOString(),
+      date: bookingDayKey(newRes.date),
       timeSlot: newRes.timeSlot,
       durationHours: newRes.durationHours,
       partySize: newRes.partySize,
@@ -1589,7 +1590,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     syncToDB(`/api/reservations/${id}`, 'PUT', u, `Reservation updated`).then(runCloudBackup).catch(()=>{});
     
     const dbUpdates: any = {};
-    if (u.date) dbUpdates.date = new Date(u.date).toISOString();
+    if (u.date) dbUpdates.date = bookingDayKey(u.date);
     if (u.timeSlot) dbUpdates.timeSlot = u.timeSlot;
     if (u.durationHours) dbUpdates.durationHours = u.durationHours;
     if (u.partySize) dbUpdates.partySize = u.partySize;

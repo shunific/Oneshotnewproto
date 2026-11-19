@@ -79,19 +79,9 @@ export function getReservationStatusConfig(status: string) {
     };
   }
 
-  if (s === 'no-show' || s === 'noshow') {
-    return {
-      label: 'NO-SHOW',
-      colorName: 'red',
-      badgeClass: 'bg-red-500/15 text-red-400 border-red-500/30',
-      dotClass: 'bg-red-400',
-      dotPulse: false
-    };
-  }
-
   // Fallback
   return {
-    label: s.toUpperCase() || 'UNKNOWN',
+    label: ['no-show','noshow','no_show'].includes(s) ? 'ARCHIVED' : s.toUpperCase() || 'UNKNOWN',
     colorName: 'neutral',
     badgeClass: 'bg-neutral-800 text-neutral-300 border-neutral-700',
     dotClass: 'bg-neutral-400',

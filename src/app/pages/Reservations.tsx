@@ -1,16 +1,18 @@
+import { SessionReceipt, bookingReceiptRecord } from '../components/SessionReceipt';
+import { BookingCalendar } from '../components/BookingCalendar';
+import { bookingDay, bookingDayKey, closureOn, freeIntervals, holdsBooking, slotCapacity } from '../utils/bookingSchedule.js';
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { useAppContext, HOURLY_RATE, DOWN_PAYMENT_RATE, ReservationStatus, Reservation, Event, PromoCode } from '../context/AppContext';
 import {
   Plus, X, Calendar, Clock, Users, Phone, Mail, ChevronDown, CheckCircle,
   XCircle, Search, Filter, DollarSign, AlertTriangle, Download, Image as ImageIcon,
   CalendarX2, List as ListIcon, Lock, ChevronLeft, ChevronRight, Send, Upload, ShieldAlert, RefreshCw, Table2,
-  FileText, QrCode, CalendarClock, ThumbsDown
+  FileText, CalendarClock, ThumbsDown
 } from 'lucide-react';
 import { format, isToday, isTomorrow, isPast, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isBefore, startOfDay, addMonths, subMonths, differenceInSeconds, isThisWeek, addMinutes, differenceInHours, differenceInDays } from 'date-fns';
 import { useLocation, useNavigate } from 'react-router';
 import { supabase } from '../utils/supabase';
 import { motion, AnimatePresence } from 'motion/react';
-import { TimeField } from '../components/ui/TimeField';
 
 const formatPHP = (amount?: number | string | null) => {
   const val = Number(amount) || 0;
@@ -27,6 +29,7 @@ const parseRescheduleRequest = (raw: any): { requestedDate?: string; requestedTi
 };
 
 const statusConfig: Record<string, { label: string; color: string; dot: string }> = {
+  'no-show': { label: 'Archived', color: 'text-neutral-400', dot: 'bg-neutral-500' },
   pending: { label: 'Pending', color: 'bg-amber-500/10 text-amber-400 border-amber-500/20', dot: 'bg-amber-400' },
   confirmed: { label: 'Confirmed', color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20', dot: 'bg-emerald-400' },
   'checked-in': { label: 'Checked In', color: 'bg-blue-500/10 text-blue-400 border-blue-500/20', dot: 'bg-blue-400' },
@@ -60,90 +63,6 @@ type ActionModalData = {
   type: 'receipt' | 'refund' | 'reschedule';
   reservation: any;
 };
-
-function MiniCalendar({ selectedDate, onSelect, reservedDates, closedDates, onClosedClick }: { selectedDate: Date | null; onSelect: (d: Date) => void; reservedDates: Date[]; closedDates: any[]; onClosedClick?: (d: Date, reason: string) => void; }) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const [viewDate, setViewDate] = useState(() => { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d; });
-
-  const year = viewDate.getFullYear();
-  const month = viewDate.getMonth();
-  const firstDayOfMonth = new Date(year, month, 1).getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const daysInPrevMonth = new Date(year, month, 0).getDate();
-
-  const cells: Array<{ day: number; currentMonth: boolean; date: Date }> = [];
-  for (let i = firstDayOfMonth - 1; i >= 0; i--) { const d = new Date(year, month - 1, daysInPrevMonth - i); cells.push({ day: daysInPrevMonth - i, currentMonth: false, date: d }); }
-  for (let d = 1; d <= daysInMonth; d++) { cells.push({ day: d, currentMonth: true, date: new Date(year, month, d) }); }
-  const remaining = 42 - cells.length;
-  for (let d = 1; d <= remaining; d++) { cells.push({ day: d, currentMonth: false, date: new Date(year, month + 1, d) }); }
-
-  const isReserved = (date: Date) => reservedDates.some(rd => { const d = new Date(rd); d.setHours(0, 0, 0, 0); return d.getTime() === date.getTime(); });
-  
-  const getClosedData = (date: Date) => closedDates.find((cd: any) => { 
-    if (cd.type === 'weekly') return date.getDay() === cd.dayOfWeek;
-    if (!cd.date) return false;
-    const d = new Date(cd.date); 
-    if (isNaN(d.getTime())) return false;
-    d.setHours(0, 0, 0, 0); 
-    return d.getTime() === date.getTime(); 
-  });
-
-  const isPastDate = (date: Date) => date < today;
-  const isSelected = (date: Date) => selectedDate ? date.getTime() === (() => { const s = new Date(selectedDate); s.setHours(0,0,0,0); return s.getTime(); })() : false;
-  const isTodayDate = (date: Date) => date.getTime() === today.getTime();
-
-  return (
-    <div className="bg-transparent select-none">
-      <div className="flex items-center justify-between mb-4 px-1">
-        <button type="button" onClick={() => setViewDate(d => new Date(d.getFullYear(), d.getMonth() - 1))} className="p-1 rounded text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"><ChevronLeft size={16} /></button>
-        <span className="text-xs font-bold text-white">{format(viewDate, 'MMMM yyyy')}</span>
-        <button type="button" onClick={() => setViewDate(d => new Date(d.getFullYear(), d.getMonth() + 1))} className="p-1 rounded text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"><ChevronRight size={16} /></button>
-      </div>
-      <div className="grid grid-cols-7 mb-2">
-        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => <div key={d} className="text-center text-[8px] text-neutral-500 font-bold uppercase tracking-widest">{d}</div>)}
-      </div>
-      <div className="grid grid-cols-7 gap-y-1">
-        {cells.map(({ day, currentMonth, date }, idx) => {
-          const past = isPastDate(date); 
-          const selected = isSelected(date); 
-          const today_ = isTodayDate(date);
-          const closedData = getClosedData(date);
-          const closed = !!closedData && currentMonth;
-          const reserved = isReserved(date) && currentMonth; 
-          
-          const handleCellClick = () => {
-            if (closed) {
-              onClosedClick?.(date, closedData.reason || 'Closed for maintenance or private event.');
-            } else if (!past && currentMonth) {
-              onSelect(date);
-            }
-          };
-
-          const disabled = !currentMonth || (past && !closed);
-
-          return (
-            <div key={idx} className="flex justify-center">
-              <div 
-                onClick={handleCellClick} 
-                className={`relative flex flex-col items-center justify-center w-8 h-8 rounded-full text-xs transition-all 
-                  ${!currentMonth ? 'opacity-20 cursor-default' : ''} 
-                  ${past && currentMonth && !closed ? 'opacity-30 cursor-default text-neutral-600' : ''} 
-                  ${closed ? 'bg-rose-500/10 text-rose-500 border border-rose-500/30 hover:bg-rose-500/20 cursor-pointer' : ''} 
-                  ${selected && !closed ? 'bg-emerald-500 text-white shadow-md cursor-pointer' : ''} 
-                  ${!selected && today_ && !closed ? 'border border-emerald-500 text-emerald-400 cursor-pointer' : ''} 
-                  ${!selected && !disabled && !closed && !today_ ? 'text-neutral-300 hover:bg-neutral-800 cursor-pointer' : ''}`}
-              >
-                <span className={`pointer-events-none ${selected ? 'font-bold' : 'font-medium'}`}>{day}</span>
-                {reserved && !selected && !closed && <span className="absolute bottom-0.5 w-1 h-1 rounded-full bg-amber-400 pointer-events-none" />}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
 
 export function Reservations() {
   const { 
@@ -398,71 +317,17 @@ export function Reservations() {
     }
   };
 
-  // Weekdays Mon–Thu use the weekday schedule; Fri/Sat/Sun use the weekend schedule.
-  const isWeekendDate = (d: Date) => [0, 5, 6].includes(d.getDay());
-  const getOpeningTimeStr = (d: Date) => (isWeekendDate(d) ? rates?.weekendStartTime : rates?.weekdayStartTime) || '12:00';
-
-  // Default the booking start time to the store's opening hour so staff never have to
-  // pick a slot outside operating hours. Today is clamped to the current time.
-  const defaultStartTimeFor = (d: Date) => {
-    const openStr = getOpeningTimeStr(d);
-    const nowStr = format(new Date(), 'HH:mm');
-    if (isToday(d) && openStr < nowStr) return nowStr;
-    return openStr;
+  const bookingSettings = { rates, reservations, events, closedDates, maxHours: reservationTerms?.maxHours };
+  const defaultStartTimeFor = (day: Date, table?: any) => {
+    const candidates = table ? [table] : tables;
+    const starts = candidates.flatMap((t: any) => freeIntervals(day,t,bookingSettings)
+      .filter(([a,b]: number[]) => b-a >= 60).map(([a]: number[])=>a));
+    if (!starts.length) return '';
+    const first = Math.min(...starts);
+    return String(Math.floor(first/60)).padStart(2,'0') + ':' + String(first%60).padStart(2,'0');
   };
-
-  // Reservations that still hold a table on the given date (cancelled/completed release it).
-  const blockingReservationsFor = (date: Date) => reservations.filter((r: any) =>
-    r.tableId && isSameDay(new Date(r.date), date) && r.status !== 'cancelled' && r.status !== 'completed'
-  );
-
-  // Table status for the selected date: occupied by an active walk-in session today, or
-  // reserved by another booking. Used to surface occupancy on the New Manual Booking feed.
-  const getTableBookingState = (table: any) => {
-    if (!selectedDate) return { occupied: false, reserved: false, label: 'Available Slot' };
-    if (isToday(selectedDate) && table.status === 'occupied' && table.session?.startTime) {
-      return { occupied: true, reserved: false, label: 'Occupied — Playing Now' };
-    }
-    const blocks = blockingReservationsFor(selectedDate).filter((r: any) => r.tableId === table.id);
-    if (blocks.length > 0) {
-      const first = [...blocks].sort((a: any, b: any) => (a.timeSlot || '').localeCompare(b.timeSlot || ''))[0];
-      return { occupied: false, reserved: true, label: `Reserved ${formatTimeOnly(first.timeSlot)}` };
-    }
-    return { occupied: false, reserved: false, label: 'Available Slot' };
-  };
-
-  const getNextClosingTime = (dateObj: Date) => {
-    if (!dateObj) return null;
-    const d = new Date(dateObj);
-    const isWeekend = [0, 5, 6].includes(d.getDay());
-    const closeTimeStr = isWeekend ? rates?.weekendEndTime : rates?.weekdayEndTime;
-    if (!closeTimeStr) return null;
-    
-    const [hr, min] = closeTimeStr.split(':').map(Number);
-    const closeDate = new Date(dateObj);
-    closeDate.setHours(hr, min, 0, 0);
-    
-    if (hr <= 12) {
-      closeDate.setDate(closeDate.getDate() + 1);
-    }
-    return closeDate;
-  };
-
-  const maxAllowedDuration = (() => {
-    let maxMins = 24 * 60; 
-    if (selectedDate && form.timeSlot) {
-      const closeDate = getNextClosingTime(selectedDate);
-      const [h, m] = form.timeSlot.split(':').map(Number);
-      const startD = new Date(selectedDate);
-      startD.setHours(h, m, 0, 0);
-      
-      if (closeDate) {
-        const minsLeft = Math.floor(differenceInSeconds(closeDate, startD) / 60);
-        if (minsLeft > 0) maxMins = Math.min(maxMins, minsLeft);
-      }
-    }
-    return Math.max(1, Math.floor(maxMins / 60));
-  })();
+  const bookingTable = tables.find((t:any)=>t.id === selectedTableId);
+  const maxAllowedDuration = slotCapacity(selectedDate,form.timeSlot,bookingTable,bookingSettings);
 
   const maxAllowedPartySize = (() => {
     const wDayMax = Number(reservationTerms?.weekdayMaxPartySize) || 20;
@@ -490,56 +355,7 @@ export function Reservations() {
     setFile(file);
   };
 
-  const validateTimeSlot = (time: string, duration: number) => {
-    if (!time || !selectedDate) return 'invalid';
-    if (!selectedTableId) return 'no_table';
-
-    const parseToMins = (t: string) => {
-      const [hh = '0', mm = '0'] = (t || '').split(':');
-      return Number(hh) * 60 + Number(mm || 0);
-    };
-
-    const slotMins = parseToMins(time);
-    const requestedStart = new Date(selectedDate);
-    const [h, m] = time.split(':').map(Number);
-    requestedStart.setHours(h, m, 0, 0);
-    const requestedEnd = addMinutes(requestedStart, duration * 60);
-
-    if (isToday(requestedStart)) {
-      const nowMins = new Date().getHours() * 60 + new Date().getMinutes();
-      if (slotMins <= nowMins) return 'past'; 
-    }
-
-    let tableOverlapCount = 0;
-    const sameTableRes = reservations.filter((r: any) => 
-      r.tableId === selectedTableId && 
-      r.status !== 'cancelled' && 
-      r.status !== 'completed' && 
-      isSameDay(new Date(r.date), requestedStart)
-    );
-
-    sameTableRes.forEach((r: any) => {
-      const rStart = new Date(r.date);
-      const [rH, rM] = (r.timeSlot || '00:00').split(':').map(Number);
-      rStart.setHours(rH, rM, 0, 0); 
-      const rEnd = addMinutes(rStart, r.durationHours * 60);
-      if (requestedStart < rEnd && requestedEnd > rStart) tableOverlapCount++;
-    });
-
-    if (tableOverlapCount > 0) return 'table_conflict';
-
-    if (isToday(requestedStart)) {
-      const targetTable = tables.find((t: any) => t.id === selectedTableId);
-      if (targetTable?.status === 'occupied' && targetTable.session?.startTime && targetTable.session?.durationMinutes) {
-         const sessionEnd = addMinutes(new Date(targetTable.session.startTime), targetTable.session.durationMinutes);
-         if (requestedStart < sessionEnd) return 'active_conflict';
-      }
-    }
-
-    return 'valid';
-  };
-  
-  const timeValidation = validateTimeSlot(form.timeSlot, form.durationHours);
+  const timeValidation = !selectedTableId ? 'no_table' : form.durationHours > 0 && form.durationHours <= maxAllowedDuration ? 'valid' : 'unavailable';
 
   const effectiveHourly = (rates && Number(rates.hourlyRate) > 0) ? Number(rates.hourlyRate) : HOURLY_RATE;
   const totalAmount = form.durationHours * effectiveHourly;
@@ -714,25 +530,16 @@ export function Reservations() {
             const fileExt = refundReceiptFile.name.split('.').pop();
             const fileName = `refund_${Date.now()}_${Math.floor(Math.random() * 1000)}.${fileExt}`;
             const { error: uploadError } = await supabase.storage.from('oneshot-assets').upload(fileName, refundReceiptFile);
-            if (!uploadError) {
-               const { data: publicUrlData } = supabase.storage.from('oneshot-assets').getPublicUrl(fileName);
-               finalReceiptUrl = publicUrlData.publicUrl;
-            }
+            if (uploadError) throw uploadError;
+            finalReceiptUrl = supabase.storage.from('oneshot-assets').getPublicUrl(fileName).data.publicUrl;
          }
-
-         updateReservation(actionModal.reservation.id, { 
-            status: 'cancelled', 
-            cancellationReason: `Refund Settled: ${callSummary}` 
-         });
-
-         if (finalReceiptUrl) {
-            await supabase.from('reservations').update({ 
-              receipt_img_url: finalReceiptUrl,
-              refund_notes: finalReceiptUrl
-            }).eq('id', actionModal.reservation.id);
-         }
-
-         flash("Marked as contacted and refund settled successfully.", "success");
+         const reason = 'Refund settled: ' + callSummary.trim();
+         const { data, error } = await supabase.from('reservations')
+           .update({status:'cancelled',refundStatus:'settled',refundNotes:finalReceiptUrl || callSummary.trim(),cancellation_reason:reason,cancellationreason:reason})
+           .eq('id',actionModal.reservation.id).eq('status','pending-refund').select('id').single();
+         if (error || !data) throw new Error('Refund could not be saved. Refresh the booking and retry.');
+         await forceFullSync();
+         flash("Refund marked as settled.", "success");
 
       } else if (actionModal.type === 'reschedule') {
          if (!rescheduleData?.newDate || !rescheduleData?.newTableId) {
@@ -744,26 +551,27 @@ export function Reservations() {
          const [h,m] = rescheduleData.newTimeSlot.split(':').map(Number);
          rDate.setHours(h, m, 0, 0);
 
-         updateReservation(actionModal.reservation.id, { 
-           status: 'confirmed', 
-           date: rDate,
-           timeSlot: rescheduleData.newTimeSlot,
-           durationHours: rescheduleData.newDuration,
-           tableId: rescheduleData.newTableId,
-           cancellationReason: `Rescheduled: ${callSummary}`,
-           rescheduleCount: parseRescheduleRequest(actionModal.reservation.cancellationReason)
-             ? (Number(actionModal.reservation.rescheduleCount) || 0) + 1
-             : (Number(actionModal.reservation.rescheduleCount) || 0),
-         });
-         flash("Reservation rescheduled and the customer has been notified.", "success");
+         const table = tables.find((t:any)=>t.id === rescheduleData.newTableId);
+         if (slotCapacity(rDate,rescheduleData.newTimeSlot,table,bookingSettings,actionModal.reservation.id) < rescheduleData.newDuration)
+           throw new Error('This time is no longer available for the full session.');
+         const reason = 'Rescheduled: ' + callSummary.trim();
+         const {error} = await supabase.from('reservations').update({
+           status:'confirmed', date:bookingDayKey(rDate), timeSlot:rescheduleData.newTimeSlot,
+           durationHours:rescheduleData.newDuration, tableId:table.id,
+           cancellation_reason:reason,cancellationreason:reason,
+           rescheduleCount:(Number(actionModal.reservation.rescheduleCount)||0)+(actionModal.reservation.status==='pending-reschedule'?1:0)
+         }).eq('id',actionModal.reservation.id).eq('status',actionModal.reservation.status).select('id').single();
+         if (error) throw new Error('Reschedule could not be saved. Refresh the booking and retry.');
+         await forceFullSync();
+         flash("Reservation rescheduled.", "success");
       }
       
       setActionModal(null);
       setCallSummary('');
       setRefundReceiptFile(null);
       setRefundReceiptPreview(null);
-    } catch (e) {
-      flash("An error occurred while processing the action.", "error");
+    } catch (e: any) {
+      flash(e.message || "An error occurred while processing the action.", "error");
     } finally {
       setIsActionSubmitting(false);
     }
@@ -788,7 +596,7 @@ export function Reservations() {
 
   const openRescheduleApproval = (r: any) => {
     const request = parseRescheduleRequest(r.cancellationReason);
-    const baseDate = request?.requestedDate ? new Date(request.requestedDate) : new Date(r.date);
+    const baseDate = request?.requestedDate ? bookingDay(request.requestedDate) : new Date(r.date);
     setRescheduleData({
       newDate: Number.isFinite(baseDate.getTime()) ? baseDate : new Date(r.date),
       newTimeSlot: request?.requestedTime || r.timeSlot,
@@ -834,10 +642,10 @@ export function Reservations() {
   }, 0);
 
   const dateKey = (d: Date) => format(d, 'yyyy-MM-dd');
-  const closedMap = new Map(closedDates.map((c: any) => [c.date, c]));
+
   
   const resMap = reservations.reduce((acc: any, r: any) => {
-    const d = dateKey(new Date(r.date));
+    const d = bookingDayKey(r.date);
     if (!acc[d]) acc[d] = [];
     acc[d].push(r);
     return acc;
@@ -888,9 +696,12 @@ export function Reservations() {
               const isPastDate = isBefore(day, todayStart);
               const isTodayDate = isSameDay(day, new Date());
               
-              const dayCls = closedMap.get(key);
+              const dayCls = closureOn(day,closedDates);
               const dayEvs = eventsMap[key] || [];
               const dayRes = resMap[key] || [];
+              const withinWindow = !isPastDate && differenceInDays(day,startOfDay(new Date())) <= 30;
+              const hasSlot = withinWindow && tables.some((table:any) =>
+                freeIntervals(day,table,bookingSettings).some(([start,end]:number[])=>end-start>=60));
 
               return (
                 <div
@@ -907,12 +718,13 @@ export function Reservations() {
                   `}
                 >
                   <span className={`font-semibold text-xs mb-1 ${isTodayDate ? 'text-amber-400' : isPastDate ? 'text-neutral-600' : 'text-neutral-300'}`}>{format(day, 'd')}</span>
+                  {withinWindow && !dayCls && <span className={`text-[9px] ${hasSlot ? 'text-emerald-400' : 'text-rose-400'}`}>{hasSlot ? 'Available' : 'Unavailable'}</span>}
                   
                   <div className="w-full space-y-0.5 overflow-hidden flex-1 pointer-events-none">
                     {dayCls && <div className="w-full text-[9px] bg-rose-500/20 text-rose-400 rounded px-1 truncate font-semibold">Closed</div>}
                     
                     {!dayCls && dayRes.length > 0 && (
-                      <div className="w-full text-[8px] bg-blue-500/20 text-blue-400 rounded px-1 truncate font-semibold border border-blue-500/30">
+                      <div className="w-full text-[8px] bg-neutral-800 text-neutral-300 rounded px-1 truncate font-semibold">
                         {dayRes.length} Rsv
                       </div>
                     )}
@@ -953,6 +765,17 @@ export function Reservations() {
           </div>
         ))}
       </div>
+
+      {reservations.some((r:any)=>r.status==='pending-refund') && (
+        <section className="space-y-3 rounded-xl border border-amber-900/40 bg-neutral-950 p-4">
+          <h3 className="text-sm font-bold text-amber-400">Refund requests</h3>
+          {reservations.filter((r:any)=>r.status==='pending-refund').map((r:any)=>
+            <div key={r.id} className="flex items-center justify-between gap-3 text-sm">
+              <span>{r.customerName} · #{r.id}</span>
+              <button type="button" className="text-amber-400" onClick={()=>{setCallSummary('');setActionModal({type:'refund',reservation:r});}}>Process refund</button>
+            </div>)}
+        </section>
+      )}
 
       {/* 🟢 RESCHEDULE REQUESTS */}
       {rescheduleRequests.length > 0 && (
@@ -1073,6 +896,7 @@ export function Reservations() {
               <option value="confirmed">Confirmed</option>
               <option value="checked-in">Checked In</option>
               <option value="pending-reschedule">Pending Reschedule</option>
+              <option value="pending-refund">Pending Refund</option>
               <option value="completed">Completed</option>
               <option value="cancelled">Cancelled</option>
             </select>
@@ -1253,7 +1077,7 @@ export function Reservations() {
                 const key = dateKey(dayViewDate);
                 const dayEvs = eventsMap[key] || [];
                 const dayPrs = promosMap[key] || [];
-                const dayCls = closedMap.get(key);
+                const dayCls = closureOn(dayViewDate,closedDates);
                 const dayRes = resMap[key] || [];
 
                 return (
@@ -1288,7 +1112,7 @@ export function Reservations() {
                                   <p className="text-xs text-neutral-500">{r.timeSlot} · {r.partySize} pax</p>
                                 </div>
                                 <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${statusConfig[r.status]?.color}`}>
-                                  {r.status}
+                                  {statusConfig[r.status]?.label || r.status}
                                 </span>
                               </div>
                               
@@ -1424,7 +1248,7 @@ export function Reservations() {
                 {selected.status === 'completed' && (
                   <div className="border-t border-neutral-800 pt-5 mt-2">
                     <button 
-                      onClick={() => setViewingEReceipt(selected)}
+                      onClick={() => setViewingEReceipt(bookingReceiptRecord(selected,tables,sessionHistory))}
                       className="w-full flex items-center justify-center gap-2 px-4 py-3.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 rounded-xl text-sm font-bold text-emerald-400 transition-colors shadow-lg shadow-black/20"
                     >
                       <FileText size={16} /> View Digital e-Receipt
@@ -1604,21 +1428,13 @@ export function Reservations() {
                         <div className="grid grid-cols-2 gap-2">
                            <div>
                               <label className="block text-[10px] text-neutral-500 mb-1">New Date</label>
-                              <input type="date" value={rescheduleData.newDate ? format(rescheduleData.newDate, 'yyyy-MM-dd') : ''} min={format(new Date(), 'yyyy-MM-dd')} onChange={e => setRescheduleData(prev => prev ? ({...prev, newDate: new Date(e.target.value)}) : null)} className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-[10px] text-neutral-100 focus:outline-none focus:border-amber-500" style={{ colorScheme: 'dark' }} />
+                              <input type="date" value={rescheduleData.newDate ? format(rescheduleData.newDate, 'yyyy-MM-dd') : ''} min={format(new Date(), 'yyyy-MM-dd')} onChange={e => setRescheduleData(prev => prev ? ({...prev, newDate: bookingDay(e.target.value)}) : null)} className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-[10px] text-neutral-100 focus:outline-none focus:border-amber-500" style={{ colorScheme: 'dark' }} />
                            </div>
                            <div>
                               <label className="block text-[10px] text-neutral-500 mb-1">New Time</label>
-                              <TimeField
+                              <input type="time" required style={{colorScheme:'dark'}}
                                 value={rescheduleData.newTimeSlot}
-                                min={rescheduleData.newDate && isToday(rescheduleData.newDate) ? format(new Date(), 'HH:mm') : undefined}
-                                onChange={val => {
-                                  const nowTime = format(new Date(), 'HH:mm');
-                                  if (rescheduleData.newDate && isToday(rescheduleData.newDate) && val && val < nowTime) {
-                                    setRescheduleData(prev => prev ? ({ ...prev, newTimeSlot: nowTime }) : null);
-                                    return;
-                                  }
-                                  setRescheduleData(prev => prev ? ({...prev, newTimeSlot: val}) : null);
-                                }}
+                                onChange={e=>{const time=e.target.value;setRescheduleData(prev=>prev ? {...prev,newTimeSlot:time} : null);}}
                                 className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-[10px] text-neutral-100 focus-within:border-amber-500"
                               />
                            </div>
@@ -1737,10 +1553,10 @@ export function Reservations() {
                   {isCalendarExpanded && (
                     <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden border-b border-neutral-800 bg-neutral-950/50 shrink-0">
                       <div className="p-4">
-                        <MiniCalendar
+                        <BookingCalendar
                           selectedDate={selectedDate}
                           onSelect={(d) => { setSelectedDate(d); setSelectedTableId(null); setIsCalendarExpanded(false); setForm(f => ({ ...f, timeSlot: defaultStartTimeFor(d) })); }}
-                          reservedDates={[]} closedDates={closedDates}
+                          tables={tables} settings={bookingSettings} onClosedClick={(_,reason) => flash(reason,'error')}
                         />
                       </div>
                     </motion.div>
@@ -1759,7 +1575,6 @@ export function Reservations() {
                         <span className="font-semibold text-[11px] uppercase tracking-wider">Venue Layout Status</span>
                         <div className="flex items-center gap-3 text-[10px]">
                           <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> Free</span>
-                          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-sky-400" /> Reserved</span>
                           <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> Occupied</span>
                           <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-rose-500" /> Maint.</span>
                         </div>
@@ -1769,14 +1584,19 @@ export function Reservations() {
                         {tables.filter((t: any) => t.isActive).map((table: any) => {
                           const isSel = selectedTableId === table.id;
                           const isMaint = table.status === 'maintenance';
-                          const booking = getTableBookingState(table);
+                          const occupied = isToday(selectedDate) && table.status === 'occupied';
+                          const bookable = freeIntervals(selectedDate,table,bookingSettings).some(([a,b]:number[])=>b-a>=60);
                           
                           return (
                             <button
                               key={table.id}
                               type="button"
                               disabled={isMaint}
-                              onClick={() => setSelectedTableId(table.id)}
+                              onClick={() => {
+                                setSelectedTableId(table.id);
+                                const timeSlot = defaultStartTimeFor(selectedDate,table);
+                                setForm(f=>({...f,timeSlot,durationHours:Math.max(1,Math.min(f.durationHours,slotCapacity(selectedDate,timeSlot,table,bookingSettings)))}));
+                              }}
                               className={`relative p-3 rounded-xl border text-left flex flex-col justify-between transition-all ${
                                 isMaint 
                                   ? 'bg-neutral-900/30 border-neutral-800/40 opacity-40 cursor-not-allowed'
@@ -1787,10 +1607,10 @@ export function Reservations() {
                             >
                               <div className="flex justify-between items-center mb-1">
                                 <span className={`text-xs font-bold ${isSel ? 'text-emerald-400' : 'text-neutral-200'}`}>{table.name}</span>
-                                <span className={`w-2 h-2 rounded-full ${isMaint ? 'bg-rose-500' : booking.occupied ? 'bg-amber-400 animate-pulse' : booking.reserved ? 'bg-sky-400' : 'bg-emerald-500'}`} />
+                                <span className={`w-2 h-2 rounded-full ${isMaint ? 'bg-rose-500' : occupied ? 'bg-amber-400 animate-pulse' : bookable ? 'bg-emerald-500' : 'bg-rose-500'}`} />
                               </div>
-                              <p className={`text-[10px] truncate ${booking.reserved ? 'text-sky-400 font-semibold' : booking.occupied ? 'text-amber-400 font-semibold' : 'text-neutral-400'}`}>
-                                {isMaint ? 'Unavailable' : booking.label}
+                              <p className={`text-[10px] truncate ${occupied ? 'text-amber-400 font-semibold' : 'text-neutral-400'}`}>
+                                {isMaint || !bookable ? 'Unavailable' : occupied ? 'Occupied now' : 'Available Slot'}
                               </p>
                             </button>
                           );
@@ -1814,8 +1634,7 @@ export function Reservations() {
                             const tableRes = reservations.filter((r: any) => 
                               r.tableId === selectedTableId && 
                               isSameDay(new Date(r.date), selectedDate) && 
-                              r.status !== 'cancelled' && 
-                              r.status !== 'completed'
+                              holdsBooking(r)
                             ).sort((a: any, b: any) => {
                               const timeA = a.timeSlot.split(':').map(Number);
                               const timeB = b.timeSlot.split(':').map(Number);
@@ -1895,20 +1714,15 @@ export function Reservations() {
                           <label className="block text-xs text-neutral-400 mb-1.5 flex justify-between items-end">
                             <span>Start Time <span className="text-rose-500">*</span></span>
                             {selectedDate && isToday(selectedDate) && (
-                              <span className="text-[9px] text-amber-500 font-semibold">Min: {format(new Date(), 'HH:mm')}</span>
+                              <span className="text-[9px] text-amber-500 font-semibold">Min: {format(addMinutes(new Date(),60), 'HH:mm')}</span>
                             )}
                           </label>
-                          <TimeField
-                            required
-                            min={selectedDate && isToday(selectedDate) ? format(new Date(), 'HH:mm') : undefined}
-                            value={form.timeSlot}
-                            onChange={val => {
-                              const nowTime = format(new Date(), 'HH:mm');
-                              if (selectedDate && isToday(selectedDate) && val && val < nowTime) {
-                                setForm(f => ({ ...f, timeSlot: nowTime }));
-                                return;
-                              }
-                              setForm(f => ({ ...f, timeSlot: val }));
+                          <input type="time" required
+                            value={form.timeSlot} style={{ colorScheme: 'dark' }}
+                            onChange={e => {
+                              const timeSlot=e.target.value;
+                              const cap=slotCapacity(selectedDate,timeSlot,bookingTable,bookingSettings);
+                              setForm(f=>({...f,timeSlot,durationHours:cap>0 ? Math.min(f.durationHours,cap) : f.durationHours}));
                             }}
                             className={`w-full bg-neutral-800 border rounded-lg px-3 py-2.5 text-sm text-neutral-100 focus-within:border-emerald-500 ${timeValidation !== 'valid' && form.timeSlot ? 'border-rose-500/50 text-rose-200' : 'border-neutral-700'}`}
                           />
@@ -1922,9 +1736,7 @@ export function Reservations() {
                       </div>
                       
                       <div className="mt-3">
-                        {timeValidation === 'past' && <p className="text-[10px] text-rose-400 font-semibold flex items-center gap-1"><XCircle size={10} /> Time has passed.</p>}
-                        {timeValidation === 'table_conflict' && <div className="text-[10px] text-rose-400 font-bold flex items-start gap-1.5 bg-rose-950/30 p-2.5 rounded border border-rose-900/50 mt-2"><XCircle size={14} className="shrink-0 mt-0.5" /><span>Table has another reservation overlapping this time.</span></div>}
-                        {timeValidation === 'active_conflict' && <div className="text-[10px] text-amber-400 font-bold flex items-start gap-1.5 bg-amber-950/20 p-2.5 rounded border border-amber-900/30 mt-2"><Clock size={14} className="shrink-0 mt-0.5" /><span>Table has an active walk-in timer running. Wait for it to finish.</span></div>}
+                        {timeValidation === 'unavailable' && <p className="text-xs text-rose-400">Choose an available time within operating hours with room for the full duration and at least one hour of notice.</p>}
                         {timeValidation === 'valid' && <p className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1 mt-2"><CheckCircle size={10} /> Valid selection!</p>}
                       </div>
                     </div>
@@ -2277,71 +2089,7 @@ export function Reservations() {
         </div>
       )}
 
-      {/* 🟢 FULLY RESPONSIVE DIGITAL E-RECEIPT (RESERVATIONS VIEW) */}
-      {viewingEReceipt && (
-        <div 
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 sm:p-8"
-          onClick={() => setViewingEReceipt(null)}
-        >
-          <div 
-            className="w-full max-w-sm relative animate-in zoom-in-95 duration-200 max-h-full overflow-y-auto hide-scrollbar rounded-2xl" 
-            onClick={e => e.stopPropagation()}
-          >
-            {/* Close Button */}
-            <button 
-              onClick={() => setViewingEReceipt(null)} 
-              className="absolute top-2 right-2 z-10 p-2 text-neutral-400 hover:text-white transition-colors bg-neutral-900/80 rounded-full" 
-              title="Close Receipt"
-            >
-              <X size={18} />
-            </button>
-
-            {/* The Ticket Graphic */}
-            <div className="bg-neutral-100 text-neutral-900 rounded-b-xl shadow-2xl relative overflow-hidden" style={{ filter: 'drop-shadow(0 10px 15px rgba(16,185,129,0.2))' }}>
-              <div className="h-4 w-full flex space-x-1 absolute top-0 left-0 bg-black">
-                {Array.from({ length: 30 }).map((_, i) => (
-                  <div key={i} className="w-3 h-3 bg-neutral-100 rounded-full -mt-1.5" />
-                ))}
-              </div>
-              
-              <div className="px-6 pt-10 pb-8 flex flex-col items-center font-mono">
-                <h2 className="text-3xl font-black tracking-tighter mb-1">ONE SHOT</h2>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-neutral-500 mb-6">Bar & Billiards</p>
-                
-                <div className="w-full space-y-2 text-xs font-semibold border-b-2 border-dashed border-neutral-300 pb-4 mb-4">
-                  <div className="flex justify-between"><span>Booking ID:</span><span className="font-bold text-[10px]">{viewingEReceipt.id.toUpperCase()}</span></div>
-                  <div className="flex justify-between"><span>Date:</span><span>{format(new Date(viewingEReceipt.date), 'MM/dd/yyyy')}</span></div>
-                  <div className="flex justify-between"><span>Time:</span><span>{formatTimeOnly(viewingEReceipt.timeSlot)}</span></div>
-                  <div className="flex justify-between"><span>Table:</span><span>{viewingEReceipt.tableId ? getTableName(viewingEReceipt.tableId) : 'N/A'}</span></div>
-                  <div className="flex justify-between"><span>Customer:</span><span>{viewingEReceipt.customerName}</span></div>
-                </div>
-
-                <div className="w-full space-y-2 text-xs font-bold border-b-2 border-dashed border-neutral-300 pb-4 mb-4">
-                  <div className="flex justify-between"><span>Table Booked ({viewingEReceipt.durationHours}h)</span><span>{formatPHP(viewingEReceipt.totalAmount)}</span></div>
-                </div>
-
-                <div className="w-full space-y-1.5 text-sm">
-                  <div className="flex justify-between font-black text-base"><span>TOTAL DUE</span><span>{formatPHP(viewingEReceipt.totalAmount)}</span></div>
-                  <div className="flex justify-between text-neutral-500 font-semibold text-xs"><span>Down Payment</span><span>-{formatPHP(viewingEReceipt.downPaymentAmount)}</span></div>
-                  <div className="flex justify-between text-neutral-500 font-semibold text-xs"><span>Balance Paid</span><span>-{formatPHP(Math.max(0, Number(viewingEReceipt.totalAmount || 0) - Number(viewingEReceipt.downPaymentAmount || 0)))}</span></div>
-                </div>
-
-                <div className="w-full mt-4 pt-4 border-t-[3px] border-neutral-800 flex justify-between font-black text-xl">
-                  <span>STATUS</span>
-                  <span className="text-emerald-600">SETTLED</span>
-                </div>
-
-                <div className="mt-8 flex flex-col items-center">
-                   <div className="p-2 border-2 border-neutral-900 rounded-lg mb-2 opacity-80">
-                     <QrCode size={64} strokeWidth={1.5} />
-                   </div>
-                   <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600 bg-emerald-500/10 px-3 py-1 rounded-full">Completed Booking</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {viewingEReceipt && <SessionReceipt record={viewingEReceipt} onClose={()=>setViewingEReceipt(null)} />}
 
       {/* 🟢 MIGRATE TABLE MODAL */}
       {migrateModal && (

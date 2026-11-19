@@ -91,6 +91,12 @@ const sanitizeDate = (val) => {
   return null;
 };
 
+// Cloud reservations store a Manila calendar date in a PostgreSQL DATE column.
+function reservationDay(value) {
+  if (!value || /^\d{4}-\d{2}-\d{2}$/.test(value)) return value || null;
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Manila',year:'numeric',month:'2-digit',day:'2-digit'}).format(date) : null;
+}
 const sqlite3 = sqlite3Pkg ? sqlite3Pkg.verbose() : null;
 const app = express();
 const rawPort = process.env.BACKEND_PORT || process.env.ONESHOT_QA_PORT || process.env.PORT || 3001;
@@ -582,7 +588,7 @@ app.get('/api/reservations', (req, res) => {
       customerName: r.customerName || r.customer_name || 'Guest',
       contactNumber: r.contactNumber || r.contact_number || '',
       email: r.email || null,
-      date: sanitizeDate(r.date || r.reservation_date),
+      date: reservationDay(r.date || r.reservation_date),
       timeSlot: r.timeSlot || r.time_slot || '',
       durationHours: r.durationHours || r.duration_hours || 1,
       partySize: r.partySize || r.party_size || 1,
@@ -901,11 +907,11 @@ app.post('/api/cache-reservations', (req, res) => {
     db.serialize(() => {
       db.run('BEGIN TRANSACTION');
       const stmt = db.prepare(`
-        INSERT OR REPLACE INTO reservations (id, customerName, contactNumber, email, date, timeSlot, durationHours, partySize, tableId, status, totalAmount, downPaymentAmount, downPaymentPaid, balancePaid, paymentRef, receiptImg, cancellationReason, refundStatus, refundMethod, refundNotes, createdAt, promoCode, discountAmount) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT OR REPLACE INTO reservations (id, customerName, contactNumber, email, date, timeSlot, durationHours, partySize, tableId, status, totalAmount, downPaymentAmount, downPaymentPaid, balancePaid, paymentRef, receiptImg, cancellationReason, refundStatus, refundMethod, refundNotes, createdAt, promoCode, discountAmount, rescheduleCount)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       reservations.forEach(r => {
-        stmt.run([r.id, r.customerName, r.contactNumber, r.email||null, typeof r.date === 'string' ? r.date : new Date(r.date).toISOString(), r.timeSlot, r.durationHours, r.partySize, r.tableId||null, r.status, r.totalAmount, r.downPaymentAmount, r.downPaymentPaid?1:0, r.balancePaid?1:0, r.paymentRef||null, r.receiptImg||null, r.cancellationReason||null, r.refundStatus||null, r.refundMethod||null, r.refundNotes||null, typeof r.createdAt === 'string' ? r.createdAt : new Date(r.createdAt).toISOString(), r.promoCode||null, r.discountAmount||0]);
+        stmt.run([r.id, r.customerName, r.contactNumber, r.email||null, typeof r.date === 'string' ? r.date : new Date(r.date).toISOString(), r.timeSlot, r.durationHours, r.partySize, r.tableId||null, r.status, r.totalAmount, r.downPaymentAmount, r.downPaymentPaid?1:0, r.balancePaid?1:0, r.paymentRef||null, r.receiptImg||null, r.cancellationReason||null, r.refundStatus||null, r.refundMethod||null, r.refundNotes||null, typeof r.createdAt === 'string' ? r.createdAt : new Date(r.createdAt).toISOString(), r.promoCode||null, r.discountAmount||0,Number(r.rescheduleCount)||0]);
       });
       stmt.finalize();
       db.run('COMMIT', (err) => {
@@ -960,6 +966,29 @@ app.post('/api/sync-to-cloud', async (req, res) => {
   let syncErrors = [];
   try {
 
+    // Staff review writes are explicit. A background backup from an older POS
+    // snapshot must not acknowledge, reopen or discard a customer's request.
+    const syncReservations = async (rows) => {
+      for (let i = 0; i < rows.length; i += 50) {
+        const batch = rows.slice(i, i + 50);
+        const { data, error } = await supabase.from('reservations').select('*').in('id', batch.map(row => row.id));
+        if (error) throw error;
+        const existing = new Map(data.map(row => [row.id, row]));
+        const missing = batch.filter(row => !existing.has(row.id));
+        if (missing.length) {
+          const { error } = await supabase.from('reservations').upsert(missing, { onConflict: 'id', ignoreDuplicates: true });
+          if (error) throw error;
+        }
+        for (const row of batch) {
+          const current = existing.get(row.id);
+          if (!current || ['pending-refund','pending-reschedule'].some(status => current.status === status || row.status === status)
+              || current.refundStatus === 'settled' || Number(current.rescheduleCount) > Number(row.rescheduleCount || 0)) continue;
+          if (Object.keys(row).every(key => String(current[key] ?? '') === String(row[key] ?? ''))) continue;
+          const { error } = await supabase.from('reservations').update(row).eq('id',row.id).eq('status',current.status);
+          if (error) throw error;
+        }
+      }
+    };
     const syncTable = (localTable, cloudTable, mapFn, conflictKey = 'id') => {
       return new Promise((resolve) => {
         db.all(`SELECT * FROM ${localTable}`, [], async (err, rows) => {
@@ -972,6 +1001,7 @@ app.post('/api/sync-to-cloud', async (req, res) => {
               return true;
             });
             if (payload.length === 0) return resolve();
+            if (cloudTable === 'reservations') { await syncReservations(payload); return resolve(); }
             console.log(`☁️ Syncing ${localTable}: ${payload.length} row(s)`);
 
 const { data, error } = await supabase
@@ -1075,7 +1105,7 @@ if (error) {
         customerName: r.customerName || '',
         contactNumber: r.contactNumber || '',
         email: r.email || null,
-        date: sanitizeDate(r.date),
+        date: reservationDay(r.date),
         timeSlot: r.timeSlot || '',
         durationHours: r.durationHours ?? 1,
         partySize: r.partySize ?? 1,
@@ -1089,6 +1119,7 @@ if (error) {
         receiptImg: r.receiptImg || null,
         cancellation_reason: r.cancellationReason || null,
         refundStatus: r.refundStatus || null,
+        rescheduleCount: Number(r.rescheduleCount) || 0,
         refundMethod: r.refundMethod || null,
         refundNotes: r.refundNotes || null,
         promoCode: r.promoCode || null,
@@ -1342,10 +1373,10 @@ app.delete('/api/lost-and-found/:id', (req, res) => {
 });
 
 app.post('/api/reservations', (req, res) => {
-  const { id, customerName, contactNumber, email, date, timeSlot, durationHours, partySize, status, totalAmount, downPaymentAmount, downPaymentPaid, balancePaid, paymentRef, receiptImg } = req.body;
+  const { id, customerName, contactNumber, email, date, timeSlot, durationHours, partySize, tableId, status, totalAmount, downPaymentAmount, downPaymentPaid, balancePaid, paymentRef, receiptImg } = req.body;
   const createdAt = new Date().toISOString();
-  db.run(`INSERT INTO reservations (id, customerName, contactNumber, email, date, timeSlot, durationHours, partySize, status, totalAmount, downPaymentAmount, downPaymentPaid, balancePaid, paymentRef, receiptImg, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, 
-  [id, customerName, contactNumber, email || null, date, timeSlot, durationHours, partySize, status, totalAmount, downPaymentAmount, downPaymentPaid ? 1 : 0, balancePaid ? 1 : 0, paymentRef || null, receiptImg || null, createdAt], function(err) {
+  db.run(`INSERT INTO reservations (id, customerName, contactNumber, email, date, timeSlot, durationHours, partySize, tableId, status, totalAmount, downPaymentAmount, downPaymentPaid, balancePaid, paymentRef, receiptImg, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  [id, customerName, contactNumber, email || null, reservationDay(date), timeSlot, durationHours, partySize, tableId || null, status, totalAmount, downPaymentAmount, downPaymentPaid ? 1 : 0, balancePaid ? 1 : 0, paymentRef || null, receiptImg || null, createdAt], function(err) {
     if (err) return res.status(500).json({ error: err.message });
     res.status(201).json({ message: 'Reservation created successfully', id: id });
     // Fire-and-forget: notify the customer their booking was received.
