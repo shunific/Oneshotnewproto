@@ -1,6 +1,6 @@
+import { completedReservationStats, openTimeRemaining } from '../utils/waitHistory';
 import { RefundRequestDialog, type RefundBooking } from '../components/RefundRequestDialog';
 import { clockLabel, clockRangeLabel } from '../utils/clockDisplay';
-import { TimeField } from '../components/ui/TimeField';
 import { BookingCalendar } from '../components/BookingCalendar';
 import { bookingDayKey, slotCapacity } from '../utils/bookingSchedule.js';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -19,7 +19,7 @@ import {
   Sparkles, Upload, Search, ExternalLink, AlertTriangle, XCircle, Bell, RefreshCw, Lock,
   Table2, LogOut, FileText, Sun, Moon, HelpCircle
 } from 'lucide-react';
-import { useAppContext, HOURLY_RATE, DOWN_PAYMENT_RATE, selectCanonicalTables } from '../context/AppContext';
+import { useAppContext, HOURLY_RATE, DOWN_PAYMENT_RATE } from '../context/AppContext';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
 import { ReservationStatusBadge } from '../components/ReservationStatusBadge';
 import {
@@ -45,6 +45,7 @@ export function HomePage() {
 
   const [activeUser, setActiveUser] = useState<{ name: string; email: string; phone?: string; } | null>(null);
 
+  const completedHistory = useMemo(() => completedReservationStats(reservations || []), [reservations]);
   const [dynamicWaitTime, setDynamicWaitTime] = useState<string>('Calculating...');
 
   useEffect(() => {
@@ -64,12 +65,12 @@ export function HomePage() {
 
     const now = new Date();
     const remainingTimes = activeTables.map((t: any) => {
-      if (t.session.isOpenTime || !t.session.durationMinutes) return 45; 
+      if (t.session.isOpenTime || !t.session.durationMinutes) return completedHistory.typicalBookedMinutes ? openTimeRemaining(t.session.startTime, now, completedHistory.typicalBookedMinutes) : 45;
       const end = addMinutes(new Date(t.session.startTime), t.session.durationMinutes);
       return Math.max(0, differenceInMinutes(end, now));
     }).sort((a: any, b: any) => a - b);
 
-    const baseWait = remainingTimes[0] || 15;
+    const baseWait = remainingTimes[0] ?? 15;
     const unseatedQueue = Math.max(0, waitingCount - freeTables);
     const totalWait = baseWait + (unseatedQueue * 15); 
 
@@ -80,7 +81,7 @@ export function HomePage() {
     } else {
       setDynamicWaitTime(`~${Math.floor(totalWait / 60)}h ${Math.round(totalWait % 60)}m`);
     }
-  }, [tables, queue]);
+  }, [tables, queue, completedHistory]);
 
   const [rateLimits, setRateLimits] = useState<Record<string, number[]>>({});
   const checkRateLimit = useCallback((action: string, maxAttempts: number, windowMinutes: number) => {
@@ -180,7 +181,7 @@ export function HomePage() {
   const [isTableSelectorExpanded, setIsTableSelectorExpanded] = useState(true);
   
   const venueTables = useMemo(() => {
-    return selectCanonicalTables(tables || [], 8);
+    return tables.filter(t => t.isActive).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }) || a.id.localeCompare(b.id));
   }, [tables]);
   
   const [resForm, setResForm] = useState({ 
@@ -379,14 +380,14 @@ export function HomePage() {
     .filter((r: any) => r.status === 'cancelled')
     .map((r: any) => {
       const reason = typeof r.cancellationReason === 'string' ? r.cancellationReason : '';
-      const isRefund = r.status === 'pending-refund' || reason.toLowerCase().includes('refund');
+      const isRefund = r.refundStatus !== 'declined' && (r.status === 'pending-refund' || reason.toLowerCase().includes('refund'));
       const cleanReason = reason && !reason.startsWith('__RESCHEDULE_REQUEST__') && !reason.startsWith('Rescheduled:')
         ? reason
         : '';
       return {
         id: `cancel_${r.id}`,
         type: 'Reservation Cancelled',
-        title: isRefund ? 'Cancellation & Refund' : 'Reservation Cancelled',
+        title: r.refundStatus === 'declined' ? 'Booking cancelled · Refund declined' : isRefund ? 'Cancellation & Refund' : 'Reservation Cancelled',
         content: `Your reservation for ${format(new Date(r.date), 'MMM d, yyyy')} has been cancelled.${cleanReason ? ` Reason: ${cleanReason}` : ''}${isRefund ? ' Any applicable refund is being processed.' : ''}`,
         createdAt: r.createdAt
       };
@@ -837,7 +838,7 @@ export function HomePage() {
 
   const minAllowedTime = useMemo(() => {
     if (!selectedDate || !isToday(selectedDate)) return '';
-    const earliest = addMinutes(new Date(), ADVANCE_NOTICE_MINS);
+    const earliest = new Date((Math.ceil(Date.now() / 60000) + ADVANCE_NOTICE_MINS) * 60000);
     const h = String(earliest.getHours()).padStart(2, '0');
     const m = String(earliest.getMinutes()).padStart(2, '0');
     return `${h}:${m}`;
@@ -1642,7 +1643,7 @@ export function HomePage() {
                               )}
 
                               <div className="flex items-center justify-between mb-3 text-xs text-neutral-400">
-                                <span className="font-semibold text-[11px] uppercase tracking-wider">Venue Layout (8 Tables)</span>
+                                <span className="font-semibold text-[11px] uppercase tracking-wider">Venue Layout ({venueTables.length} {venueTables.length === 1 ? 'Table' : 'Tables'})</span>
                                 <div className="flex items-center gap-3 text-[10px]">
                                   <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> Free</span>
                                   <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> Active</span>
@@ -1903,35 +1904,12 @@ export function HomePage() {
                                       <span className="text-[9px] text-amber-500 font-semibold">Min: {fmt12(minAllowedTime)}</span>
                                     )}
                                   </label>
-                                  <TimeField label="Start time"
+                                  <input type="time" aria-label="Start time"
                                     min={selectedDate && isToday(selectedDate) ? minAllowedTime : undefined}
                                     style={{ colorScheme: isLightMode ? 'light' : 'dark' }} 
                                     value={resForm.timeSlot} 
-                                    onChange={newValue => {
-                                      const val = newValue;
-                                      if (!val) {
-                                        setResForm(f => ({ ...f, timeSlot: '' }));
-                                        return;
-                                      }
-                                      if (selectedDate && isToday(selectedDate)) {
-                                        const [h, m] = val.split(':').map(Number);
-                                        const now = new Date();
-                                        const nowMins = now.getHours() * 60 + now.getMinutes();
-                                        const chosenMins = h * 60 + m;
-                                        if (chosenMins <= nowMins) {
-                                          setToastMsg({ title: "Time Has Passed", desc: "You cannot select a time that has already passed for today.", type: 'error' });
-                                          setResForm(f => ({ ...f, timeSlot: minAllowedTime || format(addMinutes(new Date(), 60), 'HH:mm') }));
-                                          return;
-                                        }
-                                        if (minAllowedTime) {
-                                          const [minH, minM] = minAllowedTime.split(':').map(Number);
-                                          if (chosenMins < minH * 60 + minM) {
-                                            setToastMsg({ title: "1-Hour Advance Required", desc: "Please choose a time at least 1 hour from now.", type: 'error' });
-                                            setResForm(f => ({ ...f, timeSlot: minAllowedTime }));
-                                            return;
-                                          }
-                                        }
-                                      }
+                                    onChange={e => {
+                                      const val = e.currentTarget.value;
                                       const cap = selectedTableId ? capacity(selectedDate,val,selectedTableId) : 0;
                                       setResForm(f => ({ ...f, timeSlot: val, duration: cap>0 ? Math.min(f.duration,cap) : f.duration }));
                                     }} 
@@ -2293,6 +2271,9 @@ export function HomePage() {
                                     <span className="text-xs font-black text-neutral-900 dark:text-white font-mono bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 rounded border border-neutral-300 dark:border-neutral-700">{r.id}</span>
                                     <ReservationStatusBadge status={r.status} />
                                   </div>
+                                  {r.refundStatus === 'declined' && (
+                                    <p className="mb-1 text-xs font-semibold text-rose-400">Refund declined{canManageBooking(r) && r.refundNotes ? ` · ${r.refundNotes}` : ''}</p>
+                                  )}
                                   <p className="text-sm font-semibold text-neutral-800 dark:text-neutral-200">{format(new Date(r.date), 'MMM d, yyyy')} · {fmt12(r.timeSlot)} ({r.durationHours}h)</p>
                                   <p className="text-xs text-neutral-500">
                                     {tables.find((t: any) => t.id === r.tableId)?.name || 'Billiard Table'}
@@ -3031,19 +3012,13 @@ export function HomePage() {
                       <span className="text-[9px] text-amber-500 font-semibold">Min: {fmt12(format(addMinutes(new Date(), 60), 'HH:mm'))}</span>
                     )}
                   </label>
-                  <TimeField label="New time"
+                  <input type="time" aria-label="New time"
                     required 
                     min={rescheduleData.newDate && isToday(rescheduleData.newDate) ? format(addMinutes(new Date(), 60), 'HH:mm') : undefined}
                     style={{ colorScheme: 'dark' }}
                     value={rescheduleData.timeSlot} 
-                    onChange={newValue => {
-                      const val = newValue;
-                      const minTime = format(addMinutes(new Date(), 60), 'HH:mm');
-                      if (rescheduleData.newDate && isToday(rescheduleData.newDate) && val && val < minTime) {
-                        setToastMsg({ title: "1-Hour Advance Required", desc: "Cannot reschedule to a time less than 1 hour from now.", type: 'error' });
-                        setRescheduleData(prev => prev ? ({ ...prev, timeSlot: minTime }) : null);
-                        return;
-                      }
+                    onChange={e => {
+                      const val = e.currentTarget.value;
                       setRescheduleData(prev => prev ? ({ ...prev, timeSlot: val }) : null);
                     }} 
                     className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-sm text-neutral-100 focus:border-violet-500 outline-none text-center transition-colors" 

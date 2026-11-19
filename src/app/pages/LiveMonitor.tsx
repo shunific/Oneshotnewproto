@@ -1,3 +1,4 @@
+import { completedReservationStats, openTimeRemaining } from '../utils/waitHistory';
 import { useState, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { Table, QueueItem } from '../context/AppContext';
@@ -209,7 +210,7 @@ function QueueRow({ item, position, estWait }: { item: QueueItem; position: numb
 // ── Main Component ─────────────────────────────────────────────
 // ── Main Component ─────────────────────────────────────────────
 export function LiveMonitor() {
-  const { tables, queue, refreshLiveMonitor, rates } = useAppContext();
+  const { tables, queue, reservations, refreshLiveMonitor, rates } = useAppContext();
   const [tick, setTick] = useState(0);
   const [now, setNow] = useState(new Date());
 
@@ -229,15 +230,14 @@ export function LiveMonitor() {
   }, [refreshLiveMonitor]);
 
   // 🟢 FIXED: Accurate AI Wait Time that handles Open Time correctly without returning 0 mins!
+  const completedHistory = completedReservationStats(reservations);
   const calculateAIWaitTime = (position: number) => {
     const activeTables = tables.filter(t => t.status === 'occupied' && t.session);
     if (activeTables.length === 0) return "0 mins";
 
     const remainingTimes = activeTables.map(t => {
       if (t.session?.isOpenTime || t.session?.durationMinutes === null) {
-        // If Open Time, assume 120 mins average. If they exceeded 120 mins, assume they leave in 30 mins.
-        const elapsedMins = Math.floor(differenceInSeconds(now, new Date(t.session!.startTime)) / 60);
-        return elapsedMins < 120 ? (120 - elapsedMins) : 30;
+        return openTimeRemaining(t.session!.startTime, now, completedHistory.typicalBookedMinutes ?? 120);
       } else {
         const duration = t.session?.durationMinutes || 60;
         const endTime = addMinutes(new Date(t.session!.startTime), duration);

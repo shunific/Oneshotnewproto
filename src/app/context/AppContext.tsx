@@ -59,7 +59,7 @@ export type ReservationStatus = 'pending' | 'confirmed' | 'checked-in' | 'comple
 
 export type Reservation = {
   id: string; customerName: string; contactNumber: string; email?: string; date: Date; timeSlot: string; durationHours: number; partySize: number; tableId?: string; status: ReservationStatus; totalAmount: number; downPaymentAmount: number; downPaymentPaid: boolean; balancePaid: boolean; createdAt: Date; cancellationReason?: string; promoCode?: string; discountAmount?: number; paymentRef?: string; receiptImg?: string;
-  refundStatus?: 'pending' | 'processing' | 'sent' | 'in_person' | 'remediated' | 'acknowledged' | 'expired';
+  refundStatus?: 'declined' | 'settled' | 'pending' | 'processing' | 'sent' | 'in_person' | 'remediated' | 'acknowledged' | 'expired';
   refundMethod?: 'gcash' | 'cash' | 'session_credit';
   refundNotes?: string;
 };
@@ -204,50 +204,6 @@ export type AppContextType = {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
-// Table ids in the cloud are timestamp based (e.g. "t1790923595927"), so the
-// number must be read from the display name ("Table 3"), not the id. Older
-// duplicate test tables share the same name; keep the earliest created row per
-// number so the venue always resolves to exactly the 8 canonical tables.
-function tableNumberForRow(t: any): number {
-  const name = String(t?.name ?? '');
-  const nameMatch = name.match(/table\s*#?\s*(\d+)/i) || name.match(/^t\s*(\d+)$/i);
-  if (nameMatch) return parseInt(nameMatch[1], 10);
-  const id = String(t?.id ?? '');
-  const idMatch = id.match(/^t?(\d{1,2})$/i);
-  if (idMatch) return parseInt(idMatch[1], 10);
-  const digits = id.replace(/\D/g, '');
-  const n = digits ? parseInt(digits, 10) : 0;
-  return n > 0 && n <= 8 ? n : 0;
-}
-
-function tableCreationRank(t: any): number {
-  const digits = String(t?.id ?? '').replace(/\D/g, '');
-  return digits ? Number(digits) : Number.MAX_SAFE_INTEGER;
-}
-
-export function selectCanonicalTables<T extends { id?: any; name?: any }>(rows: T[], max = 8): T[] {
-  const byNumber = new Map<number, T>();
-  for (const row of rows || []) {
-    const n = tableNumberForRow(row);
-    if (n < 1 || n > max) continue;
-    const existing = byNumber.get(n);
-    if (!existing || tableCreationRank(row) < tableCreationRank(existing)) {
-      byNumber.set(n, row);
-    }
-  }
-  for (let i = 1; i <= max; i++) {
-    if (!byNumber.has(i)) {
-      byNumber.set(i, {
-        id: `t${i}`,
-        name: `Table ${i}`,
-        status: 'available',
-        isActive: true,
-      } as any);
-    }
-  }
-  return [...byNumber.entries()].sort((a, b) => a[0] - b[0]).map(([, row]) => row);
-}
-
 // The customer site is also deployed statically (Vercel). The desktop API only
 // exists on the venue's machine, so asking the static host for /api/* answers
 // with 405 and floods the console. Only talk to it when served locally.
@@ -269,7 +225,7 @@ function cloudFloorTables(rows: any[]): Table[] {
       }
     }
     const rawActive = t.isActive ?? t.isactive ?? t.is_active;
-    const isActive = rawActive !== undefined ? (rawActive === 1 || rawActive === true || rawActive === 'true') : true;
+    const isActive = rawActive !== undefined ? (rawActive === 1 || rawActive === true || rawActive === 'true' || rawActive === '1') : true;
 
     return {
       id: String(t.id),
@@ -280,7 +236,7 @@ function cloudFloorTables(rows: any[]): Table[] {
       session
     };
   });
-  return selectCanonicalTables(mappedCloudTables);
+  return mappedCloudTables;
 }
 
 async function loadPublicQueue(): Promise<QueueItem[] | null> {
@@ -300,21 +256,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // States
   const [tables, setTables] = useState<Table[]>(() => {
     try {
-      const cached = localStorage.getItem('oneshot_tables_cache');
+      const cached = localStorage.getItem('oneshot_floor_records_v2');
       if (cached) {
         const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          const sanitized = selectCanonicalTables(parsed);
-          if (sanitized.length > 0) return sanitized;
-        }
+        if (Array.isArray(parsed)) return cloudFloorTables(parsed);
       }
-    } catch (e) {}
-    return Array.from({ length: 8 }, (_, i) => ({
-      id: `t${i + 1}`,
-      name: `Table ${i + 1}`,
-      status: 'available' as TableStatus,
-      isActive: true,
-    }));
+    } catch {}
+    return [];
   });
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
@@ -410,9 +358,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [theme, primaryColor]);
 
   useEffect(() => {
-    if (tables && tables.length > 0) {
+    if (tables) {
       try {
-        localStorage.setItem('oneshot_tables_cache', JSON.stringify(tables));
+        localStorage.setItem('oneshot_floor_records_v2', JSON.stringify(tables));
       } catch (e) {}
     }
   }, [tables]);
@@ -490,7 +438,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (tablesRes && tablesRes.ok) { 
         const newTables = await tablesRes.json(); 
         if (Array.isArray(newTables)) {
-          const sanitized = selectCanonicalTables(newTables);
+          const sanitized = cloudFloorTables(newTables);
           setTables(prev => JSON.stringify(prev) !== JSON.stringify(sanitized) ? sanitized : prev);
         }
       }
@@ -547,7 +495,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ]);
 
       if (Array.isArray(rawTables)) {
-        const sanitized = selectCanonicalTables(rawTables);
+        const sanitized = cloudFloorTables(rawTables);
         setTables(sanitized);
       }
       if (Array.isArray(localInventory)) setInventory(localInventory);
@@ -577,16 +525,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         console.warn("Supabase reservations notice:", resErr.message || resErr);
       }
 
-      if (cloudTablesData && (cloudTablesData as any[]).length > 0) {
-        const canonicalCloudTables = cloudFloorTables(cloudTablesData);
-        setTables(prev => {
-          // If local tables fetch failed (like when viewing customer facing site without local machine running),
-          // adopt cloud tables from Supabase!
-          if (!Array.isArray(rawTables) || !prev || prev.length === 0) {
-            return canonicalCloudTables;
-          }
-          return prev;
-        });
+      if (Array.isArray(cloudTablesData) && !Array.isArray(rawTables)) {
+        setTables(cloudFloorTables(cloudTablesData));
       }
 
       if (annData && (annData as any[]).length > 0) {
