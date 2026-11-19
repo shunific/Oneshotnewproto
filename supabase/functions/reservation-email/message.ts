@@ -32,7 +32,19 @@ export type QueueEntry = {
   };
 };
 
-const venue = 'One Shot Bar & Billiards';
+export type VenueDetails = {
+  name: string;
+  phone: string;
+  email: string;
+  address: string;
+};
+
+export const defaultVenue: VenueDetails = {
+  name: 'One Shot Bar & Billiards',
+  phone: '',
+  email: '',
+  address: '',
+};
 const peso = new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' });
 const dayInManila = new Intl.DateTimeFormat('en-PH', {
   dateStyle: 'full', timeZone: 'Asia/Manila',
@@ -63,7 +75,7 @@ function schedule(details: QueueEntry['details']): string {
   return `${dayInManila.format(date)} · ${hours % 12 || 12}:${clock[2]} ${hours >= 12 ? 'PM' : 'AM'}`;
 }
 
-export function buildReservationEmail(entry: QueueEntry) {
+export function buildReservationEmail(entry: QueueEntry, venue: VenueDetails = defaultVenue) {
   const { details, event } = entry;
   const [label, heading, color] = messages[event];
   const reference = entry.reservation_id.toUpperCase();
@@ -93,9 +105,28 @@ export function buildReservationEmail(entry: QueueEntry) {
     ['Down payment', deposit === undefined ? '' : peso.format(deposit)],
   ].filter(([, value]) => value !== '');
 
+  const contactDetails = [
+    venue.address,
+    venue.phone ? `Hotline: ${venue.phone}` : '',
+    venue.email,
+  ].filter(Boolean);
+  const contactHtml = [
+    venue.address ? html(venue.address) : '',
+    venue.phone ? `Hotline: ${html(venue.phone)}` : '',
+    venue.email ? html(venue.email) : '',
+  ].filter(Boolean).join('<br>');
+  const footer = `You are receiving this email because you made a reservation at ${venue.name}. Keep your booking reference ${reference} handy when contacting us.`;
+
   return {
-    subject: `${venue}: ${heading} (${reference})`,
-    text: [venue, heading, note, ...rows.map(([key, value]) => `${key}: ${value}`)].filter(Boolean).join('\n'),
+    subject: `${venue.name}: ${heading} (${reference})`,
+    text: [
+      venue.name,
+      heading,
+      note,
+      ...rows.map(([key, value]) => `${key}: ${value}`),
+      contactDetails.join('\n'),
+      footer,
+    ].filter(Boolean).join('\n'),
     html: `<div style="background:#f4f4f5;padding:24px;font-family:Arial,sans-serif;color:#18181b">
       <div style="max-width:520px;margin:auto;background:#fff;border:1px solid #e4e4e7;border-radius:16px;padding:24px">
         <p style="color:${color};font-weight:bold;text-transform:uppercase;letter-spacing:1px">${html(label)}</p>
@@ -104,7 +135,10 @@ export function buildReservationEmail(entry: QueueEntry) {
         <table style="width:100%;border-collapse:collapse">${rows.map(([key, value]) =>
           `<tr><th scope="row" style="text-align:left;padding:8px 4px;color:#52525b">${html(key)}</th><td style="text-align:right;padding:8px 4px">${html(value)}</td></tr>`
         ).join('')}</table>
-        <p style="margin-top:24px;color:#52525b;font-size:13px">${html(venue)}</p>
+        ${contactHtml ? `<p style="margin:20px 0 0;color:#52525b;font-size:13px;line-height:1.6">${contactHtml}</p>` : ''}
+        <p style="margin:20px 0 0;padding-top:16px;border-top:1px solid #e4e4e7;color:#71717a;font-size:12px;line-height:1.5">
+          You are receiving this email because you made a reservation at ${html(venue.name)}. Keep your booking reference <strong>${html(reference)}</strong> handy when contacting us.
+        </p>
       </div>
     </div>`,
   };

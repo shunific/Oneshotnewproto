@@ -131,7 +131,9 @@ begin
     event_names := array_append(event_names, 'booking-received');
   end if;
 
-  if details->>'depositOnFile' = 'true' and previous_details->>'depositOnFile' = 'false'
+  -- A deposit saved as part of the initial booking is already covered by
+  -- booking-received, so only a later deposit update gets its own email.
+  if tg_op = 'UPDATE' and details->>'depositOnFile' = 'true' and previous_details->>'depositOnFile' = 'false'
       and (case when coalesce(details->>'deposit', '') ~ '^[0-9]{1,10}(\.[0-9]{1,4})?$'
         then (details->>'deposit')::numeric > 0 else false end)
       and checkout_reference <> 'TRUSTED_WAIVER' then

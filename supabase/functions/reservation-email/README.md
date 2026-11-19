@@ -20,8 +20,14 @@ reservation_mail.queue                          (sent / retry / failed)
 
 Queueing is deduplicated by `(reservation_id, event, event_key)`. Reschedules
 use the new date/time/hours as their key, so a second reschedule still sends.
+A booking whose deposit is already on file sends one `booking-received` email;
+`deposit-received` is only queued when the deposit is recorded after booking.
 Transient SMTP failures retry with exponential backoff; rejected recipients
 and invalid messages fail immediately.
+
+The email footer reads the venue name, hotline, email and optional address from
+`public.cms`, falling back to `public.system_settings`, so it matches the
+website's current contact details.
 
 ## Deploy
 

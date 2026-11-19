@@ -2,7 +2,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { createClient } from 'npm:@supabase/supabase-js@2.118.0';
 // @ts-types="npm:@types/nodemailer@7.0.11"
 import nodemailer from 'npm:nodemailer@10.5.0';
-import { buildReservationEmail, messages, type QueueEntry } from './message.ts';
+import { buildReservationEmail, defaultVenue, messages, type QueueEntry, type VenueDetails } from './message.ts';
 
 const maxBatch = 5;
 const maxBatchTime = 25000;
@@ -20,6 +20,43 @@ function matchesSecret(supplied: string, expected: string): boolean {
 function serviceKey(): string | undefined {
   const keys = Deno.env.get('SUPABASE_SECRET_KEYS');
   return (keys ? JSON.parse(keys).default : undefined) || Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+}
+
+async function loadVenue(supabase: ReturnType<typeof createClient>): Promise<VenueDetails> {
+  try {
+    const [cms, settings] = await Promise.all([
+      supabase.from('cms').select('keyname, settingvalue'),
+      supabase.from('system_settings').select('key_name, setting_value'),
+    ]);
+    const config: Record<string, string> = {};
+    for (const row of (settings.data ?? []) as Array<{ key_name?: string; setting_value?: string }>) {
+      if (row.key_name) config[row.key_name] = row.setting_value ?? '';
+    }
+    // The website treats CMS as the source of truth, so it wins over settings.
+    for (const row of (cms.data ?? []) as Array<{ keyname?: string; settingvalue?: string }>) {
+      if (row.keyname) config[row.keyname] = row.settingvalue ?? '';
+    }
+
+    const pick = (...keys: string[]) => {
+      for (const key of keys) {
+        const value = config[key];
+        if (value !== undefined && value !== null && String(value).trim() !== '') return String(value).trim();
+      }
+      return '';
+    };
+    const name = pick('venueName', 'name') || defaultVenue.name;
+    const phone = (pick('contactNumber', 'contactPhone', 'contactnumber', 'phone').split('|')[0] || '').trim();
+    const email = pick('contactEmail', 'contactemail', 'email');
+    const address = pick('address', 'venueAddress');
+    const nameKey = name.toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]/g, '').replace(/and/g, '');
+    const addressKey = address.toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]/g, '').replace(/and/g, '');
+    const addressIsName = !!address && (addressKey === nameKey || nameKey.includes(addressKey) || addressKey.includes(nameKey));
+
+    return { name, phone, email, address: addressIsName ? '' : address };
+  } catch (error) {
+    console.error('Could not load venue contact details:', error);
+    return defaultVenue;
+  }
 }
 
 function smtpResult(error: unknown): Result {
@@ -65,6 +102,7 @@ async function handle(request: Request): Promise<Response> {
     }
   }
 
+  const venue = await loadVenue(supabase);
   const start = Date.now();
   let sent = 0;
   let unsuccessful = 0;
@@ -82,7 +120,7 @@ async function handle(request: Request): Promise<Response> {
             from: { address: user, name: 'One Shot Bar & Billiards' },
             to: { address: entry.recipient, name: '' },
             messageId: `<reservation-email-${entry.id}@gmail.com>`,
-            ...buildReservationEmail(entry),
+            ...buildReservationEmail(entry, venue),
           });
           result = receipt.accepted.map(value => String(value).toLowerCase()).includes(entry.recipient.toLowerCase())
             ? 'sent' : 'recipient-rejected';
