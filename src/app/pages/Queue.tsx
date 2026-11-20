@@ -62,7 +62,6 @@ export function Queue() {
   const [aiWaitTime, setAiWaitTime] = useState<string>('Analyzing data...');
   const [isAILoading, setIsAILoading] = useState(true);
 
-  const [refreshVersion, setRefreshVersion] = useState(0);
   const fetchAIPrediction = useCallback(async (signal: AbortSignal) => {
     if(reservationMoveError||heldTableIds.size){setAiWaitTime('Check transfer recovery');setIsAILoading(false);return;}
     setIsAILoading(true);
@@ -125,7 +124,7 @@ export function Queue() {
     const request = new AbortController();
     void fetchAIPrediction(request.signal);
     return () => request.abort();
-  }, [fetchAIPrediction, refreshVersion]);
+  }, [fetchAIPrediction]);
 
 
   // Get upcoming reservations (today and future)
@@ -472,7 +471,6 @@ export function Queue() {
                 {reservationMoveError||heldTableIds.size?'Check transfer recovery':aiWaitTime}
               </span>
               <div className="flex flex-col items-end mt-1 space-y-1.5">
-                <button type="button" disabled={isAILoading} onClick={() => setRefreshVersion(value => value + 1)} className="text-xs text-emerald-400 underline disabled:opacity-50">Refresh estimate</button>
                 {/* 🟢 THE NEAREST END TIME BADGE */}
                 {getNearestEndTime() && availableTables.length === 0 && (
                   <span className="text-[10px] text-emerald-300/90 font-semibold bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/50 flex items-center gap-1.5 shadow-sm">
