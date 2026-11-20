@@ -5,13 +5,14 @@ import { useAppContext } from '../context/AppContext';
 import { Table, QueueItem } from '../context/AppContext';
 import { Clock, Users, X, Sparkles } from 'lucide-react';
 import { addMinutes, differenceInSeconds } from 'date-fns';
+import { EXTENSION_DECISION_MINUTES } from '../../../session-billing.mjs';
 
 // ── Helpers ────────────────────────────────────────────────────
 function getSessionTimer(table: Table): {
-  mm: string; ss: string; isOvertime: boolean; percentLeft: number; label: string; isOpenTime: boolean;
+  mm: string; ss: string; isOvertime: boolean; isGrace: boolean; percentLeft: number; label: string; isOpenTime: boolean;
 } {
   if (!table.session || !table.session.startTime) {
-    return { mm: '--', ss: '--', isOvertime: false, percentLeft: 0, label: '', isOpenTime: false };
+    return { mm: '--', ss: '--', isOvertime: false, isGrace: false, percentLeft: 0, label: '', isOpenTime: false };
   }
 
   const start = new Date(table.session.startTime).getTime();
@@ -28,6 +29,7 @@ function getSessionTimer(table: Table): {
       mm: hh !== '00' ? hh : mm, // Show hours if over 60 mins, otherwise minutes
       ss: hh !== '00' ? mm : ss, // Show minutes if over 60 mins, otherwise seconds
       isOvertime: false, 
+      isGrace: false,
       percentLeft: 100, 
       label: 'Elapsed Time', 
       isOpenTime: true 
@@ -37,15 +39,18 @@ function getSessionTimer(table: Table): {
   // Handle "Fixed Duration" (Counting DOWN)
   const totalMs = table.session.durationMinutes * 60000;
   const remaining = totalMs - elapsed;
-  const isOvertime = remaining < 0;
-  const absRemaining = Math.abs(remaining);
+  const decisionMs = EXTENSION_DECISION_MINUTES * 60000;
+  const isOvertime = remaining <= -decisionMs;
+  const isGrace = remaining <= 0 && !isOvertime;
+  // During the decision window count the time left to extend; afterwards count overtime.
+  const shownMs = isGrace ? Math.max(0, decisionMs + remaining) : isOvertime ? Math.abs(remaining) - decisionMs : remaining;
   
-  const mm = String(Math.floor(absRemaining / 60000)).padStart(2, '0');
-  const ss = String(Math.floor((absRemaining % 60000) / 1000)).padStart(2, '0');
+  const mm = String(Math.floor(shownMs / 60000)).padStart(2, '0');
+  const ss = String(Math.floor((shownMs % 60000) / 1000)).padStart(2, '0');
   const percentLeft = Math.max(0, Math.min(100, (remaining / totalMs) * 100));
-  const label = isOvertime ? `+${mm}:${ss} Overtime` : `${mm}:${ss} remaining`;
+  const label = isGrace ? `${mm}:${ss} to extend` : isOvertime ? `+${mm}:${ss} Overtime` : `${mm}:${ss} remaining`;
   
-  return { mm, ss, isOvertime, percentLeft, label, isOpenTime: false };
+  return { mm, ss, isOvertime, isGrace, percentLeft, label, isOpenTime: false };
 }
 
 // ── Single Table Card ──────────────────────────────────────────
@@ -108,24 +113,31 @@ function TableCard({ table, held, availabilityVerified }: { table: Table; held:b
     );
   }
 
-  // Occupied Status (In Use, Open Time, Overtime)
+  // Occupied Status (In Use, Extend Window, Open Time, Overtime)
   const isOvertime = timer.isOvertime;
+  const isGrace = timer.isGrace;
   const isOpenTime = timer.isOpenTime;
   
   const colorClass = isOvertime 
     ? 'bg-rose-500/20 border-rose-500 text-rose-400 animate-pulse'
+    : isGrace
+    ? 'bg-amber-500/10 border-amber-500 text-amber-400 animate-pulse'
     : isOpenTime
     ? 'bg-blue-950/40 border-blue-800/40 text-blue-400'
     : 'bg-amber-950/40 border-amber-800/40 text-amber-400';
     
   const badgeClass = isOvertime
     ? 'bg-rose-500/20 text-rose-400 border-rose-500/30'
+    : isGrace
+    ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
     : isOpenTime
     ? 'bg-blue-500/20 text-blue-400 border-blue-500/30'
     : 'bg-amber-500/20 text-amber-400 border-amber-500/30';
 
   const barClass = isOvertime
     ? 'bg-rose-500/40'
+    : isGrace
+    ? 'bg-amber-500/40'
     : isOpenTime
     ? 'bg-blue-400/50'
     : timer.percentLeft < 15 ? 'bg-rose-500' : timer.percentLeft < 30 ? 'bg-amber-500' : 'bg-emerald-500';
@@ -137,7 +149,7 @@ function TableCard({ table, held, availabilityVerified }: { table: Table; held:b
           <span className="font-black text-white">{badge}</span>
         </div>
         <div className={`text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border ${badgeClass}`}>
-          {isOvertime ? '⚠ OVERTIME' : isOpenTime ? 'OPEN TIME' : 'IN USE'}
+          {isOvertime ? '⚠ OVERTIME' : isGrace ? 'EXTEND WINDOW' : isOpenTime ? 'OPEN TIME' : 'IN USE'}
         </div>
       </div>
 
@@ -148,17 +160,17 @@ function TableCard({ table, held, availabilityVerified }: { table: Table; held:b
 
       <div className="text-center">
         <p className="text-[10px] uppercase tracking-wider mb-1 opacity-70">
-          {isOpenTime ? 'Time Elapsed' : isOvertime ? 'Overtime' : 'Time Left'}
+          {isOpenTime ? 'Time Elapsed' : isGrace ? `Extend within ${EXTENSION_DECISION_MINUTES}m` : isOvertime ? 'Overtime' : 'Time Left'}
         </p>
         <div className="font-black text-4xl tabular-nums tracking-tight text-white">
           {timer.mm}:{timer.ss}
         </div>
 
         <div className="mt-2 h-1.5 bg-black/40 rounded-full overflow-hidden relative">
-          {!isOvertime && !isOpenTime && (
+          {!isOvertime && !isGrace && !isOpenTime && (
             <div className={`h-full rounded-full transition-all duration-1000 ${barClass}`} style={{ width: `${timer.percentLeft}%` }} />
           )}
-          {isOvertime && <div className={`h-full w-full ${barClass}`} />}
+          {(isOvertime || isGrace) && <div className={`h-full w-full ${barClass}`} />}
           {isOpenTime && (
             <div className="h-full w-full bg-blue-900/50 overflow-hidden relative">
               <div className={`absolute inset-0 w-1/2 ${barClass} animate-[ping_2s_cubic-bezier(0,0,0.2,1)_infinite] skew-x-12`} />

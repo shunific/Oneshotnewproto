@@ -1,5 +1,6 @@
 import { LoadingRing } from '../components/LoadingRing';
 import { TimeField } from '../components/ui/TimeField';
+import { EXTENSION_DECISION_MINUTES } from '../../../session-billing.mjs';
 import { localFetch } from '../utils/localApi';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router';
@@ -458,6 +459,7 @@ export default function AdminPolicyRatesEditor() {
                   placeholder="0"
                   className="w-full bg-neutral-950 border border-neutral-800 rounded p-3 text-neutral-100 focus:border-emerald-500 outline-none font-mono"
                 />
+                <p className="text-[10px] text-neutral-500 mt-1">Overtime starts after the {EXTENSION_DECISION_MINUTES}-minute extension window.</p>
               </div>
             </div>
 

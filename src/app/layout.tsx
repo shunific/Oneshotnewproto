@@ -11,6 +11,7 @@ import {
   AlertTriangle, Sparkles, MessageSquare
 } from 'lucide-react';
 import { addMinutes, differenceInSeconds, format } from 'date-fns';
+import { EXTENSION_DECISION_MINUTES, EXTENSION_DECISION_SECONDS } from '../../session-billing.mjs';
 import { useAppContext } from './context/AppContext';
 import { LockScreen } from './components/LockScreen';
 import logoImg from 'figma:asset/40eb82831843e17a3c48a360fd80f0aaaa58ddc8.png';
@@ -98,12 +99,12 @@ function SidebarSmartTimer({ tables, onNavigate }: { tables: any[]; onNavigate: 
     const end = addMinutes(start, t.session.durationMinutes);
     const remainingSecs = differenceInSeconds(end, now);
     
-    // Offset by +120 seconds to match the Table Monitor's exact grace buffer
-    if (remainingSecs <= -120) {
-      return { table: t, type: 'overtime' as const, secs: remainingSecs + 120 };
+    // Match the Table Monitor's shared extension decision window.
+    if (remainingSecs <= -EXTENSION_DECISION_SECONDS) {
+      return { table: t, type: 'overtime' as const, secs: remainingSecs + EXTENSION_DECISION_SECONDS };
     }
     if (remainingSecs <= 0) {
-      return { table: t, type: 'grace' as const, secs: remainingSecs + 120 };
+      return { table: t, type: 'grace' as const, secs: remainingSecs + EXTENSION_DECISION_SECONDS };
     }
     if (remainingSecs <= 900) {
       return { table: t, type: 'warning' as const, secs: remainingSecs };
@@ -144,7 +145,7 @@ function SidebarSmartTimer({ tables, onNavigate }: { tables: any[]; onNavigate: 
         <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider mb-1">
           <span className="flex items-center gap-1.5 truncate">
             {(isOt || isGrace) ? <AlertTriangle size={13} className="animate-bounce" /> : <Clock size={13} />}
-            <span>{isOt ? '⚠️ OVERTIME' : isGrace ? '⏳ GRACE (2M)' : isWarn ? '⏳ ENDS SOON' : '⏱️ NEXT UP'} · {primary.table.name}</span>
+            <span>{isOt ? '⚠️ OVERTIME' : isGrace ? `⏳ EXTEND ${EXTENSION_DECISION_MINUTES}M` : isWarn ? '⏳ ENDS SOON' : '⏱️ NEXT UP'} · {primary.table.name}</span>
           </span>
         </div>
         <div className="flex items-baseline gap-1.5">
@@ -152,7 +153,7 @@ function SidebarSmartTimer({ tables, onNavigate }: { tables: any[]; onNavigate: 
             {formatDuration(primary.secs)}
           </p>
           <span className="text-[10px] text-neutral-600 dark:text-neutral-400 font-semibold">
-            {isOt ? 'unpaid' : isGrace ? 'grace' : isOpen ? 'elapsed' : 'left'}
+            {isOt ? 'unpaid' : isGrace ? 'to extend' : isOpen ? 'elapsed' : 'left'}
           </span>
         </div>
         <p className="text-[11px] text-neutral-600 dark:text-neutral-400 mt-1 truncate">

@@ -1,5 +1,6 @@
 import { clockLabel } from '../utils/clockDisplay';
 import { openTimeStop } from '../utils/openTimeAvailability.js';
+import { EXTENSION_DECISION_MINUTES, EXTENSION_DECISION_SECONDS } from '../../../session-billing.mjs';
 import { useState, useEffect } from 'react';
 import { Table } from '../context/AppContext';
 import { Play, XSquare, Clock, Calendar, Wrench, ShoppingCart, Plus, Infinity as InfinityIcon } from 'lucide-react';
@@ -57,12 +58,15 @@ export function TableCard({ table, held=false, availabilityVerified=true, onAssi
     const secsLeft = differenceInSeconds(endTime, currentTime);
     const isOvertime = secsLeft < 0;
     const absSecs = Math.abs(secsLeft);
-    const isGracePeriod = isOvertime && absSecs <= 120;
-    const chargedSecs = isOvertime ? Math.max(0, absSecs - 120) : absSecs;
+    const isGracePeriod = isOvertime && absSecs <= EXTENSION_DECISION_SECONDS;
+    // Show a countdown for the decision window, then count overtime only after it.
+    const graceSecsLeft = isGracePeriod ? EXTENSION_DECISION_SECONDS - absSecs : 0;
+    const chargedSecs = isOvertime ? Math.max(0, absSecs - EXTENSION_DECISION_SECONDS) : absSecs;
+    const shownSecs = isGracePeriod ? graceSecsLeft : chargedSecs;
     
-    const hrs = Math.floor((isGracePeriod ? absSecs : chargedSecs) / 3600);
-    const mm = String(Math.floor(((isGracePeriod ? absSecs : chargedSecs) % 3600) / 60)).padStart(2, '0');
-    const ss = String((isGracePeriod ? absSecs : chargedSecs) % 60).padStart(2, '0');
+    const hrs = Math.floor(shownSecs / 3600);
+    const mm = String(Math.floor((shownSecs % 3600) / 60)).padStart(2, '0');
+    const ss = String(shownSecs % 60).padStart(2, '0');
     
     const display = hrs > 0 ? `${hrs}:${mm}:${ss}` : `${mm}:${ss}`;
 
@@ -115,7 +119,7 @@ export function TableCard({ table, held=false, availabilityVerified=true, onAssi
             {table.status === 'occupied' && (
               <span className={`text-sm font-bold flex items-center gap-1.5 ${timer?.isGracePeriod ? 'text-amber-400' : timer?.isOvertime ? 'text-rose-400' : timer?.isOpenTime ? 'text-blue-400' : 'text-amber-400'}`}>
                 <span className={`w-2 h-2 rounded-full ${timer?.isGracePeriod ? 'bg-amber-400 animate-ping' : timer?.isOvertime ? 'bg-rose-500 animate-pulse' : timer?.isOpenTime ? 'bg-blue-500' : 'bg-amber-500'}`} />
-                {stop?.reached ? 'Play stopped' : timer?.isGracePeriod ? 'Grace (2m)' : timer?.isOvertime ? 'Overtime' : timer?.isOpenTime ? 'Open Time' : 'In Use'}
+                {stop?.reached ? 'Play stopped' : timer?.isGracePeriod ? `Extend window (${EXTENSION_DECISION_MINUTES}m)` : timer?.isOvertime ? 'Overtime' : timer?.isOpenTime ? 'Open Time' : 'In Use'}
               </span>
             )}
           </div>
@@ -181,7 +185,7 @@ export function TableCard({ table, held=false, availabilityVerified=true, onAssi
                 </div>
               </div>
               
-              {timer.isGracePeriod && <p className="mt-1.5 text-xs text-amber-400 font-semibold animate-pulse">2-min talk grace · No overtime charge</p>}
+              {timer.isGracePeriod && <p className="mt-1.5 text-xs text-amber-400 font-semibold animate-pulse">Extend within {EXTENSION_DECISION_MINUTES}m · No overtime charge</p>}
               {stop && <p className="mt-2 text-xs text-amber-300">{stop.reached ? 'Play limit reached. Checkout remains available; F&B orders can still be added.' : `Play stops at ${new Date(stop.latestEndTime).toLocaleString('en-PH',{timeZone:'Asia/Manila'})} (Manila).`}</p>}
               {timer.isOpenTime && !stop && <p className="mt-2 text-xs text-neutral-500">Legacy open time: no saved stop limit.</p>}
               {/* Progress Bar */}
@@ -194,7 +198,7 @@ export function TableCard({ table, held=false, availabilityVerified=true, onAssi
                     style={{ width: `${timer.percentLeft}%` }} 
                   />
                 ) : (
-                  <div className="h-full w-full bg-rose-500/50 animate-pulse" />
+                  <div className={`h-full w-full animate-pulse ${timer.isGracePeriod ? 'bg-amber-500/50' : 'bg-rose-500/50'}`} />
                 )}
               </div>
             </div>

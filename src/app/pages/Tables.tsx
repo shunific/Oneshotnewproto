@@ -4,7 +4,7 @@ import { useLocation } from 'react-router';
 import { isOvertimeTable } from '../utils/tableAvailability.js';
 import { loadOpenTimeAvailability, reviewedOpenTimeLimit, openTimeStop } from '../utils/openTimeAvailability.js';
 import { PendingQueueActions } from '../components/PendingQueueActions';
-import { previewSessionBill, selectWalkInStartPricing } from '../../../session-billing.mjs';
+import { EXTENSION_DECISION_MINUTES, previewSessionBill, selectWalkInStartPricing } from '../../../session-billing.mjs';
 
 // 🟢 Web Audio API Session End Chime (Works offline, cross-platform)
 const playSessionEndSound = () => {
@@ -100,6 +100,7 @@ export function Tables() {
 
   // 🟢 Audio alert & Toast Notifications for active tables
   const notifiedSessionsRef = useRef<Set<string>>(new Set());
+  const overtimeStartedRef = useRef<Set<string>>(new Set());
   const milestoneNotifiedRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -131,8 +132,17 @@ export function Tables() {
 
           if (secsLeft <= 0 && !notifiedSessionsRef.current.has(sessionKey)) {
             notifiedSessionsRef.current.add(sessionKey);
-            toast.error(`${t.name} Time's Up!`, { description: 'Last play initiated (2-min buffer).', duration: 8000 });
+            toast.error(`${t.name} Time's Up!`, { description: `Extend within ${EXTENSION_DECISION_MINUTES} minutes or overtime charges apply.`, duration: 8000 });
             playSessionEndSound();
+          }
+
+          const overtimeStartsInSecs = -EXTENSION_DECISION_MINUTES * 60;
+          if (secsLeft <= overtimeStartsInSecs && !overtimeStartedRef.current.has(sessionKey)) {
+            overtimeStartedRef.current.add(sessionKey);
+            // Only toast if the window did not already end before the page loaded.
+            if (secsLeft > overtimeStartsInSecs - 15) {
+              toast.error(`${t.name} Overtime Started`, { description: `The ${EXTENSION_DECISION_MINUTES}-minute extension window ended. Overtime charges now apply.`, duration: 8000 });
+            }
           }
         }
       });
@@ -299,33 +309,26 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
   const allCustomers: CustomerSource[] = [...waitingCustomers, ...todayReservations];
 
   const endingTable = tables.find((t: any) => t.id === endingTableId);
+  // Use the same bill the checkout will charge. Overtime starts only after the
+  // shared extension decision window, never during it.
   const getEndSessionInfo = () => {
     if (!endingTable?.session) return null;
-    try {
-      const nowMs = Date.now();
-      const s = endingTable.session;
-      let billTime = nowMs;
-      
-      if (!s.isOpenTime && typeof s.durationMinutes === 'number' && Number.isFinite(Date.parse(s.startTime))) {
-        const scheduledEnd = Date.parse(s.startTime) + s.durationMinutes * 60000;
-        
-        if (nowMs > scheduledEnd) {
-          const otMs = nowMs - scheduledEnd;
-          if (otMs <= 120000) {
-            // Within 2-minute buffer: Stop bill exactly at scheduled end (0 overtime)
-            billTime = scheduledEnd; 
-          } else {
-            // Exceeded 2 minutes: Charge FULL overtime (including the 2-minute buffer)
-            billTime = nowMs; 
-          }
-        }
-      }
-      return previewSessionBill(endingTable.session, billTime, useProrated);
-    }
+    try { return previewSessionBill(endingTable.session, Date.now(), useProrated); }
     catch { return null; }
   };
 
   const endInfo = getEndSessionInfo();
+
+  const extensionWindow = (session: any) => {
+    if (!session || session.isOpenTime || typeof session.durationMinutes !== 'number') return null;
+    const scheduledEnd = Date.parse(session.startTime) + session.durationMinutes * 60000;
+    const elapsedPastEnd = Date.now() - scheduledEnd;
+    if (!Number.isFinite(elapsedPastEnd) || elapsedPastEnd < 0) return null;
+    const totalMs = EXTENSION_DECISION_MINUTES * 60000;
+    if (elapsedPastEnd > totalMs) return { expired: true, minutesLeft: 0 };
+    return { expired: false, minutesLeft: Math.max(1, Math.ceil((totalMs - elapsedPastEnd) / 60000)) };
+  };
+  const endExtensionWindow = extensionWindow(endingTable?.session);
 
   const handleVoidSession = async () => {
     if (!staffProfile?.isAdmin) { setVoidError('Sign in as an administrator to void a session.'); return; }
@@ -340,13 +343,14 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
   };
 
   const extendingTable = tables.find((t: any) => t.id === extendingTableId);
+  const extendExtensionWindow = extensionWindow(extendingTable?.session);
   const [pricingClock, setPricingClock] = useState(Date.now);
   useEffect(() => {
-    if (!assigningTableId && !extendingTableId && !posTableId && !migratingTableId) return;
+    if (!assigningTableId && !extendingTableId && !posTableId && !migratingTableId && !endingTableId) return;
     setPricingClock(Date.now());
     const timer = setInterval(() => setPricingClock(Date.now()), 1000);
     return () => clearInterval(timer);
-  }, [assigningTableId,extendingTableId,posTableId,migratingTableId]);
+  }, [assigningTableId,extendingTableId,posTableId,migratingTableId,endingTableId]);
   let startPricing: ReturnType<typeof selectWalkInStartPricing> | null = null;
   try { startPricing = selectWalkInStartPricing(rates, pricingClock); } catch { /* Start remains unavailable until policy is reviewed. */ }
   const effectiveHourly = startPricing?.hourlyRate ?? 0;
@@ -1602,6 +1606,13 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
 
             <div className="overflow-y-auto flex-1 p-6 space-y-5">
               <fieldset disabled={isSavingCheckout || !!pendingCheckout} className={`space-y-5 ${pendingCheckout ? 'pointer-events-none opacity-60' : ''}`}>
+              {endExtensionWindow && (
+                <div className={`rounded-xl border p-3 text-xs ${endExtensionWindow.expired ? 'bg-rose-950/30 border-rose-900/50 text-rose-300' : 'bg-amber-950/30 border-amber-900/50 text-amber-300'}`}>
+                  {endExtensionWindow.expired
+                    ? `The ${EXTENSION_DECISION_MINUTES}-minute extension window has ended. Overtime is included in this bill.`
+                    : `Extend within ${endExtensionWindow.minutesLeft} minute${endExtensionWindow.minutesLeft === 1 ? '' : 's'} to avoid overtime. Overtime starts after the ${EXTENSION_DECISION_MINUTES}-minute extension window.`}
+                </div>
+              )}
               <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 space-y-3">
                 <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold mb-1">Billing Breakdown</p>
                 <div className="flex justify-between text-xs">
@@ -1867,6 +1878,13 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
             </div>
 
             <form onSubmit={handleConfirmExtend} className="overflow-y-auto flex-1 p-6 space-y-4">
+              {extendExtensionWindow && (
+                <div className={`rounded-xl border p-3 text-xs ${extendExtensionWindow.expired ? 'bg-rose-950/30 border-rose-900/50 text-rose-300' : 'bg-amber-950/30 border-amber-900/50 text-amber-300'}`}>
+                  {extendExtensionWindow.expired
+                    ? `The ${EXTENSION_DECISION_MINUTES}-minute extension window has ended. Extending now adds time from the scheduled end.`
+                    : `Session ended. ${extendExtensionWindow.minutesLeft} minute${extendExtensionWindow.minutesLeft === 1 ? '' : 's'} left in the ${EXTENSION_DECISION_MINUTES}-minute extension window.`}
+                </div>
+              )}
               {(() => {
                 const extLimits = getExtensionLimits(extendingTableId);
                 return (
