@@ -28,6 +28,12 @@ export const isAppHostValue = (value: unknown): boolean =>
     value.startsWith('data:image/')
   );
 
+// Gallery images must load on the website and on every device, so only accept
+// values hosted online. Machine-local `/api/images/...` files only exist on the
+// computer that uploaded them and render blank everywhere else.
+export const isWebsiteImageValue = (value: unknown): boolean =>
+  typeof value === 'string' && !value.startsWith('/api/images/') && isAppHostValue(value);
+
 // Browser code must use a publishable key. Supabase rejects secret keys from
 // browsers, so the service key stays server-side only (server.cjs / Electron
 // main process) and is never bundled into the renderer.

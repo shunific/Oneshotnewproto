@@ -1010,7 +1010,14 @@ app.post('/api/sync-to-cloud', async (req, res) => {
             const rawPayload = rows.map(mapFn);
             const payload = rawPayload.filter(item => {
               if (!item) return false;
-              if (cloudTable === "cms") return item.keyname && String(item.keyname).trim() !== "" && item.settingvalue !== null && item.settingvalue !== undefined;
+              if (cloudTable === "cms") {
+                const key = String(item.keyname || "").trim().toLowerCase();
+                // The website's Site Settings owns the gallery. A desktop backup
+                // must never rewrite hero/about images with values that only
+                // exist on this machine, which renders blank on a fresh install.
+                if (key === "heroimages" || key === "aboutimage") return false;
+                return key !== "" && item.settingvalue !== null && item.settingvalue !== undefined;
+              }
               return true;
             });
             if (payload.length === 0) return resolve();

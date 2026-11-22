@@ -3,7 +3,7 @@ import { authRequest, localFetch } from '../utils/localApi';
 import { bookingDay, bookingDayKey } from '../utils/bookingSchedule.js';
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef, useMemo } from 'react';
 import { toast } from 'sonner';
-import { publicSupabase, isAppHostValue } from '../utils/supabase';
+import { publicSupabase, isWebsiteImageValue } from '../utils/supabase';
 import { previewSessionBill } from '../../../session-billing.mjs';
 
 // ── Types ──────────────────────────────────────────────────────
@@ -667,6 +667,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (settingsData) { 
         const settingsObj = (settingsData as any[]).reduce((acc: any, curr: any) => { 
           const k = curr.key_name || curr.keyName || curr.keyname;
+          // The website CMS owns the gallery. Older installs mirrored image
+          // values into system_settings, which would reapply machine-local
+          // files that do not exist on a fresh device, so never read them here.
+          if (k === 'heroImages' || k === 'aboutImage') return acc;
           let val = curr.setting_value ?? curr.settingValue ?? curr.settingvalue ?? curr.content_value; 
           if (val === 'true') val = true; 
           else if (val === 'false') val = false; 
@@ -681,36 +685,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setReservationTerms(prev => ({ ...prev, ...settingsObj })); 
       }
 
+      // Gallery images must be reachable from the website and from any device.
+      // Reject retired Supabase projects and machine-local `/api/images/...`
+      // files, which render blank after a fresh install.
+      const imageOnWebsite = (value: any): boolean => {
+        let val = value;
+        if (typeof val === 'string') {
+          const trimmed = val.trim();
+          if (trimmed.startsWith('[')) {
+            try { val = JSON.parse(trimmed); } catch { return isWebsiteImageValue(trimmed); }
+          } else {
+            return isWebsiteImageValue(trimmed);
+          }
+        }
+        if (Array.isArray(val)) return val.length > 0 && val.every(v => typeof v === 'string' && isWebsiteImageValue(v));
+        return false;
+      };
+
       // 🟢 CMS Data is the definitive Source of Truth for website branding, contact info & map pin:
       if (cmsData) { 
         (cmsData as any[]).forEach((curr: any) => {
           const k = curr.key_name || curr.keyName || curr.keyname;
           const v = curr.settingvalue ?? curr.settingValue ?? curr.setting_value ?? curr.content_value;
           if (!k) return;
-          // Image keys are handled below so a stale host cannot override a
-          // reachable one already loaded from system_settings.
-          if ((k === 'heroImages' || k === 'aboutImage') && !isAppHostValue(v)) return;
+          // Image keys are validated below; the website copy is the only source.
+          if ((k === 'heroImages' || k === 'aboutImage') && !imageOnWebsite(v)) return;
           configObj[k] = v;
         }); 
       }
-      // Image URLs must live on the Supabase project this build talks to. Older
-      // builds saved images from a retired project, which render blank after a
-      // fresh install; drop any value that still points elsewhere.
-      const imageOnAppHost = (value: any): boolean => {
-        let val = value;
-        if (typeof val === 'string') {
-          const trimmed = val.trim();
-          if (trimmed.startsWith('[')) {
-            try { val = JSON.parse(trimmed); } catch { return isAppHostValue(trimmed); }
-          } else {
-            return isAppHostValue(trimmed);
-          }
-        }
-        if (Array.isArray(val)) return val.length > 0 && val.every(v => typeof v === 'string' && isAppHostValue(v));
-        return false;
-      };
       for (const key of ['heroImages', 'aboutImage']) {
-        if (configObj[key] !== undefined && !imageOnAppHost(configObj[key])) {
+        if (configObj[key] !== undefined && !imageOnWebsite(configObj[key])) {
           delete configObj[key];
         }
       }
@@ -1677,12 +1681,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }));
         await publicSupabase.from('cms').upsert(altRows, { onConflict: 'key_name' });
       }
-      // Dual-sync to system_settings for total redundancy
-      const settingsRows = Object.entries(newConfig).map(([k, v]) => ({
-        key_name: k,
-        setting_value: typeof v === 'object' ? JSON.stringify(v) : String(v ?? '')
-      }));
-      await publicSupabase.from('system_settings').upsert(settingsRows, { onConflict: 'key_name' });
+      // Dual-sync to system_settings for total redundancy. Gallery images stay
+      // out of this table: the website CMS owns them, and a copy here would be
+      // re-seeded onto fresh installs as a machine-local, blank image.
+      const settingsRows = Object.entries(newConfig)
+        .filter(([k]) => k !== 'heroImages' && k !== 'aboutImage')
+        .map(([k, v]) => ({
+          key_name: k,
+          setting_value: typeof v === 'object' ? JSON.stringify(v) : String(v ?? '')
+        }));
+      if (settingsRows.length > 0) await publicSupabase.from('system_settings').upsert(settingsRows, { onConflict: 'key_name' });
     } catch (e) {
       console.warn("Direct Supabase CMS sync note:", e);
     }

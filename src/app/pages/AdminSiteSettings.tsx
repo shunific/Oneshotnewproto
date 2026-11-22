@@ -6,7 +6,7 @@ import {
   Upload, Trash2, Image as ImageIcon, AlertTriangle, Users, 
   Info, Sliders, Navigation, ChevronLeft, ChevronRight, Eye
 } from "lucide-react";
-import { supabase } from "../utils/supabase"; 
+import { supabase, publicSupabase, isWebsiteImageValue } from "../utils/supabase"; 
 
 import { resolveMapEmbedUrl, resolveMapOpenUrl } from "../utils/maps";
 
@@ -86,6 +86,7 @@ export function AdminSiteSettings() {
       } catch (e) {
         parsedHero = [];
       }
+      if (!Array.isArray(parsedHero)) parsedHero = [];
 
       setForm((prev: any) => ({
         ...prev,
@@ -94,8 +95,9 @@ export function AdminSiteSettings() {
         description: siteConfig.description !== undefined ? siteConfig.description : prev.description,
         contactNumber: siteConfig.contactNumber !== undefined ? siteConfig.contactNumber : prev.contactNumber,
         contactEmail: siteConfig.contactEmail !== undefined ? siteConfig.contactEmail : prev.contactEmail,
-        heroImages: parsedHero.length > 0 ? parsedHero : prev.heroImages,
-        aboutImage: siteConfig.aboutImage || prev.aboutImage,
+        // Trust the saved website value even when the gallery was cleared.
+        heroImages: siteConfig.heroImages !== undefined ? parsedHero.filter((url: any) => isWebsiteImageValue(url)) : prev.heroImages,
+        aboutImage: siteConfig.aboutImage !== undefined ? (isWebsiteImageValue(siteConfig.aboutImage) ? siteConfig.aboutImage : '') : prev.aboutImage,
       }));
 
       setLocationForm((prev) => ({
@@ -105,6 +107,46 @@ export function AdminSiteSettings() {
       }));
     }
   }, [siteConfig]);
+
+  // The website is the only source of truth for the gallery. Re-read it when
+  // this page opens so a freshly installed device shows the live images instead
+  // of a local copy, and never republishes the local copy back online.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data, error } = await publicSupabase
+          .from("cms")
+          .select("*")
+          .in("keyname", ["heroImages", "aboutImage"]);
+        if (error) throw error;
+        if (cancelled || !Array.isArray(data)) return;
+        const values = new Map<string, any>(
+          data.map((row: any) => [
+            String(row.keyname ?? row.key_name ?? row.keyName ?? "").toLowerCase(),
+            row.settingvalue ?? row.setting_value ?? row.settingValue,
+          ])
+        );
+        const parseHero = (raw: any): string[] => {
+          let list: any = raw;
+          if (typeof raw === "string") {
+            try { list = JSON.parse(raw); } catch { list = []; }
+          }
+          return Array.isArray(list) ? list.filter((url: any) => isWebsiteImageValue(url)) : [];
+        };
+        const about = values.get("aboutimage");
+        setForm((prev: any) => ({
+          ...prev,
+          heroImages: parseHero(values.get("heroimages")),
+          aboutImage: isWebsiteImageValue(about) ? about : "",
+        }));
+        setActiveSlideIdx(0);
+      } catch {
+        // Offline or blocked: keep whatever the app already loaded.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // Sync from rates
   useEffect(() => {
@@ -309,6 +351,11 @@ export function AdminSiteSettings() {
 
   // Image Upload / Removal
   const saveHeroImages = async () => {
+    const heroList = Array.isArray(form.heroImages) ? form.heroImages : [];
+    if (heroList.some((url: any) => !isWebsiteImageValue(url))) {
+      flash("This gallery has an image that only exists on this device. Upload it again before saving.", "error");
+      return;
+    }
     setIsProcessing(true);
     try {
       await updateSiteConfig({ heroImages: form.heroImages });
@@ -325,6 +372,10 @@ export function AdminSiteSettings() {
   };
 
   const saveAboutImage = async () => {
+    if (form.aboutImage && !isWebsiteImageValue(form.aboutImage)) {
+      flash("This photo only exists on this device. Upload it again before saving.", "error");
+      return;
+    }
     setIsProcessing(true);
     try {
       await updateSiteConfig({ aboutImage: form.aboutImage });
