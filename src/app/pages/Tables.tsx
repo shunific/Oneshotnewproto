@@ -203,6 +203,16 @@ export function Tables() {
   
   const [useProrated,      setUseProrated]      = useState(false);
 
+  // 🟢 Admin-Authorized Waive Overtime States
+  const [waiveOvertime,          setWaiveOvertime]          = useState(false);
+  const [waiveOvertimeReason,    setWaiveOvertimeReason]    = useState('Staff delay in ending session');
+  const [waiveOvertimeBy,        setWaiveOvertimeBy]        = useState('');
+  const [showWaiveOvertimeModal, setShowWaiveOvertimeModal] = useState(false);
+  const [waiveAdminPassword,     setWaiveAdminPassword]     = useState('');
+  const [waiveOvertimeError,     setWaiveOvertimeError]     = useState('');
+  const [isVerifyingWaive,       setIsVerifyingWaive]       = useState(false);
+
+
   const [completedReceipt, setCompletedReceipt] = useState<any | null>(null);
   const [viewingLiveReceiptId, setViewingLiveReceiptId] = useState<string | null>(null); // 🟢 NEW STATE
 
@@ -313,8 +323,36 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
   // shared extension decision window, never during it.
   const getEndSessionInfo = () => {
     if (!endingTable?.session) return null;
-    try { return previewSessionBill(endingTable.session, Date.now(), useProrated); }
+    try { return previewSessionBill(endingTable.session, Date.now(), useProrated, waiveOvertime); }
     catch { return null; }
+  };
+
+  const handleAuthorizeWaiveOvertime = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!waiveAdminPassword.trim() || !waiveOvertimeReason.trim() || isVerifyingWaive) return;
+    setIsVerifyingWaive(true);
+    setWaiveOvertimeError('');
+    try {
+      const res = await localFetch('http://localhost:3001/api/auth/verify-admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: waiveAdminPassword }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.ok) {
+        setWaiveOvertimeError(data?.error || 'Invalid administrator password.');
+        return;
+      }
+      setWaiveOvertime(true);
+      setWaiveOvertimeBy(data.admin?.fullName || data.admin?.username || 'Administrator');
+      setShowWaiveOvertimeModal(false);
+      setWaiveAdminPassword('');
+      flash(`Overtime waived (Authorized by ${data.admin?.fullName || 'Admin'}).`, 'success');
+    } catch {
+      setWaiveOvertimeError('Could not verify administrator password. Check local server.');
+    } finally {
+      setIsVerifyingWaive(false);
+    }
   };
 
   const endInfo = getEndSessionInfo();
@@ -387,16 +425,18 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
     return closeDate;
   };
 
-  const getNextReservation = (tableId: string, excludeId?: string) => {
+  const getNextReservation = (tableId: string, excludeId?: string, excludeCustomerName?: string) => {
     const now = new Date();
-    const upcoming = reservations
+    const excludeNameNorm = excludeCustomerName?.trim().toLowerCase();
+    const upcoming = (reservations || [])
       .filter((r: any) => {
-        if (r.id === excludeId || r.tableId !== tableId || (r.status !== 'pending' && r.status !== 'confirmed')) return false;
-        // 🟢 FIX: Reconstruct exact date and time to bypass Javascript Midnight mapping
+        if (r.id === excludeId || r.tableId !== tableId) return false;
+        if (!['pending', 'confirmed', 'checked-in'].includes(r.status)) return false;
+        if (excludeNameNorm && r.customerName?.trim().toLowerCase() === excludeNameNorm) return false;
         const rDate = new Date(r.date);
         const [h, m] = (r.timeSlot || '00:00').split(':').map(Number);
         rDate.setHours(h, m, 0, 0);
-        return rDate > now && isSameDay(rDate, now); // Only match future reservations today
+        return rDate > addMinutes(now, -15) && isSameDay(rDate, now);
       })
       .sort((a: any, b: any) => {
         const aDate = new Date(a.date);
@@ -409,13 +449,13 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
       });
 
     if (!upcoming.length) return null;
-    
+
     const r = upcoming[0];
     const rDate = new Date(r.date);
     const [h, m] = (r.timeSlot || '00:00').split(':').map(Number);
     rDate.setHours(h, m, 0, 0);
-    
-    return { date: rDate, customerName: r.customerName, timeSlot: r.timeSlot };
+
+    return { id: r.id, date: rDate, customerName: r.customerName, timeSlot: r.timeSlot };
   };
 
 
@@ -453,8 +493,8 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
           setDurationMinutes(newMins);
           setAmountPaid(Math.round((newMins / 60) * effectiveHourly).toString());
         }
-      } else if (durationMinutes === 'open' && (isOpenTimeDisabled || (availData && availData.maxMins < 1440))) {
-          const newMins = (availData?.opts && availData.opts.length > 0) ? availData.opts[0] : 60;
+      } else if (durationMinutes === 'open' && availData && availData.maxMins < 1440) {
+            const newMins = (availData?.opts && availData.opts.length > 0) ? availData.opts[0] : 60;
           setDurationMinutes(newMins);
           setAmountPaid(Math.round((newMins / 60) * effectiveHourly).toString());
           setPaymentOption('payNow');
@@ -521,6 +561,12 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
     setUseProrated(false);
     setShowVoidModal(false);
     setVoidError('');
+    setWaiveOvertime(false);
+    setWaiveOvertimeReason('Staff delay in ending session');
+    setWaiveOvertimeBy('');
+    setShowWaiveOvertimeModal(false);
+    setWaiveAdminPassword('');
+    setWaiveOvertimeError('');
   };
 
   const openExtend = (tableId: string) => {
@@ -554,33 +600,54 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
 
   const getExtensionLimits = (tableId: string) => {
     const now = new Date();
+    const table = tables.find((t: any) => t.id === tableId);
+    const session = table?.session;
+
+    // Extensions add onto scheduledEnd (startTime + durationMinutes)
+    const baseEnd = (session?.startTime && !session.isOpenTime && session.durationMinutes)
+      ? addMinutes(new Date(session.startTime), Number(session.durationMinutes))
+      : now;
+
     let maxMins = (reservationTerms?.maxHours || 8) * 60;
     let blocksOpenTime = false;
     let conflictWarning = "";
+    let nextResInfo: { id: string; date: Date; customerName: string; timeSlot: string } | null = null;
 
     const closeDate = getNextClosingTime();
     if (closeDate) {
-      const minsLeft = Math.floor(differenceInSeconds(closeDate, now) / 60);
-      if (minsLeft > 0) maxMins = Math.min(maxMins, minsLeft);
+      const minsLeft = Math.floor(differenceInSeconds(closeDate, baseEnd) / 60);
+      maxMins = Math.min(maxMins, Math.max(0, minsLeft));
     }
 
-    const nextRes = getNextReservation(tableId);
+    const nextRes = getNextReservation(tableId, undefined, session?.customerName);
     if (nextRes) {
-      const minsUntilRes = Math.floor(differenceInSeconds(nextRes.date, now) / 60);
-      if (minsUntilRes > 0) {
+      nextResInfo = nextRes;
+      // Leave a 2-minute transition buffer before the reservation starts
+      const minsUntilRes = Math.floor(differenceInSeconds(nextRes.date, baseEnd) / 60) - 2;
+      if (minsUntilRes >= 60) {
         maxMins = Math.min(maxMins, minsUntilRes);
         blocksOpenTime = true;
-        conflictWarning = `Upcoming reservation for ${nextRes.customerName} at ${clockLabel(nextRes.timeSlot)}.`;
+        conflictWarning = `Upcoming reservation for ${nextRes.customerName} at ${clockLabel(nextRes.timeSlot)}. Max extension is ${Math.floor(maxMins / 60)}h.`;
       } else {
         maxMins = 0;
         blocksOpenTime = true;
-        conflictWarning = `Table is reserved for ${nextRes.customerName} NOW. Extension blocked.`;
+        conflictWarning = `Extension blocked — ${nextRes.customerName} has a reservation at ${clockLabel(nextRes.timeSlot)}. Move this player to another free table or end the game at ${clockLabel(nextRes.timeSlot)}.`;
       }
     }
 
     const opts = [];
     for (let m = 60; m <= maxMins; m += 60) opts.push(m);
-    return { opts, maxMins, blocksOpenTime, conflictWarning };
+
+    // Find free tables that have at least 60 mins clear before their own next reservation
+    const safeTables = safeAvailableTables.filter((t: any) => {
+      if (t.id === tableId) return false;
+      const otherRes = getNextReservation(t.id);
+      if (!otherRes) return true;
+      const gap = Math.floor(differenceInSeconds(otherRes.date, baseEnd) / 60) - 2;
+      return gap >= 60;
+    });
+
+    return { opts, maxMins, blocksOpenTime, conflictWarning, nextRes: nextResInfo, safeTables };
   };
 
 
@@ -703,6 +770,10 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
         overtimeCharge: receipt.overtime_charge,
         overtimeRate: receipt.overtime_rate,
         overtimeMins: receipt.overtime_minutes,
+        overtimeWaived: receipt.overtime_waived,
+        overtimeWaivedAmount: receipt.overtime_waived_amount,
+        overtimeWaiveReason: receipt.overtime_waive_reason,
+        overtimeWaivedBy: receipt.overtime_waived_by,
         posOrdersTotal: receipt.fnb_charge,
         orders: saved.history.orders,
         staffName: staffProfile?.fullName || staffProfile?.username || 'Staff',
@@ -723,6 +794,8 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
       setEndingTableId(null);
       setEndingSessionSnapshot(null);
       setShowVoidModal(false);
+      setWaiveOvertime(false);
+      setWaiveOvertimeBy('');
       flash(payload.closureKind === 'void' ? 'Session void saved. Any prepaid refund remains pending return.' : 'Checkout saved. The table and receipt were committed together.', 'success');
     } catch (error: any) {
       flash(error?.message || 'Checkout was not confirmed. Your payment details are kept; retry the pending save before taking another payment.', 'error');
@@ -746,6 +819,9 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
       paymentMethod: endPayMethod,
       tendered,
       useProrated,
+      waiveOvertime,
+      waiveOvertimeReason,
+      waiveOvertimeBy,
       paymentReference: endGcashRef,
       debtName,
       debtContact,
@@ -1622,7 +1698,9 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
                 {endInfo.bookingDiscount > 0 && (<div className="flex justify-between text-xs text-emerald-400"><span>Booking Discount</span><span>−{formatPHP(endInfo.bookingDiscount)}</span></div>)}
                 {endInfo.isOvertime && (
                   <div className="flex justify-between text-xs">
-                    <span className="text-amber-400 flex items-center gap-1"><AlertTriangle size={10} /> Overtime ({endInfo.overtimeMins}m @ {formatPHP(endInfo.overtimeRate)}/hr)</span>
+                    <span className="text-amber-400 flex items-center gap-1">
+                      <AlertTriangle size={10} /> {endInfo.overtimeLabel || 'Overtime'} ({endInfo.overtimeMins}m · {endInfo.billedOvertimeHours}h @ {formatPHP(endInfo.overtimeRate)}/hr)
+                    </span>
                     <span className="text-amber-400 font-semibold">+{formatPHP(endInfo.overtimeCharge)}</span>
                   </div>
                 )}
@@ -1645,6 +1723,56 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
                   <span className={`font-black ${endInfo.balance > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>{formatPHP(endInfo.balance > 0 ? endInfo.balance : 0)}</span>
                 </div>
               </div>
+
+                {/* 🟢 Admin-Authorized Waive Overtime Control (REQ022) */}
+              {endInfo.isOvertime && (
+                <div className={`rounded-xl p-3.5 border space-y-2.5 ${
+                  waiveOvertime
+                    ? 'bg-emerald-950/25 border-emerald-800/50'
+                    : 'bg-amber-950/20 border-amber-800/40'
+                }`}>
+                  {waiveOvertime ? (
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="text-xs space-y-0.5">
+                        <p className="font-bold text-emerald-400 flex items-center gap-1.5">
+                          <CheckCircle size={13} /> Overtime Charge Waived
+                        </p>
+                        <p className="text-[11px] text-neutral-300">Reason: {waiveOvertimeReason}</p>
+                        <p className="text-[10px] text-neutral-500">Authorized by: {waiveOvertimeBy}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setWaiveOvertime(false);
+                          setWaiveOvertimeBy('');
+                          flash('Overtime charge restored.', 'success');
+                        }}
+                        className="px-2.5 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-[10px] font-bold rounded-lg border border-neutral-700"
+                      >
+                        Undo
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-xs">
+                        <p className="font-bold text-amber-400">Staff delay or system issue?</p>
+                        <p className="text-[10px] text-neutral-400">An administrator can waive this overtime charge.</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setWaiveAdminPassword('');
+                          setWaiveOvertimeError('');
+                          setShowWaiveOvertimeModal(true);
+                        }}
+                        className="px-3 py-1.5 bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-700/50 rounded-lg text-[11px] font-bold transition-colors flex items-center gap-1.5 flex-shrink-0"
+                      >
+                        <Lock size={12} /> Waive Overtime
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Early Departure & Admin-Authorized Void UI */}
               {!endInfo.isOpenTime && endInfo.elapsedMins < (endingTable.session.durationMinutes || 0) && (
@@ -1868,6 +1996,74 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
         </div>
       )}
 
+      {/* 🟢 ADMIN PASSWORD MODAL FOR WAIVING OVERTIME */}
+      {showWaiveOvertimeModal && endingTable?.session && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <form onSubmit={handleAuthorizeWaiveOvertime} className="bg-neutral-950 border border-amber-800/60 rounded-2xl w-full max-w-sm p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-amber-400 font-bold text-sm">
+                <Lock size={16} />
+                <span>Admin Override — Waive Overtime</span>
+              </div>
+              <button type="button" onClick={() => setShowWaiveOvertimeModal(false)} className="text-neutral-500 hover:text-white">
+                <X size={16} />
+              </button>
+            </div>
+            <p className="text-xs text-neutral-300 leading-relaxed">
+              Enter an administrator password to waive the overtime fee for <strong>{endingTable.name}</strong>. This action will be recorded in the Activity Log.
+            </p>
+            <div>
+              <label className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold block mb-1">Reason for Waiving *</label>
+              <select
+                value={waiveOvertimeReason}
+                onChange={e => setWaiveOvertimeReason(e.target.value)}
+                className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-xs text-neutral-200 outline-none focus:border-amber-500"
+              >
+                <option value="Staff delay in ending session">Staff delay in ending session</option>
+                <option value="System or timer glitch">System or timer glitch</option>
+                <option value="Equipment / table interruption">Equipment / table interruption</option>
+                <option value="Manager courtesy waiver">Manager courtesy waiver</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold block mb-1">Admin Password *</label>
+              <input
+                type="password"
+                value={waiveAdminPassword}
+                onChange={e => { setWaiveAdminPassword(e.target.value); setWaiveOvertimeError(''); }}
+                placeholder="Enter administrator password"
+                autoFocus
+                required
+                className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-sm text-neutral-100 outline-none focus:border-amber-500"
+              />
+            </div>
+            {waiveOvertimeError && (
+              <div className="flex items-center gap-1.5 text-[11px] text-rose-400 font-semibold bg-rose-950/40 border border-rose-900/50 p-2.5 rounded-xl">
+                <AlertTriangle size={14} className="shrink-0" />
+                <span>{waiveOvertimeError}</span>
+              </div>
+            )}
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowWaiveOvertimeModal(false)}
+                className="flex-1 py-2.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 rounded-xl text-xs font-semibold transition-colors border border-neutral-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isVerifyingWaive || !waiveAdminPassword.trim()}
+                className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-500 disabled:bg-neutral-800 disabled:text-neutral-500 text-white rounded-xl text-xs font-bold transition-colors"
+              >
+                {isVerifyingWaive ? 'Verifying...' : 'Authorize Waiver'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+      
+
       {/* EXTEND SESSION MODAL */}
       {extendingTableId && extendingTable?.session && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
@@ -1890,15 +2086,82 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
                 return (
                   <>
                     {extLimits.conflictWarning && (
-                      <div className="bg-amber-950/30 border border-amber-900/50 p-3 rounded-lg flex items-start gap-2">
-                        <AlertTriangle size={14} className="text-amber-500 flex-shrink-0 mt-0.5" />
-                        <p className="text-[10px] text-amber-400 font-semibold">{extLimits.conflictWarning}</p>
+                      <div className={`p-3.5 rounded-xl border space-y-3 ${
+                        extLimits.maxMins === 0
+                          ? 'bg-rose-950/30 border-rose-800/60'
+                          : 'bg-amber-950/30 border-amber-900/50'
+                      }`}>
+                        <div className="flex items-start gap-2">
+                          <AlertTriangle size={14} className={`${extLimits.maxMins === 0 ? 'text-rose-400' : 'text-amber-500'} flex-shrink-0 mt-0.5`} />
+                          <p className={`text-[11px] font-semibold leading-relaxed ${extLimits.maxMins === 0 ? 'text-rose-300' : 'text-amber-400'}`}>
+                            {extLimits.conflictWarning}
+                          </p>
+                        </div>
+
+                        {extLimits.maxMins === 0 && (
+                          <div className="space-y-2.5 pt-2 border-t border-rose-900/40">
+                            {extLimits.safeTables.length > 0 ? (
+                              <div className="space-y-1.5">
+                                <p className="text-[10px] uppercase tracking-wider font-bold text-neutral-400">
+                                  Option 1 — Move to a Free Table &amp; Continue
+                                </p>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {extLimits.safeTables.map((t: any) => (
+                                    <button
+                                      key={t.id}
+                                      type="button"
+                                      onClick={async () => {
+                                        if (sessionInFlight.current) return;
+                                        sessionInFlight.current = true;
+                                        setIsSavingSession(true);
+                                        try {
+                                          await migrateSession(extendingTableId, t.id);
+                                          setExtendingTableId(t.id);
+                                          flash(`Moved to ${t.name}. You can now confirm the extension.`, 'success');
+                                        } catch (err: any) {
+                                          flash(err?.message || 'Could not migrate table.', 'error');
+                                        } finally {
+                                          sessionInFlight.current = false;
+                                          setIsSavingSession(false);
+                                        }
+                                      }}
+                                      className="px-2.5 py-1.5 bg-sky-600 hover:bg-sky-500 text-white text-[11px] font-bold rounded-lg transition-colors flex items-center gap-1"
+                                    >
+                                      <ArrowRightLeft size={11} /> Move to {t.name}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : (
+                              <p className="text-[10px] text-amber-400 font-semibold">
+                                No other free tables are open for an extra hour right now.
+                              </p>
+                            )}
+
+                            <div className="pt-2 border-t border-rose-900/40 flex items-center justify-between gap-2">
+                              <span className="text-[10px] text-neutral-400">
+                                Option 2 — End game when reservation starts
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const targetId = extendingTableId;
+                                  setExtendingTableId(null);
+                                  openEnd(targetId);
+                                }}
+                                className="px-2.5 py-1.5 bg-rose-700 hover:bg-rose-600 text-white text-[11px] font-bold rounded-lg transition-colors"
+                              >
+                                End Session
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
-                    
+
                     <div className="space-y-1.5">
                       <label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Extra Time</label>
-                      <select 
+                      <select
                         value={extendMinutes === 'open' ? 'open' : extendMinutes}
                         onChange={e => {
                           const val = e.target.value;
@@ -1918,8 +2181,12 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
                             <option key={d} value={d}>+{d / 60} Hour{d / 60 > 1 ? 's' : ''} (+{formatPHP(Math.round((d / 60) * extendingRate * 100) / 100)})</option>
                           ))
                         )}
-                        <option value="open" disabled={extendingTable.session?.isOpenTime}>
-                          {extendingTable.session?.isOpenTime ? 'Already on Open Time' : 'Switch to Open Time (saved stop time applies)'}
+                        <option value="open" disabled={extendingTable.session?.isOpenTime || extLimits.blocksOpenTime}>
+                          {extendingTable.session?.isOpenTime
+                            ? 'Already on Open Time'
+                            : extLimits.blocksOpenTime
+                              ? 'Open Time blocked (Upcoming reservation)'
+                              : 'Switch to Open Time (saved stop time applies)'}
                         </option>
                       </select>
                     </div>
@@ -1979,7 +2246,7 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
 
                 // 🟢 NEW: Hard stop. Prevent extension if mathematically blocked by an upcoming reservation
                 if (extendMinutes === 'open') {
-                  if (!openLimit || extendingTable.session?.isOpenTime) canExtend = false;
+                  if (!openLimit || extendingTable.session?.isOpenTime || extLimits.blocksOpenTime) canExtend = false;
                 } else {
                   if (extLimits.maxMins === 0 || (extendMinutes as number) > extLimits.maxMins) canExtend = false;
                 }
@@ -2169,6 +2436,17 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
                         <div className="flex justify-between font-bold text-black">
                           <span>OVERTIME{Number.isSafeInteger(rData.overtimeMins) && rData.overtimeMins >= 0 ? ` (${rData.overtimeMins}m)` : ''}{Number.isFinite(rData.overtimeRate) && rData.overtimeRate > 0 ? ` @ ${formatPHP(rData.overtimeRate)}/HR` : ''}</span>
                           <span>{formatPHP(rData.overtimeCharge)}</span>
+                        </div>
+                      )}
+                      {rData.overtimeWaived && (
+                        <div className="flex flex-col text-neutral-600">
+                          <div className="flex justify-between font-bold text-black">
+                            <span>OVERTIME WAIVED</span>
+                            <span>₱0.00</span>
+                          </div>
+                          <span className="text-[9px] text-neutral-500">
+                            By: {rData.overtimeWaivedBy || 'Admin'} · {rData.overtimeWaiveReason || 'Waived'}
+                          </span>
                         </div>
                       )}
                       {rData.orders?.map((o: any, i: number) => (

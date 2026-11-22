@@ -39,7 +39,7 @@ export function OverviewDashboard() {
   const { 
     tables, queue, reservations, watchlist, 
     staffUsers, promoCodes, announcements, closedDates, rates, 
-    staffProfile,availableTables,heldTableIds,reservationMoveError
+    staffProfile,availableTables,heldTableIds,reservationMoveError, pullNewCloudData
   } = useAppContext() as any;
   
   const navigate = useNavigate();
@@ -47,6 +47,7 @@ export function OverviewDashboard() {
 
   // ── Connectivity & Local Backup State ─────────────────────────
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isPulling, setIsPulling] = useState(false);
   const [lastSync, setLastSync] = useState<Date>(new Date());
   const [isBrowserOffline, setIsBrowserOffline] = useState(!navigator.onLine);
   const [offlineSince, setOfflineSince] = useState<Date | null>(null);
@@ -133,6 +134,22 @@ export function OverviewDashboard() {
       flash(`Sync Failed: ${error.message || 'Could not reach server'}`, 'error');
     } finally {
       setIsSyncing(false);
+    }
+  };
+
+  const handleFetchCloudData = async () => {
+    if (isPulling || isSyncing) return;
+    setIsPulling(true);
+    flash("Refreshing...", "loading");
+    try {
+      const result = await pullNewCloudData();
+      if (!result.ok) throw new Error(result.message);
+      setLastSync(new Date());
+      flash(result.message, "success");
+    } catch (error: any) {
+      flash(`Refresh Failed: ${error.message || 'Could not reach cloud'}`, 'error');
+    } finally {
+      setIsPulling(false);
     }
   };
 
@@ -282,6 +299,19 @@ export function OverviewDashboard() {
             </span>
           )}
           
+          <button
+            onClick={handleFetchCloudData}
+            disabled={isPulling || isSyncing}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all border ${
+              isPulling
+                ? 'bg-neutral-900 text-neutral-500 border-neutral-800 cursor-wait'
+                : 'bg-sky-600/10 hover:bg-sky-600/20 text-sky-400 border-sky-600/20'
+            }`}
+          >
+            <RefreshCw size={14} className={isPulling ? 'animate-spin' : ''} />
+            <span>{isPulling ? 'Fetching...' : 'Refresh'}</span>
+          </button>
+
           <button
             onClick={handleManualSync}
             disabled={isSyncing}

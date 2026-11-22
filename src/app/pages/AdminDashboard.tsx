@@ -19,7 +19,7 @@ export function AdminDashboard() {
     staffUsers, tables, promoCodes, announcements, closedDates, 
     rates, reservations, feedback, weather, updateWeatherLocation, 
     activities, sessionHistory,
-    queue, watchlist, availableTables, reservationMoveError
+    queue, watchlist, availableTables, reservationMoveError, pullNewCloudData
   } = useAppContext() as any;
   
   const navigate = useNavigate();
@@ -27,6 +27,7 @@ export function AdminDashboard() {
   const [isEditingWeather, setIsEditingWeather] = useState(false);
   const [locationQuery, setLocationQuery] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isPulling, setIsPulling] = useState(false);
 
   // 🟢 TOAST STATE WITH 5S TIMER & FADE OUT
   const [toast, setToast] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
@@ -156,6 +157,22 @@ export function AdminDashboard() {
     }
   };
 
+  const handleFetchCloudData = async () => {
+    if (isPulling || isSyncing) return;
+    setIsPulling(true);
+    flash("Refreshing...", "success");
+    try {
+      const result = await pullNewCloudData();
+      if (!result.ok) throw new Error(result.message);
+      setLastSync(new Date());
+      flash(result.message, "success");
+    } catch (error: any) {
+      flash(`Refresh Failed: ${error.message || 'Could not reach cloud'}`, 'error');
+    } finally {
+      setIsPulling(false);
+    }
+  };
+
   const handleWeatherSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (locationQuery.trim()) {
@@ -271,6 +288,20 @@ export function AdminDashboard() {
             </span>
           )}
           
+          {/* Fetch New Data Button */}
+          <button
+            onClick={handleFetchCloudData}
+            disabled={isPulling || isSyncing}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all border ${
+              isPulling
+                ? 'bg-neutral-900 text-neutral-500 border-neutral-800 cursor-wait'
+                : 'bg-sky-600/10 hover:bg-sky-600/20 text-sky-400 border-sky-600/20'
+            }`}
+          >
+            <RefreshCw size={14} className={isPulling ? 'animate-spin' : ''} />
+            <span>{isPulling ? 'Fetching' : 'Refresh'}</span>
+          </button>
+
           {/* Cloud Sync Button */}
           <button
             onClick={handleManualSync}

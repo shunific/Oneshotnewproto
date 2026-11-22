@@ -301,6 +301,7 @@ export type AppContextType = {
   pendingReservationMoves: PendingReservationMove[];
   recoverReservationTransfer: (record: any, action: any) => Promise<any>;
   refreshReservationTransfers: () => Promise<void>;
+  pullNewCloudData: () => Promise<{ ok: boolean; totalChanges: number; message: string }>;
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -775,8 +776,47 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const pullNewCloudData = useCallback(async () => {
+    try {
+      const res = await localFetch('http://localhost:3001/api/sync-from-cloud', { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return { ok: false, totalChanges: 0, message: data.error || 'Could not fetch new data from Cloud.' };
+      }
+
+      // Reload UI state cleanly from the updated local SQLite database
+      await forceFullSync();
+      return {
+        ok: true,
+        totalChanges: Number(data.totalChanges) || 0,
+        message: data.message || 'Cloud data checked.',
+      };
+    } catch (err: any) {
+      return { ok: false, totalChanges: 0, message: err?.message || 'Could not reach local server.' };
+    }
+  }, []);
+
+  // 🟢 First startup of the day (on any device): compare & pull only new cloud data before loading
   useEffect(() => {
-    forceFullSync();
+    const startupSync = async () => {
+      const todayKey = bookingDayKey(new Date());
+      const lastDailyPull = localStorage.getItem('oneshot_last_daily_pull');
+
+      if (lastDailyPull !== todayKey) {
+        try {
+          const res = await localFetch('http://localhost:3001/api/sync-from-cloud', { method: 'POST' });
+          if (res.ok) {
+            localStorage.setItem('oneshot_last_daily_pull', todayKey);
+          }
+        } catch {
+          // Offline at startup — will try again on next startup today
+        }
+      }
+
+      await forceFullSync();
+    };
+
+    void startupSync();
   }, []);
 
   useEffect(() => {
@@ -897,9 +937,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!Number.isFinite(startTime.getTime())) throw new Error('The stored session start time is invalid.');
 
     const now = Date.now();
+    const shouldWaiveOvertime = Boolean(payload?.waiveOvertime);
     let bill;
+    let waivedOvertimeAmount = 0;
     try {
-      bill = previewSessionBill({ ...session, startTime: startTime.toISOString() }, now, Boolean(payload?.useProrated));
+      bill = previewSessionBill(
+        { ...session, startTime: startTime.toISOString() },
+        now,
+        Boolean(payload?.useProrated),
+        shouldWaiveOvertime
+      );
+      if (shouldWaiveOvertime) {
+        const unwaived = previewSessionBill(
+          { ...session, startTime: startTime.toISOString() },
+          now,
+          Boolean(payload?.useProrated),
+          false
+        );
+        waivedOvertimeAmount = Number(unwaived.overtimeCharge) || 0;
+      }
     } catch (error: any) {
       throw new Error(error?.message || 'The session bill could not be calculated.');
     }
@@ -915,12 +971,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const change = paymentStatus === 'paid' ? Math.max(0, tendered - dueNow) : 0;
     const refundDue = Math.max(0, totalPaid - total);
     const endTime = new Date(now);
+    const tableName = table?.name || session.tableName || tableId;
+    const customerName = session.customerName || 'Walk-in';
+
+    if (shouldWaiveOvertime && waivedOvertimeAmount > 0) {
+      const reason = String(payload?.waiveOvertimeReason || 'Staff delay in ending session').trim();
+      const authorizedBy = String(payload?.waiveOvertimeBy || staffProfile?.fullName || 'Administrator').trim();
+      addActivity(
+        'admin_action',
+        `Waived overtime charge (₱${waivedOvertimeAmount.toFixed(2)}) on ${tableName} for ${customerName}. Reason: ${reason} | Authorized by: ${authorizedBy}`,
+        { tableId, tableName, customerName, waivedOvertimeAmount, reason, authorizedBy }
+      );
+    }
 
     const receipt = {
       receipt_no: `OS-${now}`,
       table_id: tableId,
-      table_name: table?.name || session.tableName || tableId,
-      customer_name: session.customerName || 'Walk-in',
+      table_name: tableName,
+      customer_name: customerName,
       play_start_time: startTime.toISOString(),
       play_end_time: endTime.toISOString(),
       duration_minutes: bill.elapsedMins,
@@ -929,6 +997,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       overtime_charge: bill.overtimeCharge,
       overtime_rate: bill.overtimeRate,
       overtime_minutes: bill.overtimeMins,
+      overtime_waived: Boolean(shouldWaiveOvertime && waivedOvertimeAmount > 0),
+      overtime_waived_amount: waivedOvertimeAmount,
+      overtime_waive_reason: payload?.waiveOvertimeReason || '',
+      overtime_waived_by: payload?.waiveOvertimeBy || '',
       fnb_charge: bill.posOrdersTotal,
       subtotal: total,
       total_amount: total,
@@ -1730,7 +1802,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       theme, primaryColor, updateTheme, updatePrimaryColor,
       updateRefundStatus, acknowledgeRefund,
       isLoggingOut, logoutStep,
-      lastSynced, forceFullSync, refreshPromoUsage,
+      lastSynced, forceFullSync, pullNewCloudData, refreshPromoUsage,
       availableTables, heldTableIds, reservationMoveError, pendingReservationMoves, recoverReservationTransfer, refreshReservationTransfers
     }}>
       {/* 🟢 Global Fullscreen Logout Overlay with Thread Loader */}

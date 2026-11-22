@@ -311,6 +311,9 @@ if (!sqlite3) {
       db.run('ALTER TABLE tables ADD COLUMN dateAdded TEXT', err => {
         if (err && !/duplicate column name/i.test(err.message)) console.error('Table creation date migration failed:', err.message);
       });
+      db.run('ALTER TABLE tables ADD COLUMN updatedAt TEXT', err => {
+        if (err && !/duplicate column name/i.test(err.message)) console.error('Table updatedAt migration failed:', err.message);
+      });
       // Older app-created table IDs contain the original creation time in milliseconds.
       db.run(`UPDATE tables SET dateAdded = strftime('%Y-%m-%dT%H:%M:%fZ', CAST(substr(id, 2) AS INTEGER) / 1000.0, 'unixepoch')
         WHERE dateAdded IS NULL AND length(id) = 14 AND substr(id, 1, 1) = 't'
@@ -494,6 +497,57 @@ const trainQueueAI = () => {
 setTimeout(trainQueueAI, 5000);
 setInterval(trainQueueAI, 1000 * 60 * 60 * 6);
 
+// ====================================================================
+// 🔐 VERIFY ADMIN PASSWORD FOR SENSITIVE OVERRIDES (e.g. Waive Overtime)
+// ====================================================================
+app.post('/api/auth/verify-admin', (req, res) => {
+  const nodeCrypto = require('crypto');
+  const password = typeof req.body?.password === 'string' ? req.body.password : '';
+  if (!password) return res.status(400).json({ error: 'Enter an administrator password.' });
+
+  const sha256 = nodeCrypto.createHash('sha256').update(password).digest('hex');
+
+  const matchesStoredHash = (stored) => {
+    if (!stored || typeof stored !== 'string') return false;
+    if (stored.startsWith('scrypt$')) {
+      const parts = stored.split('$');
+      if (parts.length === 3) {
+        const [, salt, keyHex] = parts;
+        const expected = Buffer.from(keyHex, 'hex');
+        try {
+          const d1 = nodeCrypto.scryptSync(password, salt, expected.length);
+          if (d1.length === expected.length && nodeCrypto.timingSafeEqual(d1, expected)) return true;
+        } catch {}
+        try {
+          const d2 = nodeCrypto.scryptSync(password, Buffer.from(salt, 'hex'), expected.length);
+          if (d2.length === expected.length && nodeCrypto.timingSafeEqual(d2, expected)) return true;
+        } catch {}
+      }
+      return false;
+    }
+    return stored === sha256 || stored === password;
+  };
+
+  db.all(
+    `SELECT id, username, fullName, password FROM staff WHERE isAdmin = 1 AND isActive = 1`,
+    [],
+    (err, rows) => {
+      if (err) return res.status(500).json({ error: err.message });
+      const matched = (rows || []).find((u) => matchesStoredHash(u.password));
+      if (!matched) {
+        return res.status(401).json({ error: 'Invalid administrator password.' });
+      }
+      res.json({
+        ok: true,
+        admin: {
+          id: matched.id,
+          username: matched.username,
+          fullName: matched.fullName || matched.username,
+        },
+      });
+    }
+  );
+});
 
 // ====================================================================
 // 🚀 READ ROUTES (GET)
@@ -1024,6 +1078,7 @@ app.post('/api/sync-to-cloud', async (req, res) => {
             if (cloudTable === 'reservations') { await syncReservations(payload); return resolve(); }
             console.log(`☁️ Syncing ${localTable}: ${payload.length} row(s)`);
 
+
 const { error } = await supabase
   .from(cloudTable)
   .upsert(payload, { onConflict: conflictKey });
@@ -1208,6 +1263,370 @@ if (error) {
     res.status(500).json({ error: 'Failed to dispatch cloud sync.' });
   }
 });
+// ====================================================================
+// 🔽 SMART MERGE PULL FROM SUPABASE (NEW RECORDS ONLY + TABLE COMPARE)
+// ====================================================================
+app.post('/api/sync-from-cloud', async (req, res) => {
+  if (!supabase) return res.status(503).json({ error: 'Cloud connection is unavailable.' });
+
+  const dbAll = (sql, params = []) => new Promise((resolve, reject) => {
+    db.all(sql, params, (err, rows) => (err ? reject(err) : resolve(rows || [])));
+  });
+  const dbRun = (sql, params = []) => new Promise((resolve, reject) => {
+    db.run(sql, params, function (err) {
+      if (err) reject(err);
+      else resolve(this.changes || 0);
+    });
+  });
+
+  const toMs = (val) => {
+    if (!val) return 0;
+    const ms = new Date(val).getTime();
+    return Number.isFinite(ms) ? ms : 0;
+  };
+
+  try {
+    const [
+      cloudTablesRes,
+      cloudResRes,
+      cloudQueueRes,
+      cloudEventsRes,
+      cloudAnnRes,
+      cloudClosedRes,
+      cloudPromosRes,
+      cloudInvRes,
+      cloudFeedRes,
+      cloudLostRes,
+      cloudWatchRes,
+      cloudHistRes,
+      cloudActRes,
+      cloudReceiptsRes,
+      cloudCmsRes,
+      cloudSettingsRes,
+    ] = await Promise.all([
+      supabase.from('tables').select('*'),
+      supabase.from('reservations').select('*'),
+      supabase.from('queue').select('*'),
+      supabase.from('events').select('*'),
+      supabase.from('announcements').select('*'),
+      supabase.from('closed_dates').select('*'),
+      supabase.from('promo_codes').select('*'),
+      supabase.from('inventory').select('*'),
+      supabase.from('feedback').select('*'),
+      supabase.from('lost_and_found').select('*'),
+      supabase.from('watchlist').select('*'),
+      supabase.from('session_history').select('*'),
+      supabase.from('activities').select('*'),
+      supabase.from('e_receipts').select('*'),
+      supabase.from('cms').select('*'),
+      supabase.from('system_settings').select('*'),
+    ]);
+
+    const summary = {
+      tablesAdded: 0,
+      tablesUpdated: 0,
+      tablesPushedToCloud: 0,
+      reservationsAdded: 0,
+      reservationsUpdated: 0,
+      otherAdded: 0,
+    };
+
+    // 1. TABLES: Compare local vs Supabase — newer copy wins and replaces the older one
+    if (Array.isArray(cloudTablesRes.data)) {
+      const localTables = await dbAll('SELECT * FROM tables');
+      const localById = new Map(localTables.map((t) => [String(t.id), t]));
+
+      for (const c of cloudTablesRes.data) {
+        const id = String(c.id);
+        const cName = c.name || `Table ${id}`;
+        const cStatus = c.status || 'available';
+        const rawActive = c.isActive ?? c.isactive ?? c.is_active;
+        const cActive = rawActive === undefined ? 1 : (rawActive === 1 || rawActive === true || rawActive === 'true' ? 1 : 0);
+        const cMaint = c.maintenanceReason ?? c.maintenancereason ?? null;
+        const rawSession = c.sessionData ?? c.sessiondata ?? null;
+        const cSessionStr = rawSession ? (typeof rawSession === 'string' ? rawSession : JSON.stringify(rawSession)) : null;
+        const cSessionObj = safeParseJSON(cSessionStr, null);
+        const cUpdatedAt = c.updated_at || c.updatedAt || cSessionObj?.startTime || null;
+
+        const local = localById.get(id);
+        if (!local) {
+          const changes = await dbRun(
+            `INSERT OR IGNORE INTO tables (id, name, status, isActive, maintenanceReason, sessionData, dateAdded, updatedAt)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [id, cName, cStatus, cActive, cMaint, cSessionStr, cUpdatedAt || new Date().toISOString(), cUpdatedAt || new Date().toISOString()]
+          );
+          summary.tablesAdded += changes;
+          continue;
+        }
+
+        const hasChanges =
+          local.name !== cName ||
+          local.status !== cStatus ||
+          (local.isActive ? 1 : 0) !== cActive ||
+          (local.maintenanceReason || null) !== (cMaint || null) ||
+          (local.sessionData || null) !== (cSessionStr || null);
+
+        if (!hasChanges) continue;
+
+        const lSessionObj = safeParseJSON(local.sessionData, null);
+        const localTime = Math.max(toMs(local.updatedAt), toMs(local.dateAdded), toMs(lSessionObj?.startTime));
+        const cloudTime = Math.max(toMs(c.updated_at || c.updatedAt), toMs(cSessionObj?.startTime));
+
+        if (cloudTime > localTime) {
+          // Local is older -> fetch newer Supabase data into local SQLite
+          const changes = await dbRun(
+            `UPDATE tables SET name = ?, status = ?, isActive = ?, maintenanceReason = ?, sessionData = ?, updatedAt = ? WHERE id = ?`,
+            [cName, cStatus, cActive, cMaint, cSessionStr, cUpdatedAt || new Date().toISOString(), id]
+          );
+          summary.tablesUpdated += changes;
+        } else if (localTime > cloudTime) {
+          // Supabase is older -> keep local AND replace old data in Supabase
+          const { error: pushErr } = await supabase
+            .from('tables')
+            .update({
+              name: local.name,
+              status: local.status,
+              isActive: local.isActive ? 1 : 0,
+              isactive: local.isActive ? 1 : 0,
+              maintenanceReason: local.maintenanceReason || null,
+              maintenancereason: local.maintenanceReason || null,
+              sessionData: local.sessionData || null,
+              sessiondata: local.sessionData || null,
+              updated_at: local.updatedAt || new Date().toISOString(),
+            })
+            .eq('id', id);
+
+          if (!pushErr) {
+            summary.tablesPushedToCloud += 1;
+          } else {
+            console.error(`❌ Failed to replace older cloud table ${id}:`, pushErr.message);
+          }
+        }
+      }
+    }
+
+    // 2. RESERVATIONS: Insert new bookings + sync new customer refund/reschedule requests
+    if (Array.isArray(cloudResRes.data) && cloudResRes.data.length > 0) {
+      const localResRows = await dbAll('SELECT * FROM reservations');
+      const localResById = new Map(localResRows.map((r) => [String(r.id), r]));
+      const newlyMergedForEmail = [];
+
+      for (const r of cloudResRes.data) {
+        const id = String(r.id);
+        const norm = {
+          id,
+          customerName: r.customerName || r.customer_name || r.customername || 'Guest',
+          contactNumber: r.contactNumber || r.contact_number || r.contactnumber || '',
+          email: r.email || null,
+          date: reservationDay(r.date) || r.date,
+          timeSlot: r.timeSlot || r.time_slot || r.timeslot || '',
+          durationHours: r.durationHours ?? r.duration_hours ?? 1,
+          partySize: r.partySize ?? r.party_size ?? 1,
+          tableId: r.tableId || r.table_id || null,
+          status: r.status || 'pending',
+          totalAmount: r.totalAmount ?? r.total_amount ?? 0,
+          downPaymentAmount: r.downPaymentAmount ?? r.down_payment_amount ?? 0,
+          downPaymentPaid: (r.downPaymentPaid || r.down_payment_paid) ? 1 : 0,
+          balancePaid: (r.balancePaid || r.balance_paid) ? 1 : 0,
+          paymentRef: r.paymentRef || r.payment_ref || null,
+          receiptImg: r.receiptImg || r.receipt_img_url || null,
+          cancellationReason: r.cancellationReason || r.cancellation_reason || r.cancellationreason || null,
+          refundStatus: r.refundStatus || r.refund_status || null,
+          refundMethod: r.refundMethod || r.refund_method || null,
+          refundNotes: r.refundNotes || r.refund_notes || null,
+          createdAt: r.createdAt || r.created_at || new Date().toISOString(),
+          promoCode: r.promoCode || r.promocode || r.promo_code || null,
+          discountAmount: r.discountAmount ?? r.discount_amount ?? 0,
+          rescheduleCount: Number(r.rescheduleCount ?? r.reschedule_count ?? 0) || 0,
+        };
+
+        const existing = localResById.get(id);
+        if (!existing) {
+          const changes = await dbRun(
+            `INSERT OR IGNORE INTO reservations (id, customerName, contactNumber, email, date, timeSlot, durationHours, partySize, tableId, status, totalAmount, downPaymentAmount, downPaymentPaid, balancePaid, paymentRef, receiptImg, cancellationReason, refundStatus, refundMethod, refundNotes, createdAt, promoCode, discountAmount, rescheduleCount)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [norm.id, norm.customerName, norm.contactNumber, norm.email, norm.date, norm.timeSlot, norm.durationHours, norm.partySize, norm.tableId, norm.status, norm.totalAmount, norm.downPaymentAmount, norm.downPaymentPaid, norm.balancePaid, norm.paymentRef, norm.receiptImg, norm.cancellationReason, norm.refundStatus, norm.refundMethod, norm.refundNotes, norm.createdAt, norm.promoCode, norm.discountAmount, norm.rescheduleCount]
+          );
+          if (changes > 0) {
+            summary.reservationsAdded += changes;
+            newlyMergedForEmail.push(norm);
+          }
+        } else {
+          const cloudHasCustomerRequest =
+            (['pending-refund', 'pending-reschedule'].includes(norm.status) && existing.status !== norm.status) ||
+            (norm.rescheduleCount > (Number(existing.rescheduleCount) || 0));
+
+          if (cloudHasCustomerRequest) {
+            const changes = await dbRun(
+              `UPDATE reservations SET status = ?, cancellationReason = ?, refundStatus = ?, rescheduleCount = ? WHERE id = ?`,
+              [norm.status, norm.cancellationReason, norm.refundStatus, norm.rescheduleCount, id]
+            );
+            summary.reservationsUpdated += changes;
+          }
+        }
+      }
+
+      if (newlyMergedForEmail.length > 0) {
+        notifyCachedReservationChanges(localResRows, newlyMergedForEmail);
+      }
+    }
+
+    // 3. OTHER TABLES: Insert ONLY new rows (INSERT OR IGNORE keeps all local records safe)
+    if (Array.isArray(cloudQueueRes.data)) {
+      for (const q of cloudQueueRes.data) {
+        summary.otherAdded += await dbRun(
+          `INSERT OR IGNORE INTO queue (id, customerName, contactNumber, partySize, status, queueNumber, notes, arrivalTime) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [q.id, q.customerName || q.customername || 'Guest', q.contactNumber || q.contactnumber || '', q.partySize ?? q.partysize ?? 1, q.status || 'waiting', q.queueNumber ?? q.queuenumber ?? 0, q.notes || '', q.arrivalTime || q.arrivaltime || new Date().toISOString()]
+        );
+      }
+    }
+
+    if (Array.isArray(cloudEventsRes.data)) {
+      for (const e of cloudEventsRes.data) {
+        summary.otherAdded += await dbRun(
+          `INSERT OR IGNORE INTO events (id, title, date, type, description, duration, registrationLink, bracketLink, minParticipants, maxParticipants, slotsFull, attachments, allowReservations, reservationTableCount, caterWalkIns, walkInTableCount, isCancelled, cancelReason, createdAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [e.id, e.title, e.date || '', e.type || 'Event', e.description || '', e.duration || 'Whole Day', e.registrationLink || e.registrationlink || '', e.bracketLink || e.bracketlink || '', e.minParticipants ?? e.minparticipants ?? 8, e.maxParticipants ?? e.maxparticipants ?? 32, (e.slotsFull || e.slotsfull) ? 1 : 0, typeof e.attachments === 'string' ? e.attachments : JSON.stringify(e.attachments || []), (e.allowReservations ?? e.allowreservations ?? 1) ? 1 : 0, e.reservationTableCount ?? e.reservationtablecount ?? 4, (e.caterWalkIns ?? e.caterwalkins ?? 1) ? 1 : 0, e.walkInTableCount ?? e.walkintablecount ?? 4, (e.isCancelled || e.iscancelled) ? 1 : 0, e.cancelReason || e.cancelreason || null, e.createdAt || e.createdat || new Date().toISOString()]
+        );
+      }
+    }
+
+    if (Array.isArray(cloudAnnRes.data)) {
+      for (const a of cloudAnnRes.data) {
+        summary.otherAdded += await dbRun(
+          `INSERT OR IGNORE INTO announcements (id, title, content, type, isActive, expiresAt, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [a.id, a.title, a.content, a.type || 'info', (a.isActive ?? a.isactive ?? 1) ? 1 : 0, a.expiresAt || a.expiresat || null, a.createdAt || a.createdat || new Date().toISOString()]
+        );
+      }
+    }
+
+    if (Array.isArray(cloudClosedRes.data)) {
+      for (const c of cloudClosedRes.data) {
+        summary.otherAdded += await dbRun(
+          `INSERT OR IGNORE INTO closed_dates (id, closed_date, type, day_of_week, reason, is_full_day, open_time, close_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [c.id, c.closed_date || '', c.type || 'specific', c.day_of_week ?? 0, c.reason || '', c.is_full_day ? 1 : 0, c.open_time || null, c.close_time || null]
+        );
+      }
+    }
+
+    if (Array.isArray(cloudPromosRes.data)) {
+      for (const p of cloudPromosRes.data) {
+        summary.otherAdded += await dbRun(
+          `INSERT OR IGNORE INTO promo_codes (id, code, discount_percent, description, is_active, is_limited_uses, max_usage, usage_count, start_date, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [p.id, p.code, p.discount_percent ?? 0, p.description || '', p.is_active ? 1 : 0, p.is_limited_uses ? 1 : 0, p.max_usage ?? 0, p.usage_count ?? 0, p.start_date || null, p.expires_at || null]
+        );
+        await dbRun(`UPDATE promo_codes SET usage_count = MAX(usage_count, ?) WHERE id = ?`, [Number(p.usage_count) || 0, p.id]);
+      }
+    }
+
+    if (Array.isArray(cloudInvRes.data)) {
+      for (const i of cloudInvRes.data) {
+        summary.otherAdded += await dbRun(
+          `INSERT OR IGNORE INTO inventory (id, name, category, price, stock, isActive) VALUES (?, ?, ?, ?, ?, ?)`,
+          [i.id, i.name, i.category || 'General', i.price ?? 0, i.stock ?? 0, (i.isActive ?? i.isactive ?? 1) ? 1 : 0]
+        );
+      }
+    }
+
+    if (Array.isArray(cloudFeedRes.data)) {
+      for (const f of cloudFeedRes.data) {
+        const tagsStr = typeof f.tags === 'string' ? f.tags : JSON.stringify(f.tags || []);
+        summary.otherAdded += await dbRun(
+          `INSERT OR IGNORE INTO feedback (id, customerName, contactInfo, feedbackType, comment, reservationId, tags, date, status, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [f.id, f.customerName || f.customername || 'Guest', f.contactInfo || f.contactinfo || null, f.feedbackType || f.feedbacktype || 'other', f.comment || '', f.reservationId || f.reservationid || null, tagsStr, f.date || new Date().toISOString(), f.status || 'pending', f.notes || null]
+        );
+      }
+    }
+
+    if (Array.isArray(cloudLostRes.data)) {
+      for (const l of cloudLostRes.data) {
+        summary.otherAdded += await dbRun(
+          `INSERT OR IGNORE INTO lost_and_found (id, itemName, description, foundDate, status, image, claimedBy, claimedDate, isArchived) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [l.id, l.itemName || l.itemname || '', l.description || '', l.foundDate || l.founddate || null, l.status || 'found', l.image || null, l.claimedBy || l.claimedby || null, l.claimedDate || l.claimeddate || null, (l.isArchived || l.isarchived) ? 1 : 0]
+        );
+      }
+    }
+
+    if (Array.isArray(cloudWatchRes.data)) {
+      for (const w of cloudWatchRes.data) {
+        summary.otherAdded += await dbRun(
+          `INSERT OR IGNORE INTO watchlist (id, name, reason, description, status, evidenceLink, dateAdded, resolvedDate, isArchived) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [w.id, w.name || '', w.reason || 'other', w.description || '', w.status || 'active', w.evidenceLink || w.evidencelink || null, w.dateAdded || w.dateadded || null, w.resolvedDate || w.resolveddate || null, (w.isArchived || w.isarchived) ? 1 : 0]
+        );
+      }
+    }
+
+    if (Array.isArray(cloudHistRes.data)) {
+      for (const h of cloudHistRes.data) {
+        const ordersStr = typeof h.orders === 'string' ? h.orders : JSON.stringify(h.orders || []);
+        summary.otherAdded += await dbRun(
+          `INSERT OR IGNORE INTO session_history (id, customerName, tableId, tableName, startTime, endTime, durationMinutes, totalAmount, amountPaid, orders, status, closureReason, partySize, occupancyRate)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [h.id, h.customerName || h.customername || 'Guest', h.tableId || h.tableid || '', h.tableName || h.tablename || '', h.startTime || h.starttime || null, h.endTime || h.endtime || null, h.durationMinutes ?? h.durationminutes ?? 0, h.totalAmount ?? h.totalamount ?? 0, h.amountPaid ?? h.amountpaid ?? 0, ordersStr, h.status || 'completed', h.closureReason || h.closurereason || null, h.partySize ?? h.partysize ?? 2, h.occupancyRate ?? h.occupancyrate ?? 0.5]
+        );
+      }
+    }
+
+    if (Array.isArray(cloudActRes.data)) {
+      for (const act of cloudActRes.data) {
+        const metaStr = typeof act.metadata === 'string' ? act.metadata : (act.metadata ? JSON.stringify(act.metadata) : null);
+        summary.otherAdded += await dbRun(
+          `INSERT OR IGNORE INTO activities (id, type, description, timestamp, metadata) VALUES (?, ?, ?, ?, ?)`,
+          [act.id, act.type || 'admin_action', act.description || '', act.timestamp || new Date().toISOString(), metaStr]
+        );
+      }
+    }
+
+    if (Array.isArray(cloudReceiptsRes.data)) {
+      for (const er of cloudReceiptsRes.data) {
+        summary.otherAdded += await dbRun(
+          `INSERT OR IGNORE INTO e_receipts (id, receipt_no, reservation_id, customer_name, customer_email, customer_phone, table_id, table_name, play_start_time, play_end_time, duration_minutes, table_rate, table_charge, overtime_charge, fnb_charge, subtotal, discount_amount, total_amount, amount_paid, balance_due, payment_method, payment_status, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [er.id, er.receipt_no, er.reservation_id || null, er.customer_name || 'Guest', er.customer_email || null, er.customer_phone || null, er.table_id || null, er.table_name || '', er.play_start_time || null, er.play_end_time || null, er.duration_minutes ?? 0, er.table_rate ?? 0, er.table_charge ?? 0, er.overtime_charge ?? 0, er.fnb_charge ?? 0, er.subtotal ?? 0, er.discount_amount ?? 0, er.total_amount ?? 0, er.amount_paid ?? 0, er.balance_due ?? 0, er.payment_method || 'cash', er.payment_status || 'paid', er.created_at || new Date().toISOString()]
+        );
+      }
+    }
+
+    if (Array.isArray(cloudCmsRes.data)) {
+      for (const row of cloudCmsRes.data) {
+        const k = row.keyname || row.key_name || row.keyName;
+        const v = row.settingvalue ?? row.setting_value ?? row.settingValue;
+        if (k && v !== undefined && v !== null) {
+          await dbRun(`INSERT OR IGNORE INTO cms (keyName, settingValue) VALUES (?, ?)`, [k, String(v)]);
+        }
+      }
+    }
+
+    if (Array.isArray(cloudSettingsRes.data)) {
+      for (const row of cloudSettingsRes.data) {
+        const k = row.key_name || row.keyName || row.keyname;
+        const v = row.setting_value ?? row.settingValue ?? row.settingvalue;
+        if (k && v !== undefined && v !== null) {
+          await dbRun(`INSERT OR IGNORE INTO systemSettings (keyName, settingValue) VALUES (?, ?)`, [k, String(v)]);
+        }
+      }
+    }
+
+    const totalChanges =
+      summary.tablesAdded +
+      summary.tablesUpdated +
+      summary.tablesPushedToCloud +
+      summary.reservationsAdded +
+      summary.reservationsUpdated +
+      summary.otherAdded;
+
+    res.json({
+      message: totalChanges > 0
+        ? `Synced ${totalChanges} change(s) (${summary.tablesPushedToCloud} table update(s) pushed to Cloud).`
+        : 'Local and Cloud databases are already up to date.',
+      totalChanges,
+      summary,
+    });
+  } catch (err) {
+    console.error('❌ Cloud pull failed:', err.message);
+    res.status(500).json({ error: 'Failed to fetch new data from Cloud: ' + err.message });
+  }
+});
 
 app.post('/api/lost-and-found', (req, res) => {
   const { id, itemName, description, foundDate, status, image, claimedBy, claimedDate } = req.body;
@@ -1292,15 +1711,15 @@ app.post('/api/tables', (req, res) => {
   if (!name) return res.status(400).json({ error: 'Enter a table name.' });
   const dateAdded = new Date().toISOString();
   db.run(
-    `INSERT INTO tables (id, name, status, isActive, dateAdded)
-     SELECT ?, CASE WHEN EXISTS (SELECT 1 FROM tables) THEN ? ELSE 'Table 1' END, ?, ?, ?
+    `INSERT INTO tables (id, name, status, isActive, dateAdded, updatedAt)
+     SELECT ?, CASE WHEN EXISTS (SELECT 1 FROM tables) THEN ? ELSE 'Table 1' END, ?, ?, ?, ?
      WHERE NOT EXISTS (SELECT 1 FROM tables WHERE trim(name) = ? COLLATE NOCASE)
        AND (? <> 'Table 1' OR NOT EXISTS (SELECT 1 FROM tables))`,
-    [id, name, status || 'available', isActive ? 1 : 0, dateAdded, name, name],
+    [id, name, status || 'available', isActive ? 1 : 0, dateAdded, dateAdded, name, name],
     function (err) {
       if (err) return res.status(500).json({ error: err.message });
       if (!this.changes) return res.status(409).json({ error: name === 'Table 1' ? 'Table 1 is reserved for the original table.' : 'This table name already exists.' });
-      db.get('SELECT id, name, dateAdded FROM tables WHERE id = ?', [id], (readError, row) => {
+      db.get('SELECT id, name, dateAdded, updatedAt FROM tables WHERE id = ?', [id], (readError, row) => {
         if (readError) return res.status(500).json({ error: readError.message });
         res.status(201).json(row);
       });
@@ -1322,6 +1741,8 @@ app.put('/api/tables/:id', (req, res) => {
   }
   if (maintenanceReason !== undefined) { updates.push("maintenanceReason = ?"); params.push(maintenanceReason); }
   if (updates.length === 0) return res.json({ message: "Nothing to update" });
+  updates.push("updatedAt = ?");
+  params.push(new Date().toISOString());
   params.push(req.params.id);
   let guard = '';
   if (name !== undefined) {

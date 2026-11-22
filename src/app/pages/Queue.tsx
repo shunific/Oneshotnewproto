@@ -57,68 +57,143 @@ export function Queue() {
   const called = queue.filter((q: any) => q.status === 'called');
 
   // ========================================================================
-  // 🧠 NEURAL NETWORK AI INTEGRATION
+  // 🧠 NEURAL NETWORK AI INTEGRATION (NEXT PERSON + PER-PERSON ESTIMATES)
   // ========================================================================
-  const [aiWaitTime, setAiWaitTime] = useState<string>('Analyzing data...');
+  const [aiSessionMinutes, setAiSessionMinutes] = useState<number>(45);
   const [isAILoading, setIsAILoading] = useState(true);
 
   const fetchAIPrediction = useCallback(async (signal: AbortSignal) => {
-    if(reservationMoveError||heldTableIds.size){setAiWaitTime('Check transfer recovery');setIsAILoading(false);return;}
+    if (reservationMoveError || heldTableIds.size) {
+      setIsAILoading(false);
+      return;
+    }
     setIsAILoading(true);
     try {
       const activeTables = tables.filter((t: any) => t.status === 'occupied' && t.session);
-      const freeTables = availableTables.length;
-      
-      // 1. If there are enough free tables for everyone waiting PLUS a new walk-in:
-      if (freeTables > waiting.length) {
-        setAiWaitTime("Available Now");
-        setIsAILoading(false);
-        return;
-      }
-
       const currentOccupancyRate = activeTables.length / Math.max(1, tables.length);
       const nextPartySize = waiting[0]?.partySize || 2;
-      
-      // 2. Send local venue state to the Brain.js Neural Network
+
+      // Send local venue state to the Brain.js Neural Network to get predicted session duration
       const res = await localFetch('http://localhost:3001/api/ai/predict-wait-time', {
         method: 'POST',
         signal,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          partySize: nextPartySize, 
+        body: JSON.stringify({
+          partySize: nextPartySize,
           hasOrders: true, // Conservative prediction assumes customers will order
           completedReservations: completedReservationStats(reservations),
           currentOccupancyRate
         })
       });
-      
+
       const data = await res.json();
       if (signal.aborted) return;
-      
-      // 3. Find the table finishing closest to now
-      const elapsedTimes = activeTables.map((t: any) => differenceInMinutes(Date.now(), new Date(t.session.startTime)));
-      const maxElapsed = Math.max(...elapsedTimes, 0); 
-      
-      // 4. Calculate Base Wait (AI Prediction minus Time Already Spent)
-      let baseWait = Math.max(0, data.estimatedMinutes - maxElapsed);
-      
-      // 5. Add Queue Friction (Only for people who don't fit in the free tables)
-      const unseatedQueue = Math.max(0, waiting.length - freeTables);
-      const totalWait = baseWait + (unseatedQueue * 10) + 2; // +2 mins for physical table cleanup
-      
-      if (totalWait < 60) {
-        setAiWaitTime(`~${Math.round(totalWait)} mins`);
-      } else {
-        setAiWaitTime(`~${Math.floor(totalWait / 60)}h ${Math.round(totalWait % 60)}m`);
-      }
-      
+
+      const predicted = Number(data?.estimatedMinutes);
+      setAiSessionMinutes(Number.isFinite(predicted) && predicted >= 15 ? predicted : 45);
     } catch (e) {
       if (signal.aborted) return;
       console.error("AI Predict Error:", e);
-      setAiWaitTime("~45 mins (Fallback)"); 
+      setAiSessionMinutes(45);
     }
     setIsAILoading(false);
-  }, [tables, availableTables, heldTableIds, reservationMoveError, reservations, waiting]);
+  }, [tables, heldTableIds, reservationMoveError, reservations, waiting]);
+
+  useEffect(() => {
+    const request = new AbortController();
+    void fetchAIPrediction(request.signal);
+    return () => request.abort();
+  }, [fetchAIPrediction]);
+
+  const formatWaitLabel = (mins: number) => {
+    const rounded = Math.round(mins);
+    if (rounded <= 0) return 'Available Now';
+    if (rounded < 60) return `~${rounded} mins`;
+    const hrs = Math.floor(rounded / 60);
+    const rem = rounded % 60;
+    return rem > 0 ? `~${hrs}h ${rem}m` : `~${hrs}h`;
+  };
+
+  // Compute individual wait time per queued person (FCFS) + next-person wait for the top banner
+  const { nextPersonWait, perPersonWaits } = useMemo(() => {
+    if (reservationMoveError || heldTableIds.size) {
+      return {
+        nextPersonWait: 'Check transfer recovery',
+        perPersonWaits: waiting.map(() => 'Check transfer recovery'),
+      };
+    }
+
+    // 1. Build a list of when each playable table becomes free (in minutes from now)
+    const tableFreeAt: number[] = [];
+
+    for (let i = 0; i < availableTables.length; i++) {
+      tableFreeAt.push(0); // Free right now
+    }
+
+    const activeTables = (tables || []).filter(
+      (t: any) => t.isActive && t.status === 'occupied' && t.session && !heldTableIds.has(t.id)
+    );
+
+    activeTables.forEach((t: any) => {
+      const start = new Date(t.session.startTime);
+      const isOpen = Boolean(t.session.isOpenTime || !t.session.durationMinutes);
+      const elapsed = Math.max(0, differenceInMinutes(now, start));
+
+      if (!isOpen) {
+        const end = addMinutes(start, Number(t.session.durationMinutes));
+        const remaining = differenceInMinutes(end, now);
+        if (remaining > 0) {
+          tableFreeAt.push(remaining + 2); // +2 mins table cleanup
+          return;
+        }
+      }
+
+      // Open time or overtime: use Brain.js predicted session length minus elapsed time
+      const aiRemaining = Math.max(15, aiSessionMinutes - elapsed);
+      tableFreeAt.push(aiRemaining + 2);
+    });
+
+    if (tableFreeAt.length === 0) {
+      return {
+        nextPersonWait: 'No tables open',
+        perPersonWaits: waiting.map(() => 'No tables open'),
+      };
+    }
+
+    // 2. Checked-in priority reservations claim the earliest open tables ahead of walk-ins
+    const priorityCheckedIn = (reservations || []).filter((r: any) => r.status === 'checked-in');
+    priorityCheckedIn.forEach((r: any) => {
+      tableFreeAt.sort((a, b) => a - b);
+      const earliest = tableFreeAt[0];
+      const resDurationMins = (Number(r.durationHours) || 1) * 60;
+      tableFreeAt[0] = earliest + resDurationMins + 2;
+    });
+
+    // 3. If no one is waiting, show the wait time for the next arriving walk-in
+    if (waiting.length === 0) {
+      tableFreeAt.sort((a, b) => a - b);
+      return {
+        nextPersonWait: formatWaitLabel(tableFreeAt[0]),
+        perPersonWaits: [],
+      };
+    }
+
+    // 4. Assign each queued customer their own individual wait estimate
+    const waits: string[] = [];
+    const sessionTurnaround = Math.max(15, aiSessionMinutes) + 2;
+
+    waiting.forEach(() => {
+      tableFreeAt.sort((a, b) => a - b);
+      const myWait = tableFreeAt[0];
+      waits.push(formatWaitLabel(myWait));
+      tableFreeAt[0] = myWait + sessionTurnaround;
+    });
+
+    return {
+      nextPersonWait: waits[0] || 'Available Now',
+      perPersonWaits: waits,
+    };
+  }, [tables, availableTables, heldTableIds, reservationMoveError, reservations, waiting, aiSessionMinutes, now]);
 
   useEffect(() => {
     const request = new AbortController();
@@ -450,7 +525,7 @@ export function Queue() {
             </h2>
           </div>
 
-          {/* 🟢 NEURAL NETWORK PREDICTION BADGE */}
+          {/* 🟢 NEURAL NETWORK PREDICTION BADGE (NEXT PERSON ONLY) */}
           <div className="bg-gradient-to-r from-emerald-950/60 to-emerald-900/20 border border-emerald-800/50 rounded-2xl p-5 mb-4 flex items-center justify-between shadow-[0_0_20px_rgba(16,185,129,0.05)] relative overflow-hidden group">
             <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl transition-all group-hover:bg-emerald-500/20" />
             <div className="flex items-center gap-4 relative z-10">
@@ -463,12 +538,14 @@ export function Queue() {
               </div>
               <div>
                 <span className="text-[10px] text-emerald-400/80 font-black uppercase tracking-widest block mb-0.5">Neural Network AI</span>
-                <span className="text-sm text-emerald-100 font-semibold tracking-tight">Estimated Wait Time</span>
+                <span className="text-sm text-emerald-100 font-semibold tracking-tight">
+                  {waiting.length > 0 ? `Next Up: ${waiting[0].customerName}` : 'Estimated Wait (Next Walk-in)'}
+                </span>
               </div>
             </div>
             <div className="text-right relative z-10 flex flex-col items-end">
-              <span className={`${reservationMoveError||heldTableIds.size?'text-base text-amber-300':'text-3xl text-emerald-400'} font-black`}>
-                {reservationMoveError||heldTableIds.size?'Check transfer recovery':aiWaitTime}
+              <span className={`${reservationMoveError || heldTableIds.size ? 'text-base text-amber-300' : 'text-3xl text-emerald-400'} font-black`}>
+                {reservationMoveError || heldTableIds.size ? 'Check transfer recovery' : nextPersonWait}
               </span>
               <div className="flex flex-col items-end mt-1 space-y-1.5">
                 {/* 🟢 THE NEAREST END TIME BADGE */}
@@ -532,9 +609,27 @@ export function Queue() {
                     )}
                   </div>
 
-                  {/* Arrival time */}
-                  <div className="hidden sm:block text-right flex-none">
-                    <p className="text-xs text-neutral-600">{format(new Date(item.arrivalTime), 'h:mm a')}</p>
+                  {/* Individual Wait Estimate & Arrival Time */}
+                  <div className="text-right flex-none flex flex-col items-end gap-1">
+                    {(() => {
+                      const est = perPersonWaits[index] || 'Calculating...';
+                      const isNow = est === 'Available Now';
+                      return (
+                        <span
+                          className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border flex items-center gap-1 whitespace-nowrap ${
+                            isNow
+                              ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                              : 'bg-amber-500/10 text-amber-400 border-amber-500/25'
+                          }`}
+                        >
+                          <Clock size={11} />
+                          {est}
+                        </span>
+                      );
+                    })()}
+                    <p className="hidden sm:block text-[11px] text-neutral-600">
+                      {format(new Date(item.arrivalTime), 'h:mm a')}
+                    </p>
                   </div>
 
                   {/* Actions */}
