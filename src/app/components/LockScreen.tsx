@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Lock, Eye, EyeOff, ShieldAlert, User } from 'lucide-react';
+import { Lock, Eye, EyeOff, ShieldAlert, User, LogIn } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 
 import { authRequest } from '../utils/localApi';
@@ -16,6 +16,7 @@ export function LockScreen({ onUnlock }: { onUnlock: () => void }) {
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState('');
+  const [sessionExpired, setSessionExpired] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
   // 🛡️ THE REACT INTERCEPTOR: Block malicious browser bypasses
@@ -35,6 +36,15 @@ export function LockScreen({ onUnlock }: { onUnlock: () => void }) {
     };
   }, []);
 
+  const handleReturnToSignIn = () => {
+    sessionStorage.removeItem('oneshot_staff_auth');
+    sessionStorage.removeItem('oneshot_admin_auth');
+    sessionStorage.removeItem('oneshot_auth_expiry');
+    sessionStorage.removeItem('oneshot_is_locked');
+    sessionStorage.removeItem('oneshot_staff_profile');
+    window.location.replace('/');
+  };
+
   const handleUnlock = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -45,15 +55,43 @@ export function LockScreen({ onUnlock }: { onUnlock: () => void }) {
       const cleanUsername = (username || '').trim().toLowerCase();
 
       if (administrator && !cleanUsername) throw new Error('Enter an administrator username.');
-      await authRequest('unlock', administrator ? { username: cleanUsername, password } : { password });
+
+      try {
+        await authRequest('unlock', administrator ? { username: cleanUsername, password } : { password });
+      } catch (unlockError: any) {
+        // Server restarted or 8-hour cookie session expired -> 401
+        if (unlockError?.status === 401) {
+          if (!administrator && staffProfile?.username) {
+            const loginResult = await authRequest('login', {
+              username: staffProfile.username,
+              password,
+            });
+            if (loginResult?.requiresPasswordChange || loginResult?.requiresPinBackup) {
+              handleReturnToSignIn();
+              return;
+            }
+            if (originalIdentity && loginResult?.user?.id && loginResult.user.id !== originalIdentity) {
+              handleReturnToSignIn();
+              return;
+            }
+          } else {
+            if (mounted.current) setSessionExpired(true);
+            throw new Error('This session expired or the server restarted. Sign in again to continue.');
+          }
+        } else {
+          throw unlockError;
+        }
+      }
 
       if (!mounted.current) return;
       if (originalIdentity && identity.current !== originalIdentity) return;
+      setSessionExpired(false);
       setPassword('');
       setUsername('');
       onUnlock();
-    } catch (failure) {
+    } catch (failure: any) {
       if (!mounted.current) return;
+      if (failure?.status === 401) setSessionExpired(true);
       setError(failure instanceof Error ? failure.message : 'Unable to verify password. Please try again.');
       setPassword('');
     } finally {
@@ -73,7 +111,7 @@ export function LockScreen({ onUnlock }: { onUnlock: () => void }) {
 
         <h1 className="text-2xl font-black text-white tracking-tight mb-1">Terminal Locked</h1>
 
-        {/* 🟢 FIXED: Display who specifically locked the terminal */}
+        {/* 🟢 Display who specifically locked the terminal */}
         <p className="text-sm text-neutral-400 mb-8 flex items-center gap-1.5">
           <User size={14} /> Locked by <strong className="text-neutral-200">@{staffProfile?.username}</strong>
         </p>
@@ -109,6 +147,17 @@ export function LockScreen({ onUnlock }: { onUnlock: () => void }) {
           <button type="submit" disabled={!password || isProcessing} className="w-full bg-rose-600 hover:bg-rose-500 disabled:bg-neutral-800 text-white font-bold py-3.5 rounded-xl transition-all shadow-lg shadow-rose-900/20">
             {isProcessing ? 'Verifying...' : 'Unlock Terminal'}
           </button>
+
+          {sessionExpired && (
+            <button
+              type="button"
+              onClick={handleReturnToSignIn}
+              className="w-full flex items-center justify-center gap-2 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded-xl text-xs font-semibold transition-colors border border-neutral-700"
+            >
+              <LogIn size={14} /> Return to Sign In
+            </button>
+          )}
+
           <button type="button" disabled={isProcessing} onClick={() => { setAdministrator(!administrator); setPassword(''); setUsername(''); setError(''); }} className="w-full text-sm text-neutral-300 underline disabled:opacity-50">
             {administrator ? 'Use my password' : 'Use administrator credentials'}
           </button>
