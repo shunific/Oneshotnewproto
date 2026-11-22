@@ -1,6 +1,6 @@
 import { clockLabel } from '../utils/clockDisplay';
 import { exportCsv } from '../utils/csvExport.js';
-import { recordedLegacyBill, sessionFinancials, summarizeSessionFinancials } from '../utils/sessionFinancials.js';
+import { recordedLegacyBill, sessionBillCents, sessionFinancials, summarizeSessionFinancials } from '../utils/sessionFinancials.js';
 import { useState, useMemo } from 'react';
 import {
   AreaChart, Area, LineChart, Line,
@@ -107,7 +107,7 @@ export function Analytics() {
         const dayHist = filteredHistory.filter((h: any) => isSameDay(new Date(h.startTime || h.endTime), day));
         return {
           dayLabel: format(day, 'MMM dd'),
-          revenue: (summarizeSessionFinancials(dayHist).billedCents + dayHist.reduce((total: number, h: any) => total + (recordedLegacyBill(h) ?? 0), 0)) / 100,
+          revenue: sessionBillCents(dayHist) / 100,
           sessions: dayHist.length
         };
       });
@@ -158,7 +158,7 @@ export function Analytics() {
     }
     return [...indexed.values()].map((table: any) => {
       const tHist = filteredHistory.filter((h: any) => h.tableId === table.id);
-      const totalRev = summarizeSessionFinancials(tHist).billedCents / 100;
+      const totalRev = sessionBillCents(tHist) / 100;
       return {
         id: table.id,
         status: table.status,
@@ -182,7 +182,7 @@ export function Analytics() {
     }
     return { count, cents };
   }, [filteredHistory]);
-  const totalRevenue = (finances.billedCents + recordedHistory.cents) / 100;
+  const totalRevenue = sessionBillCents(filteredHistory) / 100;
   const activeFloor = tables.filter((table: any) => table.isActive !== false && table.isActive !== 0 && table.status !== 'maintenance');
   const avgOccupancy = activeFloor.length ? Math.round(activeFloor.filter((table: any) => table.status === 'occupied').length / activeFloor.length * 100) : 0;
   const peakHour = peakHours.reduce((max, d) => d.sessions > max.sessions ? d : max, peakHours[0]) || { hour: 'N/A', sessions: 0 };

@@ -1,5 +1,5 @@
 import { clockLabel } from '../utils/clockDisplay';
-import { recordedLegacyBill, summarizeSessionFinancials } from '../utils/sessionFinancials.js';
+import { sessionBillCents, summarizeSessionFinancials } from '../utils/sessionFinancials.js';
 import { localFetch } from '../utils/localApi';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { PesoSign } from '../components/PesoSign';
-import { format, isToday, isTomorrow, subDays, eachDayOfInterval, isSameDay } from 'date-fns';
+import { format, isToday, isTomorrow, subDays, eachDayOfInterval, isSameDay, startOfDay, endOfDay } from 'date-fns';
 
 export function AdminDashboard() {
   const { 
@@ -104,8 +104,28 @@ export function AdminDashboard() {
   const activeAnn       = announcements.filter((a: any) => a.isActive).length;
   const upcomingClosed  = closedDates.filter((c: any) => new Date(c.date) >= new Date()).length;
   
-  const finances = summarizeSessionFinancials(sessionHistory || []);
-  const totalRevenue = finances.billedCents / 100;
+  // The Reporting Analytics panel is a 7-day view, so its money matches the
+  // Analytics tab's default range and the same session-bill definition.
+  const analyticsRange = useMemo(() => {
+    const end = endOfDay(new Date());
+    const start = startOfDay(subDays(end, 6));
+    return { start, end };
+  }, []);
+  const analyticsHistory = useMemo(
+    () => (sessionHistory || []).filter((h: any) => {
+      const at = new Date(h.startTime || h.endTime);
+      return at >= analyticsRange.start && at <= analyticsRange.end;
+    }),
+    [sessionHistory, analyticsRange]
+  );
+  const finances = summarizeSessionFinancials(analyticsHistory);
+  const totalRevenue = sessionBillCents(analyticsHistory) / 100;
+  // The header figure stays lifetime, as before; only the 7-day Reporting
+  // Analytics panel is scoped to the Analytics tab's default range.
+  const lifetimeRevenue = useMemo(
+    () => summarizeSessionFinancials(sessionHistory || []).billedCents / 100,
+    [sessionHistory]
+  );
 
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
@@ -150,19 +170,16 @@ export function AdminDashboard() {
     const end = new Date();
     const start = subDays(end, 6);
     const days = eachDayOfInterval({ start, end });
-    const history = sessionHistory || [];
     return days.map(day => {
-      const daySessions = history.filter((h: any) => isSameDay(new Date(h.endTime || h.startTime), day));
-      const legacyCents = daySessions.reduce((sum: number, row: any) => sum + (recordedLegacyBill(row) ?? 0), 0);
-      const rev = (summarizeSessionFinancials(daySessions).billedCents + legacyCents) / 100;
+      const daySessions = analyticsHistory.filter((h: any) => isSameDay(new Date(h.startTime || h.endTime), day));
       return {
         label: format(day, "EEE"),
         date: format(day, "MMM dd"),
-        revenue: rev,
+        revenue: sessionBillCents(daySessions) / 100,
         sessions: daySessions.length
       };
     });
-  }, [sessionHistory]);
+  }, [analyticsHistory]);
 
   const todayCompletedSessions = useMemo(() => {
     return (sessionHistory || []).filter((h: any) => isToday(new Date(h.endTime || h.startTime))).length;
@@ -297,7 +314,7 @@ export function AdminDashboard() {
             <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 px-3 py-2 rounded-xl flex-shrink-0">
               <PesoSign size={15} className="text-emerald-500" />
               <div>
-                <p className="text-xs font-black text-emerald-500">₱{totalRevenue.toLocaleString()}</p>
+                <p className="text-xs font-black text-emerald-500">₱{lifetimeRevenue.toLocaleString()}</p>
 
               </div>
             </div>

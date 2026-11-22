@@ -40,3 +40,12 @@ export const recordedLegacyBill = (record) => {
   const paid = exactCents(record.amountPaid);
   return bill === null || paid === null || paid > bill ? null : bill;
 };
+
+// One definition of "session bills" for every report: receipt-backed totals plus
+// the recorded money of sessions written before receipts existed. The dashboard
+// overview and the Analytics tab both use this so their figures always agree.
+export function sessionBillCents(records) {
+  const rows = Array.isArray(records) ? records : [];
+  return summarizeSessionFinancials(rows).billedCents
+    + rows.reduce((total, row) => total + (recordedLegacyBill(row) ?? 0), 0);
+}
