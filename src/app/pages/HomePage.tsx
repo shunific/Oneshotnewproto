@@ -37,10 +37,10 @@ type Section = 'home' | 'reservations' | 'events' | 'rates' | 'about' | 'feedbac
 
 export function HomePage() {
   const navigate = useNavigate();
-  const { 
+ const { 
     siteConfig, announcements, tables, reservations, events, 
     closedDates, reservationTerms, rates, addReservation, cancelReservation, 
-    forceFullSync, addFeedback, applyPromoCode,
+    forceFullSync, refreshLiveMonitor, addFeedback, applyPromoCode,
     queue
   } = useAppContext() as any;
 
@@ -223,6 +223,128 @@ export function HomePage() {
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [receiptImg, setReceiptImg] = useState<string | null>(null);
   const [showHelpModal, setShowHelpModal] = useState(false);
+
+  const [showQueueFloater, setShowQueueFloater] = useState(false);
+  const lastTableUpdateRef = useRef<string | null>(null);
+  const liveSyncRef = useRef(refreshLiveMonitor || forceFullSync);
+
+  useEffect(() => {
+    liveSyncRef.current = refreshLiveMonitor || forceFullSync;
+  }, [refreshLiveMonitor, forceFullSync]);
+
+  // 🟢 Egress-Saver: Checks ONLY 1 timestamp column every 5 seconds.
+  // Only pulls full table data if updated_at actually changed.
+  useEffect(() => {
+    const checkTableChanges = async () => {
+      if (document.visibilityState !== 'visible') return;
+      try {
+        const { data, error } = await publicSupabase
+          .from('tables')
+          .select('updated_at')
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (error || !data?.updated_at) return;
+
+        if (lastTableUpdateRef.current === null) {
+          lastTableUpdateRef.current = data.updated_at;
+        } else if (data.updated_at !== lastTableUpdateRef.current) {
+          lastTableUpdateRef.current = data.updated_at;
+          if (typeof liveSyncRef.current === 'function') {
+            void liveSyncRef.current();
+          }
+        }
+      } catch {
+        // Ignore silent offline hiccups
+      }
+    };
+
+    void checkTableChanges();
+    const interval = setInterval(checkTableChanges, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // 🟢 Live Running Tables (Computed locally every 1s using _now and startTime)
+  const runningTables = useMemo(() => {
+    return (tables || [])
+      .filter((t: any) => (t.isActive === true || t.isActive === 1 || t.isactive === 1 || t.isactive === true) && t.status === 'occupied' && t.session?.startTime)
+      .sort((a: any, b: any) => a.name.localeCompare(b.name, undefined, { numeric: true }))
+      .map((t: any) => {
+        const startDate = new Date(t.session.startTime);
+        const isOpen = Boolean(t.session.isOpenTime || !t.session.durationMinutes);
+        const durationMins = Number(t.session.durationMinutes) || 0;
+
+        const elapsedSecs = Math.max(0, Math.floor((_now.getTime() - startDate.getTime()) / 1000));
+        const eHrs = Math.floor(elapsedSecs / 3600);
+        const eMins = Math.floor((elapsedSecs % 3600) / 60);
+        const eSecs = elapsedSecs % 60;
+        const elapsedText = eHrs > 0
+          ? `${eHrs}h ${String(eMins).padStart(2, '0')}m ${String(eSecs).padStart(2, '0')}s`
+          : `${eMins}m ${String(eSecs).padStart(2, '0')}s`;
+
+        const estMinsLeft = isOpen
+          ? (completedHistory.typicalBookedMinutes
+              ? openTimeRemaining(t.session.startTime, _now, completedHistory.typicalBookedMinutes)
+              : 45)
+          : Math.max(0, differenceInMinutes(addMinutes(startDate, durationMins), _now));
+
+        const endDate = isOpen ? addMinutes(_now, estMinsLeft) : addMinutes(startDate, durationMins);
+
+        return {
+          id: t.id,
+          name: t.name,
+          isOpen,
+          startText: format(startDate, 'h:mm a'),
+          endText: format(endDate, 'h:mm a'),
+          elapsedText,
+          estLeftText: isOpen
+            ? `~${Math.round(estMinsLeft)}m est. left`
+            : estMinsLeft <= 0
+              ? 'Ending soon'
+              : `${Math.round(estMinsLeft)}m left`,
+        };
+      });
+  }, [tables, _now, completedHistory]);
+
+  // 🟢 Possible Reservations starting within the next 60 minutes
+  const upcomingNextHourReservations = useMemo(() => {
+    const activeNames = new Set(
+      (tables || [])
+        .filter((t: any) => t.status === 'occupied' && t.session?.customerName)
+        .map((t: any) => String(t.session.customerName).trim().toLowerCase())
+    );
+
+    return (reservations || [])
+      .filter((r: any) => {
+        if (!['pending', 'confirmed', 'checked-in'].includes(r.status)) return false;
+        if (r.customerName && activeNames.has(String(r.customerName).trim().toLowerCase())) return false;
+        const resStart = new Date(r.date);
+        if (r.timeSlot) {
+          const [h, m] = r.timeSlot.split(':').map(Number);
+          resStart.setHours(h || 0, m || 0, 0, 0);
+        }
+        const minsUntil = differenceInMinutes(resStart, _now);
+        return minsUntil >= -15 && minsUntil <= 60;
+      })
+      .map((r: any) => {
+        const resStart = new Date(r.date);
+        if (r.timeSlot) {
+          const [h, m] = r.timeSlot.split(':').map(Number);
+          resStart.setHours(h || 0, m || 0, 0, 0);
+        }
+        const minsUntil = differenceInMinutes(resStart, _now);
+        const tableName = (tables || []).find((t: any) => t.id === r.tableId)?.name || 'Any Table';
+        return {
+          id: r.id,
+          tableName,
+          timeText: format(resStart, 'h:mm a'),
+          durationHours: r.durationHours || 1,
+          statusText: minsUntil <= 0 ? 'Arriving now' : `In ${minsUntil}m`,
+        };
+      })
+      .sort((a: any, b: any) => a.timeText.localeCompare(b.timeText));
+  }, [reservations, tables, _now]);
 
 
   useEffect(() => {
@@ -825,6 +947,73 @@ export function HomePage() {
     };
   };
 
+ // 🟢 Live table session helper (2m Last Play -> <30m Half-Hour -> 30m+ Full-Hour Conversion)
+  const getLiveTableSessionInfo = useCallback((table: any) => {
+    if (!table || table.status !== 'occupied' || !table.session?.startTime) return null;
+
+    const start = new Date(table.session.startTime);
+    const isOpen = Boolean(table.session.isOpenTime || !table.session.durationMinutes);
+    const durationMins = Number(table.session.durationMinutes) || 0;
+    const scheduledEnd = isOpen ? null : addMinutes(start, durationMins);
+
+    const isOvertime = !isOpen && scheduledEnd !== null && _now > scheduledEnd;
+    const overtimeMins = isOvertime && scheduledEnd ? Math.max(1, differenceInMinutes(_now, scheduledEnd)) : 0;
+
+    const fullHours = Math.floor(overtimeMins / 60);
+    const remMins = overtimeMins % 60;
+    const isLastPlayBuffer = isOvertime && overtimeMins <= 2;
+    const isAutoExtendedOvertime = isOvertime && (remMins >= 30 || (fullHours > 0 && remMins <= 2));
+
+    const billedOvertimeHours = !isOvertime || isLastPlayBuffer
+      ? 0
+      : isAutoExtendedOvertime
+        ? (remMins >= 30 ? fullHours + 1 : fullHours)
+        : fullHours + 0.5;
+
+    // Live wait estimate fallback (used for open time or <30m overtime)
+    const historyEst = completedHistory.typicalBookedMinutes
+      ? openTimeRemaining(table.session.startTime, _now, completedHistory.typicalBookedMinutes)
+      : 45;
+
+    let estMinsLeft = 0;
+    let blockedUntil: Date;
+
+    if (isOpen) {
+      estMinsLeft = Math.max(15, historyEst);
+      blockedUntil = addMinutes(_now, estMinsLeft);
+    } else if (isLastPlayBuffer) {
+      blockedUntil = addMinutes(scheduledEnd!, 2);
+      estMinsLeft = Math.max(1, differenceInMinutes(blockedUntil, _now));
+    } else if (isAutoExtendedOvertime) {
+      // 🟢 30m+ overtime converts to a full hour extension and locks online bookings until that hour ends
+      const convertedEnd = addMinutes(scheduledEnd!, billedOvertimeHours * 60);
+      estMinsLeft = Math.max(0, differenceInMinutes(convertedEnd, _now));
+      blockedUntil = addMinutes(convertedEnd, 2);
+    } else if (isOvertime) {
+      // 🟢 3–29m overtime: half-hour rate + reverts to live wait estimate
+      const halfHourEnd = addMinutes(scheduledEnd!, billedOvertimeHours * 60);
+      const minsToHalfHour = Math.max(1, differenceInMinutes(halfHourEnd, _now));
+      estMinsLeft = Math.max(minsToHalfHour, historyEst);
+      blockedUntil = addMinutes(_now, estMinsLeft);
+    } else {
+      estMinsLeft = Math.max(0, differenceInMinutes(scheduledEnd!, _now));
+      blockedUntil = addMinutes(scheduledEnd!, 2);
+    }
+
+    return {
+      start,
+      scheduledEnd,
+      isOpen,
+      isOvertime,
+      isLastPlayBuffer,
+      overtimeMins,
+      billedOvertimeHours,
+      isAutoExtendedOvertime,
+      estMinsLeft,
+      blockedUntil,
+    };
+  }, [_now, completedHistory]);
+
   const bookingSettings = { rates, reservations, events, closedDates, maxHours: reservationTerms?.maxHours };
   const capacity = (day: Date | null, time: string, id: string, excludeId?: string) =>
     slotCapacity(day, time, venueTables.find(t => t.id === id), bookingSettings, excludeId);
@@ -845,6 +1034,25 @@ export function HomePage() {
   const validateTimeSlotHelper = (time: string, duration: number, day: Date | null, tableId: string | null, excludeId?: string) => {
     if (!day || !time || !(duration > 0)) return 'invalid';
     if (!tableId && !excludeId) return 'no_table';
+
+    // 🟢 Safeguard: Block slot if an on-site player extended or went overtime into this hour
+    if (isToday(day) && tableId) {
+      const targetTable = venueTables.find((t: any) => t.id === tableId);
+      const liveInfo = getLiveTableSessionInfo(targetTable);
+      if (liveInfo) {
+        const [h, m] = time.split(':').map(Number);
+        const requestedStart = new Date(day);
+        requestedStart.setHours(h || 0, m || 0, 0, 0);
+        const { startMins } = windowForDate(day);
+        if (((h || 0) * 60 + (m || 0)) < startMins) {
+          requestedStart.setDate(requestedStart.getDate() + 1);
+        }
+        if (requestedStart < liveInfo.blockedUntil) {
+          return 'active_conflict';
+        }
+      }
+    }
+
     const eligible = tableId ? venueTables.filter(t => t.id === tableId) : venueTables;
     return eligible.some(t => capacity(day,time,t.id,excludeId) >= duration) ? 'valid' : 'unavailable';
   };
@@ -881,8 +1089,41 @@ export function HomePage() {
     setShowTermsModal(false);
     setIsVerifying(true);
     setConfirmingPayment(true);
-    
+
     try {
+      const reservationDate = new Date(selectedDate!);
+      const [hours, minutes] = resForm.timeSlot.split(':').map(Number);
+      reservationDate.setHours(hours, minutes, 0, 0);
+      const { startMins } = windowForDate(selectedDate);
+      if ((hours * 60 + minutes) < startMins) {
+        reservationDate.setDate(reservationDate.getDate() + 1);
+      }
+
+      // 🟢 Final live safeguard before saving: re-check table in case player just extended on-site
+      if (isToday(selectedDate!) && selectedTableId) {
+        const { data: freshTable } = await publicSupabase
+          .from('tables')
+          .select('status, sessionData, sessiondata')
+          .eq('id', selectedTableId)
+          .maybeSingle();
+
+        const rawSession = freshTable?.sessionData || freshTable?.sessiondata;
+        const liveSession = typeof rawSession === 'string' ? JSON.parse(rawSession) : rawSession;
+        const liveInfo = getLiveTableSessionInfo(
+          freshTable ? { status: freshTable.status, session: liveSession } : null
+        );
+
+        if (liveInfo && reservationDate < liveInfo.blockedUntil) {
+          void forceFullSync?.();
+          setToastMsg({
+            title: 'Time Slot Just Taken',
+            desc: `The player on this table just extended (busy until ~${format(liveInfo.blockedUntil, 'h:mm a')}). Please choose another time or table.`,
+            type: 'error',
+          });
+          return;
+        }
+      }
+
       let finalReceiptUrl = null;
       if (receiptFile) {
         try {
@@ -897,10 +1138,6 @@ export function HomePage() {
           console.warn("Storage upload note:", uploadErr);
         }
       }
-
-      const reservationDate = new Date(selectedDate!);
-      const [hours, minutes] = resForm.timeSlot.split(':').map(Number);
-      reservationDate.setHours(hours, minutes, 0, 0);
 
       const bookingEmail = (resForm.email && resForm.email.trim()) 
         ? resForm.email.trim() 
@@ -1396,26 +1633,7 @@ export function HomePage() {
                       )}
                     </div>
                     
-                    {/* 🟢 Live Queue Dynamic Wait Time Status */}
-                    <div className="bg-gradient-to-r from-emerald-950/60 to-emerald-900/20 border border-emerald-800/50 rounded-2xl p-5 shadow-inner relative overflow-hidden group">
-                      <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl transition-all group-hover:bg-emerald-500/20" />
-                      <div className="relative z-10 flex items-start gap-4">
-                        <div className="w-10 h-10 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center flex-shrink-0 mt-1 shadow-inner">
-                          <Sparkles size={18} className="text-emerald-400 animate-pulse" />
-                        </div>
-                        <div className="flex-1">
-                          <h4 className="text-sm font-black text-emerald-400 mb-1">Smart Queue Neural Network</h4>
-                          <p className="text-xs text-emerald-100/70 leading-relaxed mb-3 pr-2">
-                            The estimate uses the table and queue information loaded with this page, along with completed bookings. Reload the page for an updated estimate.
-                          </p>
-                          <div className="bg-emerald-950/80 border border-emerald-800/60 rounded-xl p-3 shadow-lg">
-                            <span className="text-[9px] text-neutral-400 uppercase tracking-wider font-bold block mb-1">Estimated Wait</span>
-                            <span className="text-sm font-black text-emerald-400 tracking-wide flex items-center gap-1.5"><Clock size={12}/> {dynamicWaitTime}</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
+                    
                     {/* Get in Touch Card */}
                     <div className="bg-neutral-900/90 border border-neutral-800 rounded-2xl p-6 space-y-3.5 shadow-sm">
                       <p className="text-xs font-bold text-neutral-400 uppercase tracking-wider">Get in Touch</p>
@@ -1751,18 +1969,42 @@ export function HomePage() {
                                             <span className="text-purple-400 text-[10px] font-bold ml-auto flex items-center gap-1">View Details &rarr;</span>
                                           </div>
                                         )}
-                                        {isActiveWalkIn && targetTable.session && (
-                                          <div className="flex items-center gap-3 bg-amber-950/20 p-2.5 rounded-lg border border-amber-900/30">
-                                            <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-                                            <span className="text-amber-200 text-xs font-semibold">Walk-in Playing</span>
-                                            <span className="text-amber-500/70 text-[10px] font-medium ml-auto">
-                                              {targetTable.session.isOpenTime 
-                                                ? 'Open Time (No set end)' 
-                                                : `Until ${format(addMinutes(new Date(targetTable.session.startTime), targetTable.session.durationMinutes || 60), 'h:mm a')}`
-                                              }
-                                            </span>
-                                          </div>
-                                        )}
+                                        {isActiveWalkIn && targetTable.session && (() => {
+                                          const liveInfo = getLiveTableSessionInfo(targetTable);
+                                          if (!liveInfo) return null;
+                                          return (
+                                            <div className={`flex items-center gap-3 p-2.5 rounded-lg border ${
+                                              liveInfo.isOvertime
+                                                ? 'bg-rose-950/30 border-rose-800/50'
+                                                : 'bg-amber-950/20 border-amber-900/30'
+                                            }`}>
+                                              <div className={`w-2 h-2 rounded-full animate-pulse ${
+                                                liveInfo.isOvertime ? 'bg-rose-500' : 'bg-amber-400'
+                                              }`} />
+                                              <span className={`text-xs font-semibold ${
+                                                liveInfo.isOvertime ? 'text-rose-200' : 'text-amber-200'
+                                              }`}>
+                                                {liveInfo.isLastPlayBuffer
+                                              ? 'Last Play (Finishing Soon)'
+                                              : liveInfo.isAutoExtendedOvertime
+                                                ? `Auto-Extended (${liveInfo.billedOvertimeHours}h Overtime)`
+                                                : liveInfo.isOvertime
+                                                  ? `Walk-in Overtime (+${liveInfo.overtimeMins}m)`
+                                                  : 'Walk-in Playing'}
+                                              </span>
+                                              <span className={`text-[10px] font-medium ml-auto text-right ${
+                                                liveInfo.isOvertime ? 'text-rose-300' : 'text-amber-500/80'
+                                              }`}>
+                                                {liveInfo.isOpen
+                                                  ? `Open Time (Est. ~${Math.round(liveInfo.estMinsLeft)}m)`
+                                                  : liveInfo.isOvertime
+                                                    ? `Live Est. ~${Math.round(liveInfo.estMinsLeft)}m (Until ~${format(liveInfo.blockedUntil, 'h:mm a')})`
+                                                    : `Until ${format(liveInfo.scheduledEnd!, 'h:mm a')}`
+                                                }
+                                              </span>
+                                            </div>
+                                          );
+                                        })()}
                                         {tableRes.map((r: any) => {
                                           const rStart = new Date(r.date);
                                           const [rH, rM] = r.timeSlot.split(':').map(Number);
@@ -1952,7 +2194,7 @@ export function HomePage() {
                                 {timeValidation === 'active_conflict' && (
                                   <div className="text-[10px] text-amber-400 font-bold flex items-start gap-1.5 bg-amber-950/20 p-2.5 rounded border border-amber-900/30 mt-2">
                                     <Clock size={14} className="flex-shrink-0 mt-0.5" /> 
-                                    <span>A walk-in customer is currently playing on this table. Please allow buffer time.</span>
+                                    <span>This table is currently occupied, extended, or in overtime during your chosen hour. Please pick a later time or another table.</span>
                                   </div>
                                 )}
                                 {timeValidation === 'valid' && (
@@ -3410,6 +3652,209 @@ export function HomePage() {
           </motion.div>
         )}
       </AnimatePresence>
+      {/* 🟢 FLOATING SMART QUEUE & LIVE TABLES BUBBLE (VISIBLE ON ALL SECTIONS) */}
+      <div className="fixed bottom-5 right-5 z-[90] flex flex-col items-end">
+        <AnimatePresence>
+          {showQueueFloater && (
+            <motion.div
+              initial={{ opacity: 0, y: 16, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 16, scale: 0.95 }}
+              transition={{ duration: 0.2 }}
+              className={`mb-3 w-[calc(100vw-2.5rem)] sm:w-[390px] max-h-[75vh] rounded-3xl border shadow-2xl overflow-hidden flex flex-col ${
+                isLightMode
+                  ? 'bg-white border-slate-200 text-slate-900'
+                  : 'bg-neutral-950 border-neutral-800 text-neutral-100'
+              }`}
+            >
+              {/* Header */}
+              <div className={`px-5 py-4 border-b flex items-center justify-between ${
+                isLightMode ? 'bg-emerald-50/70 border-slate-200' : 'bg-neutral-900/80 border-neutral-800'
+              }`}>
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center">
+                    <Sparkles size={15} className="text-emerald-400 animate-pulse" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black text-emerald-500 uppercase tracking-wider">Smart Queue Live</h4>
+                    <p className={`text-[10px] font-medium flex items-center gap-1.5 ${isLightMode ? 'text-slate-500' : 'text-neutral-400'}`}>
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      Current Time: <span className="font-mono font-bold">{format(_now, 'h:mm:ss a')}</span>
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowQueueFloater(false)}
+                  className="p-1.5 rounded-full text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
+                  aria-label="Close Live Queue Panel"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              {/* Body */}
+              <div className="p-4 space-y-4 overflow-y-auto hide-scrollbar">
+                {/* Neural Network Queue Estimate */}
+                <div className={`grid grid-cols-2 gap-2.5`}>
+                  <div className={`rounded-2xl p-3 border ${
+                    isLightMode ? 'bg-emerald-50 border-emerald-200' : 'bg-emerald-950/40 border-emerald-800/50'
+                  }`}>
+                    <span className="text-[9px] uppercase tracking-wider font-bold text-neutral-400 block mb-0.5">Queue Wait Est.</span>
+                    <span className="text-sm font-black text-emerald-400 flex items-center gap-1.5">
+                      <Clock size={13} /> {dynamicWaitTime}
+                    </span>
+                    <span className="text-[10px] text-neutral-500 block mt-0.5">
+                      {(queue || []).filter((q: any) => q.status === 'waiting').length} walk-in(s) waiting
+                    </span>
+                  </div>
+                  <div className={`rounded-2xl p-3 border ${
+                    isLightMode ? 'bg-slate-50 border-slate-200' : 'bg-neutral-900 border-neutral-800'
+                  }`}>
+                    <span className="text-[9px] uppercase tracking-wider font-bold text-neutral-400 block mb-0.5">Floor Status</span>
+                    <span className="text-sm font-black flex items-center gap-1.5">
+                      <Table2 size={13} className="text-sky-400" /> {runningTables.length} Running
+                    </span>
+                    <span className="text-[10px] text-neutral-500 block mt-0.5">
+                      {venueTables.filter((t: any) => t.status === 'available').length} of {venueTables.length} free
+                    </span>
+                  </div>
+                </div>
+
+                {/* Running Tables List */}
+                <div className="space-y-2">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-neutral-400 flex items-center justify-between">
+                    <span>Running Tables ({runningTables.length})</span>
+                    <span className="text-[9px] text-emerald-500/80 font-mono">Live Local Timer</span>
+                  </p>
+
+                  {runningTables.length === 0 ? (
+                    <div className={`rounded-xl p-4 text-center border text-xs ${
+                      isLightMode ? 'bg-slate-50 border-slate-200 text-slate-500' : 'bg-neutral-900/50 border-neutral-800 text-neutral-500'
+                    }`}>
+                      No tables running right now — walk-ins can play immediately!
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {runningTables.map((t: any) => (
+                        <div
+                          key={t.id}
+                          className={`rounded-xl p-3 border text-xs space-y-2 ${
+                            isLightMode ? 'bg-slate-50 border-slate-200' : 'bg-neutral-900/80 border-neutral-800'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold flex items-center gap-1.5">
+                              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                              {t.name}
+                            </span>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                              t.isOpen
+                                ? 'bg-sky-500/15 text-sky-400 border border-sky-500/30'
+                                : 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
+                            }`}>
+                              {t.estLeftText}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-3 gap-1.5 text-[10px]">
+                            <div className={`rounded-lg p-1.5 ${isLightMode ? 'bg-white border border-slate-200' : 'bg-neutral-950 border border-neutral-800/80'}`}>
+                              <span className="text-neutral-500 block">Start</span>
+                              <span className="font-mono font-bold">{t.startText}</span>
+                            </div>
+                            <div className={`rounded-lg p-1.5 ${isLightMode ? 'bg-white border border-slate-200' : 'bg-neutral-950 border border-neutral-800/80'}`}>
+                              <span className="text-neutral-500 block">{t.isOpen ? 'Est. End' : 'End'}</span>
+                              <span className="font-mono font-bold">{t.isOpen ? `~${t.endText}` : t.endText}</span>
+                            </div>
+                            <div className={`rounded-lg p-1.5 ${isLightMode ? 'bg-white border border-slate-200' : 'bg-neutral-950 border border-neutral-800/80'}`}>
+                              <span className="text-neutral-500 block">Playing</span>
+                              <span className="font-mono font-bold text-emerald-400">{t.elapsedText}</span>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Possible Reservations Within the Next Hour */}
+                <div className="space-y-2">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-neutral-400 flex items-center gap-1.5">
+                    <Calendar size={11} className="text-sky-400" />
+                    Upcoming Reservations
+                  </p>
+
+                  {upcomingNextHourReservations.length === 0 ? (
+                    <div className={`rounded-xl p-3 text-center border text-[11px] ${
+                      isLightMode ? 'bg-slate-50 border-slate-200 text-slate-500' : 'bg-neutral-900/50 border-neutral-800 text-neutral-500'
+                    }`}>
+                      No reservations scheduled within the next hour.
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {upcomingNextHourReservations.map((r: any) => (
+                        <div
+                          key={r.id}
+                          className={`flex items-center justify-between rounded-xl px-3 py-2 border text-xs ${
+                            isLightMode ? 'bg-sky-50/70 border-sky-200' : 'bg-sky-950/20 border-sky-900/40'
+                          }`}
+                        >
+                          <div>
+                            <p className="font-bold text-sky-400">{r.tableName}</p>
+                            <p className="text-[10px] text-neutral-400">{r.timeText} · {r.durationHours}h slot</p>
+                          </div>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-400 border border-sky-500/30">
+                            {r.statusText}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Footer CTA */}
+              <div className={`px-4 py-3 border-t flex items-center justify-between gap-2 ${
+                isLightMode ? 'bg-slate-50 border-slate-200' : 'bg-neutral-900/60 border-neutral-800'
+              }`}>
+                <span className="text-[10px] text-neutral-500">Syncs automatically on table change</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowQueueFloater(false);
+                    handleNavClick('reservations');
+                  }}
+                  className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition-colors"
+                >
+                  Book Table
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Floating Trigger Bubble */}
+        <button
+          type="button"
+          onClick={() => setShowQueueFloater(prev => !prev)}
+          className="group flex items-center gap-2.5 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-3 rounded-full shadow-2xl shadow-emerald-950/60 border border-emerald-400/30 transition-all hover:scale-105 cursor-pointer"
+        >
+          <span className="relative flex h-2.5 w-2.5">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-200 opacity-75" />
+            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-white" />
+          </span>
+          <Sparkles size={15} className="text-emerald-100" />
+          <div className="text-left leading-tight">
+            <span className="block text-[9px] uppercase tracking-widest font-bold text-emerald-100/90">Live Queue</span>
+            <span className="block text-xs font-black whitespace-nowrap">{dynamicWaitTime}</span>
+          </div>
+          {runningTables.length > 0 && (
+            <span className="ml-1 px-2 py-0.5 rounded-full bg-black/25 text-[10px] font-bold">
+              {runningTables.length} active
+            </span>
+          )}
+        </button>
+      </div>
 
     </div>
   );
