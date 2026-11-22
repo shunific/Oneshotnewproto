@@ -1,8 +1,6 @@
 const fail = (status, message) => Object.assign(new Error(message), { status });
 
 // Shared Last Play / courtesy decision window after the booked end.
-// Matches the 2-minute buffer shown in the Customer Help & Rates policy.
-// (Change to 5 if you prefer a 5-minute buffer—just update the Help modal & paper to match.)
 export const EXTENSION_DECISION_MINUTES = 2;
 export const EXTENSION_DECISION_SECONDS = EXTENSION_DECISION_MINUTES * 60;
 // Kept so older callers that still import the previous name keep working.
@@ -15,13 +13,13 @@ function money(value, status = 409) {
   return Math.round(value * 100);
 }
 
-// 🟢 Half-Hour / Full-Hour Overtime Conversion:
-// - 0 to EXTENSION_DECISION_MINUTES (2m): ₱0 (Last Play Buffer)
-// - 3 to 29 mins past booked end: 0.5 hr (50% of overtime rate)
-// - 30 to 60 mins past booked end: 1.0 hr (100% of overtime rate; completes the 1-hour extension)
-// - Pattern repeats for additional hours (61–89m -> 1.5h, 90–120m -> 2.0h, etc.)
-export function computeOvertimeTier(rawPastEndMins, overtimeRateCents) {
-  if (!Number.isFinite(rawPastEndMins) || rawPastEndMins <= EXTENSION_DECISION_MINUTES) {
+// 🟢 Tiered Overtime Billing (Overtime Bill Only — No Extra Regular Hour):
+// - 0 to 2:00 past booked end: ₱0 (Last Play Buffer)
+// - 2:01 to 29:59 past booked end: 0.5 hr (50% of overtime rate)
+// - 30:00 to 60:00 past booked end: 1.0 hr (100% of overtime rate; customer may finish the rest of the hour)
+// - Pattern repeats if they stay past the hour (60:01–89:59 -> 1.5h, 90:00–120:00 -> 2.0h)
+export function computeOvertimeTier(rawPastEndSecs, overtimeRateCents) {
+  if (!Number.isFinite(rawPastEndSecs) || rawPastEndSecs <= EXTENSION_DECISION_SECONDS) {
     return {
       overtimeMins: 0,
       billedOvertimeHours: 0,
@@ -31,20 +29,201 @@ export function computeOvertimeTier(rawPastEndMins, overtimeRateCents) {
     };
   }
 
-  const fullCompletedHours = Math.floor((rawPastEndMins - 1) / 60);
-  const minInHour = ((rawPastEndMins - 1) % 60) + 1; // 1..60
-  const isAutoExtendedOvertime = minInHour >= 30;
+  const fullCompletedHours = Math.floor((rawPastEndSecs - 1) / 3600);
+  const secsIntoHour = ((rawPastEndSecs - 1) % 3600) + 1; // 1..3600
+  const isAutoExtendedOvertime = secsIntoHour >= 1800; // 30:00+ into the overtime hour
   const billedOvertimeHours = fullCompletedHours + (isAutoExtendedOvertime ? 1 : 0.5);
   const overtimeCents = Math.round(billedOvertimeHours * overtimeRateCents);
 
   return {
-    overtimeMins: rawPastEndMins,
+    overtimeMins: Math.ceil(rawPastEndSecs / 60),
     billedOvertimeHours,
     overtimeCents,
     isAutoExtendedOvertime,
     overtimeLabel: billedOvertimeHours === 0.5
       ? 'Half-Hour Overtime'
-      : `Full ${billedOvertimeHours}h Overtime Extension`,
+      : `Full ${billedOvertimeHours}h Overtime (Play Remaining Time)`,
+  };
+}
+
+// 🟢 Shared Timer State for Table Monitor, Live Monitor, and AppContext Auto-End
+export function getSessionTimerState(session, nowMs, nextReservationMs = null) {
+  if (!session || !session.startTime) {
+    return {
+      mode: 'idle',
+      displayMs: 0,
+      percentLeft: 0,
+      isOpenTime: false,
+      isGrace: false,
+      isOvertime: false,
+      isOvertimeExtension: false,
+      cappedByReservation: false,
+      reservationCutoffMs: null,
+      effectiveEndMs: null,
+      billedOvertimeHours: 0,
+      overtimeLabel: '',
+    };
+  }
+
+  const startMs = Date.parse(session.startTime);
+  const elapsedMs = Math.max(0, nowMs - startMs);
+
+  // Open Time (counting UP)
+  if (session.isOpenTime || session.durationMinutes === null || session.durationMinutes === undefined) {
+    return {
+      mode: 'open',
+      displayMs: elapsedMs,
+      percentLeft: 100,
+      isOpenTime: true,
+      isGrace: false,
+      isOvertime: false,
+      isOvertimeExtension: false,
+      cappedByReservation: false,
+      reservationCutoffMs: null,
+      effectiveEndMs: null,
+      billedOvertimeHours: 0,
+      overtimeLabel: '',
+    };
+  }
+
+  const totalMs = Number(session.durationMinutes) * 60000;
+  const scheduledEndMs = startMs + totalMs;
+  const remainingMs = scheduledEndMs - nowMs;
+  const decisionMs = EXTENSION_DECISION_MINUTES * 60000;
+
+  // 1. Normal booked duration counting DOWN
+  if (remainingMs > 0) {
+    return {
+      mode: 'fixed',
+      displayMs: remainingMs,
+      percentLeft: Math.max(0, Math.min(100, (remainingMs / totalMs) * 100)),
+      isOpenTime: false,
+      isGrace: false,
+      isOvertime: false,
+      isOvertimeExtension: false,
+      cappedByReservation: false,
+      reservationCutoffMs: null,
+      effectiveEndMs: scheduledEndMs,
+      billedOvertimeHours: 0,
+      overtimeLabel: '',
+    };
+  }
+
+  // 🟢 Overtime already waived by Admin -> no longer tagged as overtime
+  if (session.overtimeWaived) {
+    return {
+      mode: 'overtime-waived',
+      displayMs: 0,
+      percentLeft: 0,
+      isOpenTime: false,
+      isGrace: false,
+      isOvertime: false,
+      isOvertimeExtension: false,
+      isOvertimeWaived: true,
+      cappedByReservation: false,
+      reservationCutoffMs: null,
+      effectiveEndMs: scheduledEndMs,
+      billedOvertimeHours: 0,
+      overtimeLabel: 'Overtime Waived',
+    };
+  }
+
+  // 2. Last Play 2-minute buffer counting DOWN
+  if (remainingMs > -decisionMs) {
+    return {
+      mode: 'grace',
+      displayMs: Math.max(0, decisionMs + remainingMs),
+      percentLeft: 0,
+      isOpenTime: false,
+      isGrace: true,
+      isOvertime: false,
+      isOvertimeExtension: false,
+      cappedByReservation: false,
+      reservationCutoffMs: null,
+      effectiveEndMs: scheduledEndMs + decisionMs,
+      billedOvertimeHours: 0,
+      overtimeLabel: 'Last Play Buffer',
+    };
+  }
+
+  // 3. Past Last Play buffer -> Overtime or Overtime Extension Countdown
+  const rawPastEndMs = Math.max(0, nowMs - scheduledEndMs);
+  const rawPastEndSecs = Math.floor(rawPastEndMs / 1000);
+  const fullCompletedHours = Math.floor((Math.max(1, rawPastEndSecs) - 1) / 3600);
+  const secsIntoHour = ((Math.max(1, rawPastEndSecs) - 1) % 3600) + 1;
+  const currentHourEndMs = scheduledEndMs + (fullCompletedHours + 1) * 3600000;
+
+  // Check if an upcoming reservation falls within this overtime hour
+  const validResMs = Number.isFinite(nextReservationMs) && nextReservationMs >= scheduledEndMs
+    ? nextReservationMs
+    : null;
+  const cappedByReservation = Boolean(validResMs && validResMs <= currentHourEndMs);
+  const effectiveEndMs = cappedByReservation ? validResMs : currentHourEndMs;
+
+  // Reservation time reached -> must auto-end here (billed strictly at reservation time)
+  if (cappedByReservation && nowMs >= validResMs) {
+    const cappedSecs = Math.max(0, Math.floor((validResMs - scheduledEndMs) / 1000));
+    const tier = computeOvertimeTier(cappedSecs, 100);
+    return {
+      mode: 'reservation-ended',
+      displayMs: 0,
+      percentLeft: 0,
+      isOpenTime: false,
+      isGrace: false,
+      isOvertime: true,
+      isOvertimeExtension: true,
+      cappedByReservation: true,
+      reservationCutoffMs: validResMs,
+      effectiveEndMs: validResMs,
+      billedOvertimeHours: tier.billedOvertimeHours,
+      overtimeLabel: tier.overtimeLabel,
+    };
+  }
+
+  // 30:00+ into overtime hour -> Flip to Countdown ("30 mins left", capped by reservation if any)
+  if (secsIntoHour >= 1800) {
+    const leftMs = Math.max(0, effectiveEndMs - nowMs);
+    const windowStartMs = scheduledEndMs + fullCompletedHours * 3600000 + 1800000;
+    const windowSpanMs = Math.max(1, effectiveEndMs - windowStartMs);
+    const billedHours = fullCompletedHours + 1;
+
+    return {
+      mode: 'overtime-extension',
+      displayMs: leftMs,
+      percentLeft: Math.max(0, Math.min(100, (leftMs / windowSpanMs) * 100)),
+      isOpenTime: false,
+      isGrace: false,
+      isOvertime: true,
+      isOvertimeExtension: true,
+      cappedByReservation,
+      reservationCutoffMs: cappedByReservation ? validResMs : null,
+      effectiveEndMs,
+      billedOvertimeHours: billedHours,
+      overtimeLabel: cappedByReservation
+        ? `${billedHours}h Overtime (Ends for Res.)`
+        : `${billedHours}h Overtime Ext.`,
+    };
+  }
+
+  // 2:01 to 29:59 -> Half-Hour Overtime counting UP
+  const upMs = fullCompletedHours === 0
+    ? Math.max(0, rawPastEndMs - decisionMs)
+    : rawPastEndMs - fullCompletedHours * 3600000;
+  const billedHours = fullCompletedHours + 0.5;
+
+  return {
+    mode: 'overtime',
+    displayMs: upMs,
+    percentLeft: 0,
+    isOpenTime: false,
+    isGrace: false,
+    isOvertime: true,
+    isOvertimeExtension: false,
+    cappedByReservation,
+    reservationCutoffMs: cappedByReservation ? validResMs : null,
+    effectiveEndMs,
+    billedOvertimeHours: billedHours,
+    overtimeLabel: billedHours === 0.5 ? 'Half-Hour Overtime' : `${billedHours}h Overtime`,
   };
 }
 
@@ -110,16 +289,16 @@ export function calculateSessionBill(session, now, useProrated, waiveOvertime = 
   if (!Number.isSafeInteger(elapsedMins)) throw fail(409, 'Stored session elapsed time is invalid.');
 
   const elapsedBilling = session.isOpenTime || booked === null || useProrated;
-  const rawPastEndSecs = elapsedBilling ? 0 : Math.floor((now - start - booked * 60000) / 1000);
-  const rawPastEndMins = rawPastEndSecs > 0 ? Math.ceil(rawPastEndSecs / 60) : 0;
+  const rawPastEndSecs = elapsedBilling ? 0 : Math.max(0, Math.floor((now - start - booked * 60000) / 1000));
 
   const overtimeTier = elapsedBilling
     ? { overtimeMins: 0, billedOvertimeHours: 0, overtimeCents: 0, isAutoExtendedOvertime: false, overtimeLabel: '' }
-    : computeOvertimeTier(rawPastEndMins, overtimeRateCents);
+    : computeOvertimeTier(rawPastEndSecs, overtimeRateCents);
 
-  const overtimeMins = overtimeTier.overtimeMins;
-  const billedOvertimeHours = waiveOvertime ? 0 : overtimeTier.billedOvertimeHours;
-  const overtimeCents = waiveOvertime ? 0 : overtimeTier.overtimeCents;
+ const effectiveWaive = Boolean(waiveOvertime || session.overtimeWaived);
+  const overtimeMins = effectiveWaive ? 0 : overtimeTier.overtimeMins;
+  const billedOvertimeHours = effectiveWaive ? 0 : overtimeTier.billedOvertimeHours;
+  const overtimeCents = effectiveWaive ? 0 : overtimeTier.overtimeCents;
 
   const billableMins = Math.max(60, elapsedMins);
   const tableCents = pricingVersion === 2
@@ -148,8 +327,8 @@ export function calculateSessionBill(session, now, useProrated, waiveOvertime = 
     overtimeMins,
     billedOvertimeHours,
     isAutoExtendedOvertime: overtimeTier.isAutoExtendedOvertime,
-    overtimeLabel: waiveOvertime ? 'Overtime Waived (Admin)' : overtimeTier.overtimeLabel,
-    overtimeWaived: Boolean(waiveOvertime && overtimeTier.overtimeCents > 0),
+    overtimeLabel: effectiveWaive ? 'Overtime Waived (Admin)' : overtimeTier.overtimeLabel,
+    overtimeWaived: Boolean(effectiveWaive && overtimeTier.overtimeCents > 0),
     tableCents,
     overtimeCents,
     fnbCents,
@@ -172,7 +351,7 @@ export function previewSessionBill(session, nowMillis, useProrated = false, waiv
     totalDue: bill.totalCents / 100,
     balance: bill.balanceCents / 100,
     refundDue: bill.refundCents / 100,
-    isOvertime: bill.overtimeMins > 0,
+    isOvertime: !bill.overtimeWaived && bill.overtimeMins > 0,
     overtimeMins: bill.overtimeMins,
     billedOvertimeHours: bill.billedOvertimeHours,
     isAutoExtendedOvertime: bill.isAutoExtendedOvertime,

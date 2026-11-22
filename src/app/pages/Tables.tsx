@@ -4,7 +4,7 @@ import { useLocation } from 'react-router';
 import { isOvertimeTable } from '../utils/tableAvailability.js';
 import { loadOpenTimeAvailability, reviewedOpenTimeLimit, openTimeStop } from '../utils/openTimeAvailability.js';
 import { PendingQueueActions } from '../components/PendingQueueActions';
-import { EXTENSION_DECISION_MINUTES, previewSessionBill, selectWalkInStartPricing } from '../../../session-billing.mjs';
+import { EXTENSION_DECISION_MINUTES, previewSessionBill, selectWalkInStartPricing, getSessionTimerState } from '../../../session-billing.mjs';
 
 // 🟢 Web Audio API Session End Chime (Works offline, cross-platform)
 const playSessionEndSound = () => {
@@ -90,24 +90,61 @@ const PayMethodBtn = ({ value, current, icon: Icon, label, onChange }: { value: 
 export function Tables() {
   const { 
     tables = [], queue, reservations, assignTable, extendSession, migrateSession, checkoutTable, freeTable,
+    setSessionOvertimeWaived,
     inventory, submitTableOrders, voidTableOrder, retryPendingOrder, addInventoryItem, updateInventoryItem,
     staffProfile, rates, reservationTerms, staffUsers, hashPassword,
     addSessionHistory, addActivity, addWatchlistItem,
     seatQueueCustomer, removeFromQueue, updateReservationStatus, forceFullSync,
     pendingReservationMoves, reservationMoveError, heldTableIds, availableTables, recoverReservationTransfer, refreshReservationTransfers,
-    siteConfig
+    siteConfig, lastAutoEndedReceipt, clearLastAutoEndedReceipt
   } = useAppContext() as any;
+
+  // Declared up front so hooks, nearEndTables, modals, and TableCard all see it safely
+  const getNextReservation = (tableId: string, excludeId?: string, excludeCustomerName?: string) => {
+    const now = new Date();
+    const excludeNameNorm = excludeCustomerName?.trim().toLowerCase();
+    const upcoming = (reservations || [])
+      .filter((r: any) => {
+        if (r.id === excludeId || r.tableId !== tableId) return false;
+        if (!['pending', 'confirmed', 'checked-in'].includes(r.status)) return false;
+        if (excludeNameNorm && r.customerName?.trim().toLowerCase() === excludeNameNorm) return false;
+        const rDate = new Date(r.date);
+        const [h, m] = (r.timeSlot || '00:00').split(':').map(Number);
+        rDate.setHours(h, m, 0, 0);
+        return rDate > addMinutes(now, -15) && isSameDay(rDate, now);
+      })
+      .sort((a: any, b: any) => {
+        const aDate = new Date(a.date);
+        const [ah, am] = (a.timeSlot || '00:00').split(':').map(Number);
+        aDate.setHours(ah, am, 0, 0);
+        const bDate = new Date(b.date);
+        const [bh, bm] = (b.timeSlot || '00:00').split(':').map(Number);
+        bDate.setHours(bh, bm, 0, 0);
+        return aDate.getTime() - bDate.getTime();
+      });
+
+    if (!upcoming.length) return null;
+
+    const r = upcoming[0];
+    const rDate = new Date(r.date);
+    const [h, m] = (r.timeSlot || '00:00').split(':').map(Number);
+    rDate.setHours(h, m, 0, 0);
+
+    return { id: r.id, date: rDate, customerName: r.customerName, timeSlot: r.timeSlot };
+  };
 
   // 🟢 Audio alert & Toast Notifications for active tables
   const notifiedSessionsRef = useRef<Set<string>>(new Set());
   const overtimeStartedRef = useRef<Set<string>>(new Set());
   const milestoneNotifiedRef = useRef<Set<string>>(new Set());
+  const otExtNotifiedRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const interval = setInterval(() => {
       const now = new Date();
       (tables || []).forEach((t: any) => {
         if (t.status === "occupied" && t.session && !t.session.isOpenTime && t.session.startTime && t.session.durationMinutes) {
+          if (t.session.overtimeWaived) return;
           const endTime = addMinutes(new Date(t.session.startTime), t.session.durationMinutes);
           const secsLeft = differenceInSeconds(endTime, now);
           const sessionKey = `${t.id}-${t.session.startTime}`;
@@ -144,11 +181,32 @@ export function Tables() {
               toast.error(`${t.name} Overtime Started`, { description: `The ${EXTENSION_DECISION_MINUTES}-minute extension window ended. Overtime charges now apply.`, duration: 8000 });
             }
           }
+
+          const otExtKey = `${sessionKey}-ot-ext-${Math.floor(Math.max(0, -secsLeft) / 3600)}`;
+          const nextRes = getNextReservation(t.id, undefined, t.session.customerName);
+          const timerState = getSessionTimerState(t.session, now.getTime(), nextRes?.date?.getTime() ?? null);
+
+          if (timerState.mode === 'overtime-extension' && !otExtNotifiedRef.current.has(otExtKey)) {
+            otExtNotifiedRef.current.add(otExtKey);
+            const minsRem = Math.max(1, Math.ceil(timerState.displayMs / 60000));
+            if (timerState.cappedByReservation && nextRes) {
+              toast.warning(`${t.name} Overtime Extension (Reservation Cutoff)`, {
+                description: `30m+ overtime billed as 1h overtime only. Auto-ends at ${clockLabel(nextRes.timeSlot)} (${minsRem}m left) for ${nextRes.customerName}.`,
+                duration: 9000,
+              });
+            } else {
+              toast(`${t.name} Overtime Extension Active`, {
+                description: `Billed as 1h overtime only (no extra rental). Customer has ${minsRem}m left to finish the hour.`,
+                icon: '⏱️',
+                duration: 8000,
+              });
+            }
+          }
         }
       });
     }, 2000);
     return () => clearInterval(interval);
-  }, [tables]);
+  }, [tables, reservations]);
   
   const { state } = useLocation();
   const [filter, setFilter] = useState<FilterStatus>(state?.filter ?? 'all');
@@ -182,7 +240,6 @@ export function Tables() {
     <p>{openLimit ? `Play stops at ${new Date(openLimit).toLocaleString('en-PH',{timeZone:'Asia/Manila'})} Manila (${openPreview.value.limitingReason}). Saved local schedule; checkout remains available.` : openPreviewError || (openPreview ? 'The reviewed limit expired. Select fixed time or review the schedule.' : 'Checking the saved local open-time limit…')}</p>
   </div>;
 
-  
   const [posTableId,       setPosTableId]       = useState<string | null>(null);
   const [posSessionStartTime, setPosSessionStartTime] = useState('');
   const [isSavingOrders, setIsSavingOrders] = useState(false);
@@ -212,9 +269,16 @@ export function Tables() {
   const [waiveOvertimeError,     setWaiveOvertimeError]     = useState('');
   const [isVerifyingWaive,       setIsVerifyingWaive]       = useState(false);
 
-
   const [completedReceipt, setCompletedReceipt] = useState<any | null>(null);
-  const [viewingLiveReceiptId, setViewingLiveReceiptId] = useState<string | null>(null); // 🟢 NEW STATE
+  // 🟢 Auto-open receipt when AppContext auto-ends an overtime table for an incoming reservation
+  useEffect(() => {
+    if (lastAutoEndedReceipt) {
+      setCompletedReceipt(lastAutoEndedReceipt);
+      playSessionEndSound();
+      if (typeof clearLastAutoEndedReceipt === 'function') clearLastAutoEndedReceipt();
+    }
+  }, [lastAutoEndedReceipt, clearLastAutoEndedReceipt]);
+  const [viewingLiveReceiptId, setViewingLiveReceiptId] = useState<string | null>(null);
 
   // Migrate Session States
   const [migratingTableId, setMigratingTableId] = useState<string | null>(null);
@@ -242,7 +306,7 @@ export function Tables() {
   const [isEditingMenu, setIsEditingMenu] = useState(false);
   const [editingItem, setEditingItem] = useState<any | null>(null);
   const [editingStock, setEditingStock] = useState<number | undefined>(undefined);
-const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', price: 0, stock: 999999 });
+  const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', price: 0, stock: 999999 });
 
   // Assign form state
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerSource | null>(null);
@@ -292,7 +356,7 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
   const maintenance  = displayTables.filter((t: any) => t.status === 'maintenance').length;
 
   const filtered = displayTables.filter((t: any) => {
-    const matchFilter = filter === 'all' || (filter === 'overtime' && isOvertimeTable(t)) ||
+    const matchFilter = filter === 'all' || (filter === 'overtime' && !t.session?.overtimeWaived && isOvertimeTable(t)) ||
       (t.status === filter && (filter !== 'available' || safeAvailableTables.some((a: any) => a.id === t.id)));
     const matchSearch = !search
       || t.name.toLowerCase().includes(search.toLowerCase())
@@ -301,10 +365,14 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
   });
 
   const nearEndTables = displayTables.filter((t: any) => {
-    if (t.status !== 'occupied' || !t.session || t.session.isOpenTime) return false;
-    const endTime = addMinutes(new Date(t.session.startTime), t.session.durationMinutes);
-    const secsLeft = differenceInSeconds(endTime, new Date());
-    return secsLeft > 0 && secsLeft <= 10 * 60;
+    if (t.status !== 'occupied' || !t.session || t.session.isOpenTime || t.session.overtimeWaived) return false;
+    const nextRes = getNextReservation(t.id, undefined, t.session.customerName);
+    const st = getSessionTimerState(t.session, Date.now(), nextRes?.date?.getTime() ?? null);
+    if (st.mode === 'fixed' || st.mode === 'overtime-extension') {
+      const secsLeft = Math.floor(st.displayMs / 1000);
+      return secsLeft > 0 && secsLeft <= 10 * 60;
+    }
+    return false;
   });
 
   const waitingCustomers: CustomerSource[] = (queue || [])
@@ -333,7 +401,7 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
     setIsVerifyingWaive(true);
     setWaiveOvertimeError('');
     try {
-      const res = await localFetch('http://localhost:3001/api/auth/verify-admin', {
+      const res = await localFetch('http://localhost:3001/api/auth/verify-admin-override', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password: waiveAdminPassword }),
@@ -343,11 +411,22 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
         setWaiveOvertimeError(data?.error || 'Invalid administrator password.');
         return;
       }
+      const adminName = data.admin?.fullName || data.admin?.username || 'Administrator';
+      let currentOtCharge = 0;
+      if (endingTable?.session) {
+        try {
+          const unwaived = previewSessionBill(endingTable.session, Date.now(), useProrated, false);
+          currentOtCharge = Number(unwaived.overtimeCharge) || 0;
+        } catch {}
+      }
+      if (endingTableId && typeof setSessionOvertimeWaived === 'function') {
+        await setSessionOvertimeWaived(endingTableId, true, waiveOvertimeReason, adminName, currentOtCharge);
+      }
       setWaiveOvertime(true);
-      setWaiveOvertimeBy(data.admin?.fullName || data.admin?.username || 'Administrator');
+      setWaiveOvertimeBy(adminName);
       setShowWaiveOvertimeModal(false);
       setWaiveAdminPassword('');
-      flash(`Overtime waived (Authorized by ${data.admin?.fullName || 'Admin'}).`, 'success');
+      flash(`Overtime waived (Authorized by ${adminName}). Table is no longer tagged as overtime.`, 'success');
     } catch {
       setWaiveOvertimeError('Could not verify administrator password. Check local server.');
     } finally {
@@ -358,7 +437,7 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
   const endInfo = getEndSessionInfo();
 
   const extensionWindow = (session: any) => {
-    if (!session || session.isOpenTime || typeof session.durationMinutes !== 'number') return null;
+    if (!session || session.isOpenTime || session.overtimeWaived || typeof session.durationMinutes !== 'number') return null;
     const scheduledEnd = Date.parse(session.startTime) + session.durationMinutes * 60000;
     const elapsedPastEnd = Date.now() - scheduledEnd;
     if (!Number.isFinite(elapsedPastEnd) || elapsedPastEnd < 0) return null;
@@ -425,41 +504,6 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
     return closeDate;
   };
 
-  const getNextReservation = (tableId: string, excludeId?: string, excludeCustomerName?: string) => {
-    const now = new Date();
-    const excludeNameNorm = excludeCustomerName?.trim().toLowerCase();
-    const upcoming = (reservations || [])
-      .filter((r: any) => {
-        if (r.id === excludeId || r.tableId !== tableId) return false;
-        if (!['pending', 'confirmed', 'checked-in'].includes(r.status)) return false;
-        if (excludeNameNorm && r.customerName?.trim().toLowerCase() === excludeNameNorm) return false;
-        const rDate = new Date(r.date);
-        const [h, m] = (r.timeSlot || '00:00').split(':').map(Number);
-        rDate.setHours(h, m, 0, 0);
-        return rDate > addMinutes(now, -15) && isSameDay(rDate, now);
-      })
-      .sort((a: any, b: any) => {
-        const aDate = new Date(a.date);
-        const [ah, am] = (a.timeSlot || '00:00').split(':').map(Number);
-        aDate.setHours(ah, am, 0, 0);
-        const bDate = new Date(b.date);
-        const [bh, bm] = (b.timeSlot || '00:00').split(':').map(Number);
-        bDate.setHours(bh, bm, 0, 0);
-        return aDate.getTime() - bDate.getTime();
-      });
-
-    if (!upcoming.length) return null;
-
-    const r = upcoming[0];
-    const rDate = new Date(r.date);
-    const [h, m] = (r.timeSlot || '00:00').split(':').map(Number);
-    rDate.setHours(h, m, 0, 0);
-
-    return { id: r.id, date: rDate, customerName: r.customerName, timeSlot: r.timeSlot };
-  };
-
-
-
   const hasUnconfirmedOrderForTable = (tableId: string) => {
     const session = tables.find((table: any) => table.id === tableId)?.session;
     if (!session?.startTime) return false;
@@ -494,7 +538,7 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
           setAmountPaid(Math.round((newMins / 60) * effectiveHourly).toString());
         }
       } else if (durationMinutes === 'open' && availData && availData.maxMins < 1440) {
-            const newMins = (availData?.opts && availData.opts.length > 0) ? availData.opts[0] : 60;
+          const newMins = (availData?.opts && availData.opts.length > 0) ? availData.opts[0] : 60;
           setDurationMinutes(newMins);
           setAmountPaid(Math.round((newMins / 60) * effectiveHourly).toString());
           setPaymentOption('payNow');
@@ -542,8 +586,6 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
     return { opts, maxMins, conflictWarning, isBlocked };
   };
 
-  
-
   const openEnd = (tableId: string) => {
     if (orderRequestInFlight.current || checkoutInFlight.current) return;
     if (pendingCheckout || pendingCheckoutError) { flash('Confirm the pending checkout before changing sessions.', 'error'); return; }
@@ -554,16 +596,16 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
     setEndPayStatus('paid'); 
     setEndPayMethod('cash'); 
     setEndPartialAmount(''); 
-    setEndCashTendered(''); // This will auto-fill in the UI if needed
+    setEndCashTendered('');
     setEndGcashRef('');
     setDebtName(table?.session?.customerName || ''); 
     setDebtContact('');
     setUseProrated(false);
     setShowVoidModal(false);
     setVoidError('');
-    setWaiveOvertime(false);
-    setWaiveOvertimeReason('Staff delay in ending session');
-    setWaiveOvertimeBy('');
+    setWaiveOvertime(Boolean(table?.session?.overtimeWaived));
+    setWaiveOvertimeReason(table?.session?.overtimeWaiveReason || 'Staff delay in ending session');
+    setWaiveOvertimeBy(table?.session?.overtimeWaivedBy || '');
     setShowWaiveOvertimeModal(false);
     setWaiveAdminPassword('');
     setWaiveOvertimeError('');
@@ -578,7 +620,6 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
     if (table?.session?.pricingVersion === 2) { flash('Reservation extensions need venue approval.', 'error'); return; }
     setExtendingTableId(tableId);
     const extLimits = getExtensionLimits(tableId);
-    // 🟢 Auto-select the smallest available extension, or default to 60 if fully blocked
     setExtendMinutes((extLimits?.opts && extLimits.opts.length > 0) ? extLimits.opts[0] : 60); 
     setExtendPayStatus('paid'); setExtendPayMethod('cash'); setExtendPartialAmount(''); setExtendCashTendered(''); setExtendGcashRef('');
     setDebtName(table?.session?.customerName || ''); setDebtContact('');
@@ -590,7 +631,7 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
     const availData = getAvailableDurations(assigningTableId, c.kind === 'reservation' ? c.id : undefined);
     if (c.kind === 'reservation') {
       const mins = c.durationHours * 60;
-      const finalMins = availData ? Math.min(mins, availData.maxMins) : mins; // Enforce max gap
+      const finalMins = availData ? Math.min(mins, availData.maxMins) : mins;
       setDurationMinutes(finalMins); setAmountPaid(Math.round((finalMins / 60) * effectiveHourly).toString());
     } else {
       const defaultMins = (availData?.opts && availData.opts.length > 0) ? availData.opts[0] : 60;
@@ -649,8 +690,6 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
 
     return { opts, maxMins, blocksOpenTime, conflictWarning, nextRes: nextResInfo, safeTables };
   };
-
-
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -787,6 +826,7 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
         tendered: saved.tendered,
         status: receipt.payment_status,
         voidReason: receipt.void_reason,
+        autoEndReason: receipt.auto_end_reason,
         waivedAmount: receipt.void_reason ? (receipt.booking_discount_amount != null ? receipt.original_amount : (receipt.original_amount > 0 ? receipt.original_amount : receipt.discount_amount)) : 0,
         voidActor: receipt.void_actor_name,
         shortfall: receipt.balance_due,
@@ -948,18 +988,18 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
   };
 
   const startEditItem = (item: any) => {
-  setEditingItem(item);
-  setEditingStock(item.stock > 0 ? 999999 : 0);
-  setNewItemForm({ name: item.name, category: item.category, price: item.price, stock: item.stock > 0 ? 999999 : 0 });
-  setIsEditingMenu(true);
-};
+    setEditingItem(item);
+    setEditingStock(item.stock > 0 ? 999999 : 0);
+    setNewItemForm({ name: item.name, category: item.category, price: item.price, stock: item.stock > 0 ? 999999 : 0 });
+    setIsEditingMenu(true);
+  };
 
   const filterBtns: { key: FilterStatus; label: string; count: number; color: string }[] = [
     { key: 'all',         label: 'All',         count: displayTables.length, color: 'bg-neutral-800 text-neutral-200 border-neutral-700' },
     { key: 'available',   label: 'Available',   count: available,           color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' },
     { key: 'occupied',    label: 'Occupied',    count: occupied,            color: 'bg-rose-500/10 text-rose-400 border-rose-500/30' },
     { key: 'reserved',    label: 'Reserved',    count: reserved,            color: 'bg-amber-500/10 text-amber-400 border-amber-500/30' },
-    { key: 'overtime',    label: 'Overtime / Open Time', count: activeTables.filter(isOvertimeTable).length, color: 'bg-rose-500/10 text-rose-400 border-rose-500/30' },
+    { key: 'overtime',    label: 'Overtime / Open Time', count: activeTables.filter((t: any) => !t.session?.overtimeWaived && isOvertimeTable(t)).length, color: 'bg-rose-500/10 text-rose-400 border-rose-500/30' },
     { key: 'maintenance', label: 'Maintenance', count: maintenance,         color: 'bg-orange-500/10 text-orange-400 border-orange-500/30' },
   ];
 
@@ -971,7 +1011,6 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
       </span>
     );
   };
-
 
   return (
     <div aria-busy={isSavingOrders || isSavingCheckout || isSavingSession} className="space-y-5 flex h-[calc(100vh-140px)] relative overflow-hidden">
@@ -1020,6 +1059,7 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
         <p>{pendingCheckoutError || 'A checkout result is unconfirmed. Confirm the saved payment request before charging again.'}</p>
         {pendingCheckout && !pendingCheckoutError && <button disabled={isSavingCheckout} onClick={() => confirmCheckout(pendingCheckout.tableId, pendingCheckout.payload)} className="mt-2 font-bold underline">Retry Pending Checkout</button>}
       </div>}
+
       {/* MAIN CONTENT AREA */}
       <div className={`flex-1 space-y-5 overflow-y-auto pr-2 transition-all duration-300 ${posTableId ? 'mr-[380px]' : ''}`}>
         <PendingQueueActions />
@@ -1045,16 +1085,21 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
         {nearEndTables.filter((t: any) => !dismissedNearEnd.has(t.id)).length > 0 && (
           <div className="space-y-2">
             {nearEndTables.filter((t: any) => !dismissedNearEnd.has(t.id)).map((t: any) => {
-              const endTime = addMinutes(new Date(t.session!.startTime), t.session!.durationMinutes);
-              const minsLeft = Math.ceil(differenceInSeconds(endTime, new Date()) / 60);
+              const nextRes = getNextReservation(t.id, undefined, t.session.customerName);
+              const st = getSessionTimerState(t.session, Date.now(), nextRes?.date?.getTime() ?? null);
+              const minsLeft = Math.max(1, Math.ceil(st.displayMs / 60000));
               return (
                 <div key={t.id} className="flex items-center gap-3 bg-amber-950/40 border border-amber-700/50 rounded-xl px-4 py-3">
                   <AlertTriangle size={15} className="text-amber-400 flex-shrink-0" />
                   <div className="flex-1 min-w-0">
                     <p className="text-xs text-amber-300 truncate">
-                      <strong>{t.name}</strong> — ends in <strong>{minsLeft} min{minsLeft !== 1 ? 's' : ''}</strong>.
+                      <strong>{t.name}</strong> — {st.isOvertimeExtension && st.cappedByReservation && nextRes
+                        ? `auto-ends in ${minsLeft} min${minsLeft !== 1 ? 's' : ''} for ${nextRes.customerName}'s reservation (${clockLabel(nextRes.timeSlot)}).`
+                        : `${st.isOvertimeExtension ? 'overtime extension ends' : 'ends'} in ${minsLeft} min${minsLeft !== 1 ? 's' : ''}.`}
                     </p>
-                    <p className="text-[10px] text-amber-400/70 truncate">{t.session!.customerName} · Consider extending.</p>
+                    <p className="text-[10px] text-amber-400/70 truncate">
+                      {t.session!.customerName} · {st.isOvertimeExtension ? 'Overtime bill only (no extra 1hr charged).' : 'Consider extending.'}
+                    </p>
                   </div>
                   <button onClick={() => setDismissedNearEnd(prev => new Set([...prev, t.id]))} className="p-1 text-amber-600 hover:text-amber-300 transition-colors flex-shrink-0">
                     <X size={13} />
@@ -1105,6 +1150,7 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
                 setVoidPassword('');
               }}
               nextReservation={table.status === 'reserved' ? getNextReservation(table.id) : null}
+              upcomingReservation={table.status === 'occupied' ? getNextReservation(table.id, undefined, table.session?.customerName) : null}
             />
           ))}
         </div>
@@ -1139,6 +1185,12 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
                   <div className="flex justify-between text-xs">
                     <span className="text-amber-400 flex items-center gap-1"><AlertTriangle size={10} /> Overtime</span>
                     <span className="text-amber-400">+{formatPHP(posInfo.overtimeCharge)}</span>
+                  </div>
+                )}
+                {posInfo.overtimeWaived && (
+                  <div className="flex justify-between text-xs text-emerald-400">
+                    <span className="flex items-center gap-1"><CheckCircle size={10} /> Overtime Waived</span>
+                    <span>₱0.00</span>
                   </div>
                 )}
                 {confirmedTotal > 0 && (
@@ -1243,8 +1295,8 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
                           <option value="Extras">Extras</option>
                         </select>
                         <input type="number" value={newItemForm.price || ''} onChange={e => setNewItemForm(f => ({ ...f, price: parseFloat(e.target.value) || 0 }))} placeholder="Price ₱" required min="1" className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm text-neutral-200 focus:outline-none focus:border-amber-500" />
-                        </div>
-                        <div className="flex gap-2 pt-2">
+                      </div>
+                      <div className="flex gap-2 pt-2">
                         <button type="submit" className="flex-1 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold rounded-lg transition-colors">Add Item</button>
                       </div>
                     </form>
@@ -1338,9 +1390,7 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
               ) : (
                 <div className="space-y-2">
                   {inventory.filter((i: any) => i.isActive).map((item: any) => {
-                    
                     const outOfStock = item.stock <= 0;
-                    
                     return (
                       <button key={item.id} disabled={outOfStock || !posTable.session} onClick={() => handleAddToCart(item)}
                         className={`w-full flex items-center justify-between p-3 rounded-xl border text-left transition-all ${outOfStock ? 'bg-neutral-900/50 border-neutral-800/50 opacity-60 cursor-not-allowed' : 'bg-neutral-900 border-neutral-800 hover:border-emerald-600/40'}`}>
@@ -1704,6 +1754,12 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
                     <span className="text-amber-400 font-semibold">+{formatPHP(endInfo.overtimeCharge)}</span>
                   </div>
                 )}
+                {endInfo.overtimeWaived && (
+                  <div className="flex justify-between text-xs text-emerald-400">
+                    <span className="flex items-center gap-1"><CheckCircle size={10} /> Overtime Waived (Admin)</span>
+                    <span className="font-semibold">₱0.00</span>
+                  </div>
+                )}
                 {endInfo.posOrdersTotal > 0 && (
                   <div className="flex justify-between text-xs">
                     <span className="text-emerald-400 flex items-center gap-1"><ShoppingCart size={10}/> Food & Drinks</span>
@@ -1724,8 +1780,25 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
                 </div>
               </div>
 
-                {/* 🟢 Admin-Authorized Waive Overtime Control (REQ022) */}
-              {endInfo.isOvertime && (
+              {(() => {
+                const nextRes = getNextReservation(endingTable.id, undefined, endingTable.session?.customerName);
+                const st = getSessionTimerState(endingTable.session, Date.now(), nextRes?.date?.getTime() ?? null);
+                if (!st.isOvertimeExtension) return null;
+                const minsRem = Math.max(0, Math.ceil(st.displayMs / 60000));
+                return (
+                  <div className="rounded-xl border border-sky-800/50 bg-sky-950/25 p-3 text-xs text-sky-300 space-y-1">
+                    <p className="font-bold">Overtime Extension Active — Overtime Bill Only</p>
+                    <p className="text-[11px] text-sky-300/80">
+                      {st.cappedByReservation && nextRes
+                        ? `Capped for ${nextRes.customerName}'s reservation at ${clockLabel(nextRes.timeSlot)} (${minsRem}m left). No extra 1-hour rental is charged.`
+                        : `Customer has ${minsRem}m remaining to finish the billed overtime hour (no extra 1-hour rental is charged).`}
+                    </p>
+                  </div>
+                );
+              })()}
+
+              {/* 🟢 Admin-Authorized Waive Overtime Control (REQ022) */}
+              {(endInfo.isOvertime || endInfo.overtimeWaived || waiveOvertime) && (
                 <div className={`rounded-xl p-3.5 border space-y-2.5 ${
                   waiveOvertime
                     ? 'bg-emerald-950/25 border-emerald-800/50'
@@ -1742,7 +1815,10 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
                       </div>
                       <button
                         type="button"
-                        onClick={() => {
+                        onClick={async () => {
+                          if (endingTableId && typeof setSessionOvertimeWaived === 'function') {
+                            await setSessionOvertimeWaived(endingTableId, false);
+                          }
                           setWaiveOvertime(false);
                           setWaiveOvertimeBy('');
                           flash('Overtime charge restored.', 'success');
@@ -1797,7 +1873,7 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
                     onClick={() => {
                       if (!staffProfile?.isAdmin) { flash('Sign in as an administrator to void a session.', 'error'); return; }
                       setShowVoidModal(true);
-                                        setVoidReason('Accidental booking / under 5 mins');
+                      setVoidReason('Accidental booking / under 5 mins');
                     }} 
                     className="w-full py-2 bg-rose-600/20 hover:bg-rose-600/30 text-rose-400 border border-rose-700/50 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5"
                   >
@@ -1821,7 +1897,7 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
                 </div>
               )}
 
-              {/* 🟢 ENHANCED: Payment Status (Always unlocked for real-world edge cases like walkouts) */}
+              {/* 🟢 ENHANCED: Payment Status */}
               <>
                 <div className="space-y-2">
                   <label className="text-xs text-neutral-500 uppercase tracking-widest font-semibold">Payment Status</label>
@@ -2062,7 +2138,6 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
           </form>
         </div>
       )}
-      
 
       {/* EXTEND SESSION MODAL */}
       {extendingTableId && extendingTable?.session && (
@@ -2328,7 +2403,7 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
                     if (openTimeStop(tables.find((table:any)=>table.id===migratingTableId)?.session)?.reached) throw new Error('The play limit has been reached. End this session at checkout.');
                     await migrateSession(migratingTableId, migrateTargetId);
                     setMigratingTableId(null);
-                    setPosTableId(null); // Close the table order sidebar to refresh it
+                    setPosTableId(null);
                     flash("Session successfully migrated.", "success");
                     } catch (error: any) { if(tables.find((table:any)=>table.id===migratingTableId)?.session?.pricingVersion===2)setMigratingTableId(null);flash(error?.message || 'Transfer could not be saved. Review both tables and retry.', 'error'); }
                     finally { sessionInFlight.current = false; setIsSavingSession(false); }
@@ -2341,11 +2416,9 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
             </div>
           </div>
         </div>
-        
       )}
 
-      
-    {/* 🟢 THERMAL E-RECEIPT ENGINE (Handles both Live & Completed) */}
+      {/* 🟢 THERMAL E-RECEIPT ENGINE (Handles both Live & Completed) */}
       {(completedReceipt || viewingLiveReceiptId) && (() => {
         let rData = null;
         let isLive = false;
@@ -2367,9 +2440,12 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
           rData = {
             id: `TAB-${t.id.toUpperCase()}`,
             tableName: t.name, customerName: t.session.customerName, endTime: now,
-            isOpenTime: isOpenTime, // 🟢 Live Tab Tracking
-            bookedMins: bookedMins, // 🟢 Live Tab Tracking
+            isOpenTime: isOpenTime,
+            bookedMins: bookedMins,
             elapsedMins, bookedCharge, bookingDiscount, subtotal: bookedCharge + overtimeCharge + posOrdersTotal, overtimeCharge, overtimeMins, overtimeRate: bill.overtimeRate,
+            overtimeWaived: bill.overtimeWaived,
+            overtimeWaiveReason: t.session.overtimeWaiveReason,
+            overtimeWaivedBy: t.session.overtimeWaivedBy,
             posOrdersTotal, orders, totalDue: totalDue,
             alreadyPaid, totalPaidNow: 0, balance,
             refundDue,
@@ -2471,6 +2547,13 @@ const [newItemForm, setNewItemForm] = useState({ name: '', category: 'Drinks', p
                     </div>
 
                     <div className="border-t border-dashed border-neutral-400 my-3" />
+
+                    {rData.autoEndReason && (
+                      <div className="mb-3 rounded border border-dashed border-neutral-400 p-2 text-[10px] text-black">
+                        <p className="font-bold uppercase">Auto-Ended for Reservation</p>
+                        <p>{rData.autoEndReason}</p>
+                      </div>
+                    )}
 
                     {rData.voidReason && <div className="mb-3 space-y-1 text-xs text-black"><p className="font-bold">VOIDED — WAIVED {formatPHP(rData.waivedAmount)}</p><p>Administrator: {rData.voidActor}</p><p>Reason: {rData.voidReason}</p><p>Consumed inventory remains deducted.</p></div>}
                     {/* Totals */}

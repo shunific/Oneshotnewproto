@@ -4,7 +4,8 @@ import { bookingDay, bookingDayKey } from '../utils/bookingSchedule.js';
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef, useMemo } from 'react';
 import { toast } from 'sonner';
 import { publicSupabase, isWebsiteImageValue } from '../utils/supabase';
-import { previewSessionBill } from '../../../session-billing.mjs';
+import { previewSessionBill, getSessionTimerState } from '../../../session-billing.mjs';
+
 
 // ── Types ──────────────────────────────────────────────────────
 export type TableStatus = 'available' | 'occupied' | 'reserved' | 'maintenance' | 'event';
@@ -31,6 +32,11 @@ export type Session = {
   orders?: SessionOrder[];
   paymentStatus?: 'paid' | 'payLater';
   gcashReceiptImg?: string;
+  overtimeWaived?: boolean;
+  overtimeWaiveReason?: string;
+  overtimeWaivedBy?: string;
+  overtimeWaivedAt?: string;
+  overtimeWaivedLogged?: boolean;
 };
 
 export type Table = {
@@ -302,6 +308,9 @@ export type AppContextType = {
   recoverReservationTransfer: (record: any, action: any) => Promise<any>;
   refreshReservationTransfers: () => Promise<void>;
   pullNewCloudData: () => Promise<{ ok: boolean; totalChanges: number; message: string }>;
+  lastAutoEndedReceipt: any | null;
+  clearLastAutoEndedReceipt: () => void;
+  setSessionOvertimeWaived: (tableId: string, waived: boolean, reason?: string, authorizedBy?: string, waivedAmount?: number) => Promise<void>;
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -927,6 +936,50 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // This build no longer keeps a local pending-order ledger, so there is nothing to replay.
   const retryPendingOrder = async (_tableId: string, _expectedSessionStartTime: string) => { /* no-op */ };
+  
+  const setSessionOvertimeWaived = async (
+    tableId: string,
+    waived: boolean,
+    reason = 'Staff delay in ending session',
+    authorizedBy = 'Administrator',
+    waivedAmount = 0
+  ) => {
+    const table = tables.find(t => t.id === tableId);
+    if (!table?.session) return;
+
+    const updatedSession: Session = {
+      ...table.session,
+      overtimeWaived: waived,
+      overtimeWaiveReason: waived ? reason : undefined,
+      overtimeWaivedBy: waived ? authorizedBy : undefined,
+      overtimeWaivedAt: waived ? new Date().toISOString() : undefined,
+      overtimeWaivedLogged: waived,
+    };
+
+    setTables(prev => prev.map(t => (t.id === tableId ? { ...t, session: updatedSession } : t)));
+    await syncToDB(`/api/tables/${tableId}`, 'PUT', { status: 'occupied', session: updatedSession }, 'Overtime waiver updated')
+      .then(runCloudBackup)
+      .catch(() => {});
+    publicSupabase
+      .from('tables')
+      .update({ status: 'occupied', sessionData: JSON.stringify(updatedSession), isActive: 1 })
+      .eq('id', tableId)
+      .then();
+
+    if (waived) {
+      addActivity(
+        'admin_action',
+        `Waived overtime charge (₱${(Number(waivedAmount) || 0).toFixed(2)}) on ${table.name} for ${table.session.customerName}. Reason: ${reason} | Authorized by: ${authorizedBy}`,
+        { tableId, tableName: table.name, customerName: table.session.customerName, waivedOvertimeAmount: waivedAmount, reason, authorizedBy }
+      );
+    } else {
+      addActivity(
+        'admin_action',
+        `Restored overtime billing on ${table.name} for ${table.session.customerName}.`,
+        { tableId, tableName: table.name, customerName: table.session.customerName }
+      );
+    }
+  };
 
   const checkoutTable = async (tableId: string, payload: any) => {
     const table = tables.find(t => t.id === tableId);
@@ -936,8 +989,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const startTime = new Date(session.startTime);
     if (!Number.isFinite(startTime.getTime())) throw new Error('The stored session start time is invalid.');
 
-    const now = Date.now();
-    const shouldWaiveOvertime = Boolean(payload?.waiveOvertime);
+    const realNow = Date.now();
+    const cappedMs = Number(payload?.endedAtMs);
+    const now = Number.isFinite(cappedMs) && cappedMs >= startTime.getTime()
+      ? Math.min(realNow, cappedMs)
+      : realNow;
+        const shouldWaiveOvertime = Boolean(payload?.waiveOvertime || session.overtimeWaived);
+    const waiveReason = String(payload?.waiveOvertimeReason || session.overtimeWaiveReason || 'Staff delay in ending session').trim();
+    const waiveBy = String(payload?.waiveOvertimeBy || session.overtimeWaivedBy || staffProfile?.fullName || 'Administrator').trim();
     let bill;
     let waivedOvertimeAmount = 0;
     try {
@@ -947,15 +1006,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
         Boolean(payload?.useProrated),
         shouldWaiveOvertime
       );
-      if (shouldWaiveOvertime) {
-        const unwaived = previewSessionBill(
-          { ...session, startTime: startTime.toISOString() },
-          now,
-          Boolean(payload?.useProrated),
-          false
-        );
-        waivedOvertimeAmount = Number(unwaived.overtimeCharge) || 0;
-      }
+      if (shouldWaiveOvertime && waivedOvertimeAmount > 0 && !session.overtimeWaivedLogged) {
+      addActivity(
+        'admin_action',
+        `Waived overtime charge (₱${waivedOvertimeAmount.toFixed(2)}) on ${tableName} for ${customerName}. Reason: ${waiveReason} | Authorized by: ${waiveBy}`,
+        { tableId, tableName, customerName, waivedOvertimeAmount, reason: waiveReason, authorizedBy: waiveBy }
+      );
+    }
     } catch (error: any) {
       throw new Error(error?.message || 'The session bill could not be calculated.');
     }
@@ -999,8 +1056,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       overtime_minutes: bill.overtimeMins,
       overtime_waived: Boolean(shouldWaiveOvertime && waivedOvertimeAmount > 0),
       overtime_waived_amount: waivedOvertimeAmount,
-      overtime_waive_reason: payload?.waiveOvertimeReason || '',
-      overtime_waived_by: payload?.waiveOvertimeBy || '',
+      overtime_waive_reason: shouldWaiveOvertime ? waiveReason : '',
+      overtime_waived_by: shouldWaiveOvertime ? waiveBy : '',
       fnb_charge: bill.posOrdersTotal,
       subtotal: total,
       total_amount: total,
@@ -1010,7 +1067,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       payment_status: paymentStatus,
       refund_status: refundDue > 0 ? 'pending' : '',
       void_reason: payload?.closureKind === 'void' ? 'Voided session' : payload?.closureKind === 'walkout' ? 'Walkout' : '',
+      auto_end_reason: payload?.autoEndReason || '',
       original_amount: total,
+      
     };
 
     const orders = Array.isArray(session.orders) ? session.orders : [];
@@ -1039,6 +1098,138 @@ export function AppProvider({ children }: { children: ReactNode }) {
       tendered,
     };
   };
+
+  const [lastAutoEndedReceipt, setLastAutoEndedReceipt] = useState<any | null>(null);
+  const clearLastAutoEndedReceipt = useCallback(() => setLastAutoEndedReceipt(null), []);
+  const autoEndedSessionsRef = useRef<Set<string>>(new Set());
+  const tablesRef = useRef(tables);
+  const reservationsRef = useRef(reservations);
+  const checkoutRef = useRef(checkoutTable);
+  tablesRef.current = tables;
+  reservationsRef.current = reservations;
+  checkoutRef.current = checkoutTable;
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const nowMs = Date.now();
+      const currentTables = tablesRef.current || [];
+      const currentReservations = reservationsRef.current || [];
+
+      currentTables.forEach((t) => {
+        if (t.status !== 'occupied' || !t.session || t.session.isOpenTime || !t.session.durationMinutes || !t.session.startTime) {
+          return;
+        }
+
+        const startMs = Date.parse(String(t.session.startTime));
+        if (!Number.isFinite(startMs)) return;
+        const scheduledEndMs = startMs + Number(t.session.durationMinutes) * 60000;
+
+        // Only evaluate tables past their booked end time
+        if (nowMs < scheduledEndMs) return;
+
+        const currentNameNorm = (t.session.customerName || '').trim().toLowerCase();
+        const upcomingForTable = currentReservations
+          .filter((r) => {
+            if (r.tableId !== t.id) return false;
+            if (!['pending', 'confirmed', 'checked-in'].includes(r.status)) return false;
+            if (currentNameNorm && (r.customerName || '').trim().toLowerCase() === currentNameNorm) return false;
+            const rDate = new Date(r.date);
+            const [h, m] = String(r.timeSlot || '00:00').split(':').map(Number);
+            rDate.setHours(h || 0, m || 0, 0, 0);
+            const rMs = rDate.getTime();
+            return Number.isFinite(rMs) && rMs >= scheduledEndMs && rMs <= scheduledEndMs + 12 * 3600000;
+          })
+          .map((r) => {
+            const rDate = new Date(r.date);
+            const [h, m] = String(r.timeSlot || '00:00').split(':').map(Number);
+            rDate.setHours(h || 0, m || 0, 0, 0);
+            return { ...r, startMs: rDate.getTime() };
+          })
+          .sort((a, b) => a.startMs - b.startMs);
+
+        const nextRes = upcomingForTable[0];
+        if (!nextRes) return;
+
+        const timerState = getSessionTimerState(t.session, nowMs, nextRes.startMs);
+        if (timerState.mode !== 'reservation-ended') return;
+
+        const sessionKey = `${t.id}-${new Date(startMs).toISOString()}`;
+        if (autoEndedSessionsRef.current.has(sessionKey)) return;
+        autoEndedSessionsRef.current.add(sessionKey);
+
+        const reason = `Auto-ended at ${nextRes.timeSlot} for ${nextRes.customerName}'s reservation (Overtime bill only).`;
+
+        let previewDue = 0;
+        try {
+          const bill = previewSessionBill(
+            { ...t.session, startTime: new Date(startMs).toISOString() },
+            nextRes.startMs,
+            false
+          );
+          previewDue = Number(bill.balance) || 0;
+        } catch {}
+
+        void checkoutRef.current(t.id, {
+          expectedSession: t.session,
+          endedAtMs: nextRes.startMs,
+          paymentStatus: previewDue > 0 ? 'unpaid' : 'paid',
+          paymentMethod: 'cash',
+          tendered: 0,
+          useProrated: false,
+          closureKind: 'auto_reservation_end',
+          autoEndReason: reason,
+        }).then((saved) => {
+          const receipt = saved?.receipt;
+          if (!receipt) return;
+
+          addActivity(
+            'table_freed',
+            `Auto-ended ${t.name} (${t.session?.customerName}) at ${nextRes.timeSlot} for ${nextRes.customerName}'s reservation. Overtime charge: ₱${(Number(receipt.overtime_charge) || 0).toFixed(2)} (no extra hour charged).`
+          );
+
+          toast.warning(`${t.name} Auto-Ended for Reservation`, {
+            description: `${nextRes.customerName}'s reservation started. Collect overtime balance: ₱${(Number(receipt.balance_due) || 0).toFixed(2)} (overtime bill only).`,
+            duration: 10000,
+          });
+
+          setLastAutoEndedReceipt({
+            id: receipt.receipt_no,
+            tableName: receipt.table_name,
+            customerName: receipt.customer_name,
+            endTime: new Date(receipt.play_end_time),
+            isOpenTime: false,
+            bookedMins: t.session?.durationMinutes,
+            elapsedMins: receipt.duration_minutes,
+            bookedCharge: receipt.table_charge,
+            bookingDiscount: receipt.booking_discount_amount || 0,
+            subtotal: receipt.subtotal ?? receipt.total_amount,
+            overtimeCharge: receipt.overtime_charge,
+            overtimeRate: receipt.overtime_rate,
+            overtimeMins: receipt.overtime_minutes,
+            posOrdersTotal: receipt.fnb_charge,
+            orders: saved.history?.orders || [],
+            staffName: staffProfile?.fullName || staffProfile?.username || 'System (Auto-End)',
+            totalDue: receipt.total_amount,
+            alreadyPaid: saved.alreadyPaid,
+            totalPaidNow: saved.totalPaidNow,
+            balance: Math.max(0, receipt.total_amount - saved.alreadyPaid),
+            refundDue: saved.refundDue,
+            refundStatus: receipt.refund_status,
+            change: saved.change,
+            tendered: saved.tendered,
+            status: receipt.payment_status,
+            autoEndReason: reason,
+            shortfall: receipt.balance_due,
+          });
+        }).catch((err) => {
+          autoEndedSessionsRef.current.delete(sessionKey);
+          console.error('Auto-end on reservation failed:', err);
+        });
+      });
+    }, 2000);
+
+    return () => clearInterval(timer);
+  }, []);
 
   const extendSession = (tableId: string, mins: number, pay: number) => {
     setTables(prev => prev.map(t => {
@@ -1803,7 +1994,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       updateRefundStatus, acknowledgeRefund,
       isLoggingOut, logoutStep,
       lastSynced, forceFullSync, pullNewCloudData, refreshPromoUsage,
-      availableTables, heldTableIds, reservationMoveError, pendingReservationMoves, recoverReservationTransfer, refreshReservationTransfers
+      availableTables, heldTableIds, reservationMoveError, pendingReservationMoves, recoverReservationTransfer, refreshReservationTransfers, lastAutoEndedReceipt, clearLastAutoEndedReceipt
     }}>
       {/* 🟢 Global Fullscreen Logout Overlay with Thread Loader */}
       {isLoggingOut && (

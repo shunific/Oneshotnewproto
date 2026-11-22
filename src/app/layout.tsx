@@ -1,4 +1,5 @@
 import { eventReservationName } from './utils/eventReservation';
+import { clockLabel } from './utils/clockDisplay';
 import { localFetch } from './utils/localApi';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router';
@@ -11,7 +12,7 @@ import {
   AlertTriangle, Sparkles, MessageSquare
 } from 'lucide-react';
 import { addMinutes, differenceInSeconds, format } from 'date-fns';
-import { EXTENSION_DECISION_MINUTES, EXTENSION_DECISION_SECONDS } from '../../session-billing.mjs';
+import { EXTENSION_DECISION_MINUTES, getSessionTimerState } from '../../session-billing.mjs';
 import { useAppContext } from './context/AppContext';
 import { LockScreen } from './components/LockScreen';
 import logoImg from 'figma:asset/40eb82831843e17a3c48a360fd80f0aaaa58ddc8.png';
@@ -45,7 +46,15 @@ const pageTitles: Record<string, string> = {
 };
 
 // ── SIDEBAR SMART AUTO-SWITCHING LIVE COUNTDOWN TIMER ──
-function SidebarSmartTimer({ tables, onNavigate }: { tables: any[]; onNavigate: (path: string) => void }) {
+function SidebarSmartTimer({
+  tables,
+  reservations = [],
+  onNavigate,
+}: {
+  tables: any[];
+  reservations?: any[];
+  onNavigate: (path: string) => void;
+}) {
   const [now, setNow] = useState(new Date());
 
   useEffect(() => {
@@ -53,20 +62,24 @@ function SidebarSmartTimer({ tables, onNavigate }: { tables: any[]; onNavigate: 
     return () => clearInterval(timer);
   }, []);
 
-  const formatDuration = (totalSeconds: number) => {
-    const absSecs = Math.abs(totalSeconds);
+  const formatDuration = (totalSeconds: number, showPlus = false) => {
+    const absSecs = Math.max(0, Math.floor(Math.abs(totalSeconds)));
     const hrs = Math.floor(absSecs / 3600);
     const mins = Math.floor((absSecs % 3600) / 60);
     const secs = absSecs % 60;
     const parts = [
       hrs > 0 ? `${hrs}h` : '',
       `${mins.toString().padStart(2, '0')}m`,
-      `${secs.toString().padStart(2, '0')}s`
-    ].filter(Boolean).join(' ');
-    return totalSeconds < 0 ? `+${parts}` : parts;
+      `${secs.toString().padStart(2, '0')}s`,
+    ]
+      .filter(Boolean)
+      .join(' ');
+    return showPlus ? `+${parts}` : parts;
   };
 
-  const occupiedTables = tables.filter((t: any) => t.isActive && t.status === 'occupied' && t.session);
+  const occupiedTables = (tables || []).filter(
+    (t: any) => t.isActive && t.status === 'occupied' && t.session
+  );
 
   if (occupiedTables.length === 0) {
     return (
@@ -76,7 +89,7 @@ function SidebarSmartTimer({ tables, onNavigate }: { tables: any[]; onNavigate: 
           className="w-full bg-neutral-900 border border-neutral-800 hover:border-neutral-700 rounded-xl p-3.5 text-left transition-all group"
         >
           <div className="flex items-center gap-1.5 text-emerald-400 text-[10px] font-bold uppercase tracking-wider mb-1">
-            <Sparkles size={13} /> ✨ ALL TABLES CLEAR
+            <Sparkles size={13} /> ALL TABLES CLEAR
           </div>
           <p className="text-sm font-black text-neutral-100 group-hover:text-emerald-400 transition-colors">
             Ready for Walk-ins
@@ -89,36 +102,74 @@ function SidebarSmartTimer({ tables, onNavigate }: { tables: any[]; onNavigate: 
     );
   }
 
+  const nowMs = now.getTime();
+
+  const findNextRes = (t: any) => {
+    if (!t.session || t.session.isOpenTime || !t.session.durationMinutes || !t.session.startTime) {
+      return null;
+    }
+    const startMs = Date.parse(String(t.session.startTime));
+    if (!Number.isFinite(startMs)) return null;
+    const scheduledEndMs = startMs + Number(t.session.durationMinutes) * 60000;
+    const currentNameNorm = (t.session.customerName || '').trim().toLowerCase();
+
+    const matches = (reservations || [])
+      .filter((r: any) => {
+        if (r.tableId !== t.id) return false;
+        if (!['pending', 'confirmed', 'checked-in'].includes(r.status)) return false;
+        if (currentNameNorm && (r.customerName || '').trim().toLowerCase() === currentNameNorm) return false;
+        const rDate = new Date(r.date);
+        const [h, m] = String(r.timeSlot || '00:00').split(':').map(Number);
+        rDate.setHours(h || 0, m || 0, 0, 0);
+        const rMs = rDate.getTime();
+        return Number.isFinite(rMs) && rMs >= scheduledEndMs && rMs <= scheduledEndMs + 12 * 3600000;
+      })
+      .map((r: any) => {
+        const rDate = new Date(r.date);
+        const [h, m] = String(r.timeSlot || '00:00').split(':').map(Number);
+        rDate.setHours(h || 0, m || 0, 0, 0);
+        return { ...r, startMs: rDate.getTime() };
+      })
+      .sort((a: any, b: any) => a.startMs - b.startMs);
+
+    return matches[0] || null;
+  };
+
   const tableStatuses = occupiedTables.map((t: any) => {
-    const start = new Date(t.session.startTime);
-    const isOpen = t.session.isOpenTime || t.session.durationMinutes === null;
-    if (isOpen) {
-      const elapsedSecs = differenceInSeconds(now, start);
-      return { table: t, type: 'open' as const, secs: elapsedSecs };
+    const nextRes = findNextRes(t);
+    const st: any = getSessionTimerState(t.session, nowMs, nextRes?.startMs ?? null);
+    const secs = Math.max(0, Math.floor(st.displayMs / 1000));
+
+    if (st.isOvertimeWaived) {
+      return { table: t, type: 'waived' as const, secs: 0, st, nextRes };
     }
-    const end = addMinutes(start, t.session.durationMinutes);
-    const remainingSecs = differenceInSeconds(end, now);
-    
-    // Match the Table Monitor's shared extension decision window.
-    if (remainingSecs <= -EXTENSION_DECISION_SECONDS) {
-      return { table: t, type: 'overtime' as const, secs: remainingSecs + EXTENSION_DECISION_SECONDS };
+    if (st.isOpenTime) {
+      return { table: t, type: 'open' as const, secs, st, nextRes };
     }
-    if (remainingSecs <= 0) {
-      return { table: t, type: 'grace' as const, secs: remainingSecs + EXTENSION_DECISION_SECONDS };
+    if (st.isOvertimeExtension) {
+      return { table: t, type: 'ot-ext' as const, secs, st, nextRes };
     }
-    if (remainingSecs <= 900) {
-      return { table: t, type: 'warning' as const, secs: remainingSecs };
+    if (st.isOvertime) {
+      return { table: t, type: 'overtime' as const, secs, st, nextRes };
     }
-    return { table: t, type: 'active' as const, secs: remainingSecs };
+    if (st.isGrace) {
+      return { table: t, type: 'grace' as const, secs, st, nextRes };
+    }
+    if (secs <= 900) {
+      return { table: t, type: 'warning' as const, secs, st, nextRes };
+    }
+    return { table: t, type: 'active' as const, secs, st, nextRes };
   });
 
   tableStatuses.sort((a, b) => {
     const score = (type: string) => {
       if (type === 'overtime') return 1;
       if (type === 'grace') return 2;
-      if (type === 'warning') return 3;
-      if (type === 'active') return 4;
-      return 5;
+      if (type === 'ot-ext') return 3;
+      if (type === 'warning') return 4;
+      if (type === 'active') return 5;
+      if (type === 'open') return 6;
+      return 7;
     };
     if (score(a.type) !== score(b.type)) return score(a.type) - score(b.type);
     return a.secs - b.secs;
@@ -126,15 +177,35 @@ function SidebarSmartTimer({ tables, onNavigate }: { tables: any[]; onNavigate: 
 
   const primary = tableStatuses[0];
   const isOt = primary.type === 'overtime';
+  const isOtExt = primary.type === 'ot-ext';
   const isGrace = primary.type === 'grace';
   const isWarn = primary.type === 'warning';
   const isOpen = primary.type === 'open';
+  const isWaived = primary.type === 'waived';
 
   const cardStyle = isOt
     ? 'bg-rose-950/30 border-rose-500/60 text-rose-400'
-    : (isGrace || isWarn)
-    ? 'bg-amber-950/30 border-amber-500/60 text-amber-400'
-    : 'bg-neutral-900 border-neutral-800 text-blue-400';
+    : isOtExt
+      ? 'bg-orange-950/30 border-orange-500/60 text-orange-300'
+      : isGrace || isWarn
+        ? 'bg-amber-950/30 border-amber-500/60 text-amber-400'
+        : isWaived
+          ? 'bg-emerald-950/25 border-emerald-700/60 text-emerald-400'
+          : 'bg-neutral-900 border-neutral-800 text-blue-400';
+
+  const headerLabel = isOt
+    ? 'OVERTIME'
+    : isOtExt
+      ? 'OT EXTENSION'
+      : isGrace
+        ? `LAST PLAY ${EXTENSION_DECISION_MINUTES}M`
+        : isWarn
+          ? 'ENDS SOON'
+          : isWaived
+            ? 'OT WAIVED'
+            : isOpen
+              ? 'OPEN TIME'
+              : 'NEXT UP';
 
   return (
     <div className="px-4 py-3">
@@ -144,20 +215,57 @@ function SidebarSmartTimer({ tables, onNavigate }: { tables: any[]; onNavigate: 
       >
         <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider mb-1">
           <span className="flex items-center gap-1.5 truncate">
-            {(isOt || isGrace) ? <AlertTriangle size={13} className="animate-bounce" /> : <Clock size={13} />}
-            <span>{isOt ? '⚠️ OVERTIME' : isGrace ? `⏳ EXTEND ${EXTENSION_DECISION_MINUTES}M` : isWarn ? '⏳ ENDS SOON' : '⏱️ NEXT UP'} · {primary.table.name}</span>
+            {isOt || isGrace ? (
+              <AlertTriangle size={13} className="animate-bounce flex-shrink-0" />
+            ) : isWaived ? (
+              <CheckCircle size={13} className="flex-shrink-0" />
+            ) : (
+              <Clock size={13} className="flex-shrink-0" />
+            )}
+            <span className="truncate">
+              {headerLabel} · {primary.table.name}
+            </span>
           </span>
         </div>
+
         <div className="flex items-baseline gap-1.5">
-          <p className={`text-xl font-black ${isOt ? 'text-rose-400 animate-pulse' : isGrace ? 'text-amber-400 animate-pulse' : 'text-neutral-900 dark:text-neutral-100'}`}>
-            {formatDuration(primary.secs)}
+          <p
+            className={`text-xl font-black tabular-nums ${
+              isOt
+                ? 'text-rose-400 animate-pulse'
+                : isOtExt
+                  ? 'text-orange-300'
+                  : isGrace
+                    ? 'text-amber-400 animate-pulse'
+                    : isWaived
+                      ? 'text-emerald-400 text-base'
+                      : 'text-neutral-900 dark:text-neutral-100'
+            }`}
+          >
+            {isWaived ? 'Ready to Close' : formatDuration(primary.secs, isOt)}
           </p>
-          <span className="text-[10px] text-neutral-600 dark:text-neutral-400 font-semibold">
-            {isOt ? 'unpaid' : isGrace ? 'to extend' : isOpen ? 'elapsed' : 'left'}
-          </span>
+          {!isWaived && (
+            <span className="text-[10px] text-neutral-600 dark:text-neutral-400 font-semibold">
+              {isOt
+                ? 'overtime'
+                : isOtExt
+                  ? primary.st?.cappedByReservation && primary.nextRes
+                    ? `until ${clockLabel(primary.nextRes.timeSlot)}`
+                    : 'left (OT only)'
+                  : isGrace
+                    ? 'to extend'
+                    : isOpen
+                      ? 'elapsed'
+                      : 'left'}
+            </span>
+          )}
         </div>
+
         <p className="text-[11px] text-neutral-600 dark:text-neutral-400 mt-1 truncate">
-          Player: <span className="font-semibold text-neutral-900 dark:text-neutral-200">{primary.table.session?.customerName}</span>
+          Player:{' '}
+          <span className="font-semibold text-neutral-900 dark:text-neutral-200">
+            {primary.table.session?.customerName}
+          </span>
         </p>
       </button>
     </div>
@@ -295,7 +403,7 @@ export function Layout() {
 
   const waitingCount = queue.filter((q: any) => q.status === 'waiting').length;
   const overtimeCount = tables.filter((t: any) => {
-    if (t.status !== 'occupied' || !t.session) return false;
+    if (t.status !== 'occupied' || !t.session || t.session.isOpenTime || t.session.overtimeWaived) return false;
     const end = new Date(t.session.startTime).getTime() + (t.session.durationMinutes || 0) * 60000;
     return Date.now() > end;
   }).length;
@@ -368,7 +476,7 @@ export function Layout() {
             </button>
           </div>
 
-          <SidebarSmartTimer tables={tables} onNavigate={navigate} />
+          <SidebarSmartTimer tables={tables} reservations={reservations} onNavigate={navigate} />
 
           {/* Navigation */}
           <nav className="flex-1 px-3 py-2 space-y-0.5 overflow-y-auto">

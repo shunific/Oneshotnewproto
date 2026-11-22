@@ -158,7 +158,7 @@ app.use(cors({
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-const { registerAuthRoutes } = require('./server-auth.cjs');
+const { registerAuthRoutes, verifySecret } = require('./server-auth.cjs');
 const { registerBackupRoutes } = require('./server-backup.cjs');
 // Email notifications are optional; a packaging gap must not block startup.
 let createEmailService = () => ({
@@ -500,51 +500,40 @@ setInterval(trainQueueAI, 1000 * 60 * 60 * 6);
 // ====================================================================
 // 🔐 VERIFY ADMIN PASSWORD FOR SENSITIVE OVERRIDES (e.g. Waive Overtime)
 // ====================================================================
-app.post('/api/auth/verify-admin', (req, res) => {
-  const nodeCrypto = require('crypto');
+app.post('/api/auth/verify-admin-override', (req, res) => {
   const password = typeof req.body?.password === 'string' ? req.body.password : '';
   if (!password) return res.status(400).json({ error: 'Enter an administrator password.' });
 
-  const sha256 = nodeCrypto.createHash('sha256').update(password).digest('hex');
-
-  const matchesStoredHash = (stored) => {
-    if (!stored || typeof stored !== 'string') return false;
-    if (stored.startsWith('scrypt$')) {
-      const parts = stored.split('$');
-      if (parts.length === 3) {
-        const [, salt, keyHex] = parts;
-        const expected = Buffer.from(keyHex, 'hex');
-        try {
-          const d1 = nodeCrypto.scryptSync(password, salt, expected.length);
-          if (d1.length === expected.length && nodeCrypto.timingSafeEqual(d1, expected)) return true;
-        } catch {}
-        try {
-          const d2 = nodeCrypto.scryptSync(password, Buffer.from(salt, 'hex'), expected.length);
-          if (d2.length === expected.length && nodeCrypto.timingSafeEqual(d2, expected)) return true;
-        } catch {}
-      }
-      return false;
-    }
-    return stored === sha256 || stored === password;
-  };
-
   db.all(
-    `SELECT id, username, fullName, password FROM staff WHERE isAdmin = 1 AND isActive = 1`,
+    `SELECT id, username, fullName, password FROM staff WHERE (isAdmin = 1 OR isAdmin = 'true') AND (isActive = 1 OR isActive = 'true')`,
     [],
-    (err, rows) => {
+    async (err, rows) => {
       if (err) return res.status(500).json({ error: err.message });
-      const matched = (rows || []).find((u) => matchesStoredHash(u.password));
-      if (!matched) {
-        return res.status(401).json({ error: 'Invalid administrator password.' });
+      try {
+        let matched = null;
+        for (const u of rows || []) {
+          const ok =
+            (await verifySecret(password, u.password, true)) ||
+            (await verifySecret(password, u.password, false));
+          if (ok) {
+            matched = u;
+            break;
+          }
+        }
+        if (!matched) {
+          return res.status(401).json({ error: 'Invalid administrator password.' });
+        }
+        res.json({
+          ok: true,
+          admin: {
+            id: matched.id,
+            username: matched.username,
+            fullName: matched.fullName || matched.username,
+          },
+        });
+      } catch (verifyErr) {
+        res.status(500).json({ error: verifyErr.message || 'Verification error.' });
       }
-      res.json({
-        ok: true,
-        admin: {
-          id: matched.id,
-          username: matched.username,
-          fullName: matched.fullName || matched.username,
-        },
-      });
     }
   );
 });

@@ -1,30 +1,84 @@
 import { completedReservationStats } from '../utils/waitHistory';
 import { localFetch } from '../utils/localApi';
+import { clockLabel } from '../utils/clockDisplay';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import logoImg from '../../assets/40eb82831843e17a3c48a360fd80f0aaaa58ddc8.png';
-import { useAppContext } from '../context/AppContext';
-import { Table, QueueItem } from '../context/AppContext';
+import { useAppContext, Table, QueueItem, Reservation } from '../context/AppContext';
 import { Clock, Users, Sparkles, Cpu, RefreshCw } from 'lucide-react';
 import { addMinutes, differenceInMinutes } from 'date-fns';
-import { EXTENSION_DECISION_MINUTES } from '../../../session-billing.mjs';
+import { EXTENSION_DECISION_MINUTES, getSessionTimerState } from '../../../session-billing.mjs';
+
+type UpcomingResInfo = {
+  id: string;
+  customerName: string;
+  timeSlot: string;
+  startMs: number;
+};
 
 // ── Helpers ────────────────────────────────────────────────────
-function getSessionTimer(table: Table, nowMs: number): {
+function findUpcomingReservationForTable(
+  table: Table,
+  reservations: Reservation[]
+): UpcomingResInfo | null {
+  if (!table.session || table.session.isOpenTime || !table.session.durationMinutes || !table.session.startTime) {
+    return null;
+  }
+  const startMs = Date.parse(String(table.session.startTime));
+  if (!Number.isFinite(startMs)) return null;
+  const scheduledEndMs = startMs + Number(table.session.durationMinutes) * 60000;
+  const currentNameNorm = (table.session.customerName || '').trim().toLowerCase();
+
+  const matches = (reservations || [])
+    .filter((r) => {
+      if (r.tableId !== table.id) return false;
+      if (!['pending', 'confirmed', 'checked-in'].includes(r.status)) return false;
+      if (currentNameNorm && (r.customerName || '').trim().toLowerCase() === currentNameNorm) return false;
+      const rDate = new Date(r.date);
+      const [h, m] = String(r.timeSlot || '00:00').split(':').map(Number);
+      rDate.setHours(h || 0, m || 0, 0, 0);
+      const rMs = rDate.getTime();
+      return Number.isFinite(rMs) && rMs >= scheduledEndMs && rMs <= scheduledEndMs + 12 * 3600000;
+    })
+    .map((r) => {
+      const rDate = new Date(r.date);
+      const [h, m] = String(r.timeSlot || '00:00').split(':').map(Number);
+      rDate.setHours(h || 0, m || 0, 0, 0);
+      return {
+        id: r.id,
+        customerName: r.customerName,
+        timeSlot: r.timeSlot,
+        startMs: rDate.getTime(),
+      };
+    })
+    .sort((a, b) => a.startMs - b.startMs);
+
+  return matches[0] || null;
+}
+
+function getSessionTimer(table: Table, nowMs: number, nextRes: UpcomingResInfo | null): {
   mm: string;
   ss: string;
   isOvertime: boolean;
+  isOvertimeExtension: boolean;
+  isOvertimeWaived: boolean;
   isGrace: boolean;
+  cappedByReservation: boolean;
   percentLeft: number;
   label: string;
   overtimeTierLabel: string;
   isOpenTime: boolean;
 } {
-  if (!table.session || !table.session.startTime) {
+  const st: any = getSessionTimerState(table.session, nowMs, nextRes?.startMs ?? null);
+
+  if (st.mode === 'idle') {
     return {
       mm: '--',
       ss: '--',
       isOvertime: false,
+      isOvertimeExtension: false,
+      isOvertimeWaived: false,
       isGrace: false,
+      cappedByReservation: false,
       percentLeft: 0,
       label: '',
       overtimeTierLabel: '',
@@ -32,20 +86,19 @@ function getSessionTimer(table: Table, nowMs: number): {
     };
   }
 
-  const start = new Date(table.session.startTime).getTime();
-  const elapsed = Math.max(0, nowMs - start);
-
-  // Handle "Open Time" (Pay-as-you-go, counting UP)
-  if (table.session.durationMinutes === null || table.session.isOpenTime) {
-    const hh = String(Math.floor(elapsed / 3600000)).padStart(2, '0');
-    const mm = String(Math.floor((elapsed % 3600000) / 60000)).padStart(2, '0');
-    const ss = String(Math.floor((elapsed % 60000) / 1000)).padStart(2, '0');
+  if (st.isOpenTime) {
+    const hh = String(Math.floor(st.displayMs / 3600000)).padStart(2, '0');
+    const mm = String(Math.floor((st.displayMs % 3600000) / 60000)).padStart(2, '0');
+    const ss = String(Math.floor((st.displayMs % 60000) / 1000)).padStart(2, '0');
 
     return {
-      mm: hh !== '00' ? hh : mm, // Show hours if over 60 mins, otherwise minutes
-      ss: hh !== '00' ? mm : ss, // Show minutes if over 60 mins, otherwise seconds
+      mm: hh !== '00' ? hh : mm,
+      ss: hh !== '00' ? mm : ss,
       isOvertime: false,
+      isOvertimeExtension: false,
+      isOvertimeWaived: false,
       isGrace: false,
+      cappedByReservation: false,
       percentLeft: 100,
       label: 'Elapsed Time',
       overtimeTierLabel: '',
@@ -53,40 +106,33 @@ function getSessionTimer(table: Table, nowMs: number): {
     };
   }
 
-  // Handle "Fixed Duration" (Counting DOWN)
-  const totalMs = table.session.durationMinutes * 60000;
-  const remaining = totalMs - elapsed;
-  const decisionMs = EXTENSION_DECISION_MINUTES * 60000;
-  const isOvertime = remaining <= -decisionMs;
-  const isGrace = remaining <= 0 && !isOvertime;
+  const mm = String(Math.floor(st.displayMs / 60000)).padStart(2, '0');
+  const ss = String(Math.floor((st.displayMs % 60000) / 1000)).padStart(2, '0');
+  const isOvertimeWaived = Boolean(st.isOvertimeWaived);
 
-  // During the 2-minute Last Play buffer, count down time left to extend; afterwards count overtime.
-  const shownMs = isGrace
-    ? Math.max(0, decisionMs + remaining)
-    : isOvertime
-      ? Math.abs(remaining) - decisionMs
-      : remaining;
+  const label = isOvertimeWaived
+    ? 'Overtime Waived'
+    : st.isGrace
+      ? `${mm}:${ss} Last Play`
+      : st.isOvertimeExtension
+        ? `${mm}:${ss} OT Ext. left`
+        : st.isOvertime
+          ? `+${mm}:${ss} Overtime`
+          : `${mm}:${ss} remaining`;
 
-  const mm = String(Math.floor(shownMs / 60000)).padStart(2, '0');
-  const ss = String(Math.floor((shownMs % 60000) / 1000)).padStart(2, '0');
-  const percentLeft = Math.max(0, Math.min(100, (remaining / totalMs) * 100));
-  const label = isGrace
-    ? `${mm}:${ss} Last Play`
-    : isOvertime
-      ? `+${mm}:${ss} Overtime`
-      : `${mm}:${ss} remaining`;
-
-  // Match the half-hour (<30m) vs full-hour (30m+) overtime conversion tier
-  let overtimeTierLabel = '';
-  if (isOvertime) {
-    const rawPastEndMins = Math.ceil(Math.abs(remaining) / 60000);
-    const fullCompletedHours = Math.floor((rawPastEndMins - 1) / 60);
-    const minInHour = ((rawPastEndMins - 1) % 60) + 1;
-    const billedHours = fullCompletedHours + (minInHour >= 30 ? 1 : 0.5);
-    overtimeTierLabel = billedHours === 0.5 ? 'Half-Hour Overtime' : `${billedHours}h Overtime Ext.`;
-  }
-
-  return { mm, ss, isOvertime, isGrace, percentLeft, label, overtimeTierLabel, isOpenTime: false };
+  return {
+    mm,
+    ss,
+    isOvertime: Boolean(st.isOvertime) && !isOvertimeWaived,
+    isOvertimeExtension: Boolean(st.isOvertimeExtension) && !isOvertimeWaived,
+    isOvertimeWaived,
+    isGrace: Boolean(st.isGrace) && !isOvertimeWaived,
+    cappedByReservation: Boolean(st.cappedByReservation),
+    percentLeft: st.percentLeft,
+    label,
+    overtimeTierLabel: st.overtimeLabel,
+    isOpenTime: false,
+  };
 }
 
 function formatWaitLabel(mins: number): string {
@@ -104,13 +150,15 @@ function TableCard({
   held,
   availabilityVerified,
   nowMs,
+  upcomingRes,
 }: {
   table: Table;
   held: boolean;
   availabilityVerified: boolean;
   nowMs: number;
+  upcomingRes: UpcomingResInfo | null;
 }) {
-  const timer = getSessionTimer(table, nowMs);
+  const timer = getSessionTimer(table, nowMs, upcomingRes);
   const badge =
     table.name.match(/\d+/)?.[0].slice(0, 3) ||
     table.name
@@ -186,38 +234,52 @@ function TableCard({
     );
   }
 
-  // Occupied Status (In Use, Last Play Buffer, Open Time, Overtime)
-  const isOvertime = timer.isOvertime;
-  const isGrace = timer.isGrace;
+  // Occupied Status (In Use, Last Play Buffer, Open Time, Overtime, OT Extension, OT Waived)
+  const isOvertimeWaived = timer.isOvertimeWaived;
+  const isOvertimeExtension = timer.isOvertimeExtension && !isOvertimeWaived;
+  const isOvertime = timer.isOvertime && !isOvertimeExtension && !isOvertimeWaived;
+  const isGrace = timer.isGrace && !isOvertimeWaived;
   const isOpenTime = timer.isOpenTime;
 
-  const colorClass = isOvertime
-    ? 'bg-rose-500/20 border-rose-500 text-rose-400 animate-pulse'
-    : isGrace
-      ? 'bg-amber-500/15 border-amber-500 text-amber-400 animate-pulse'
-      : isOpenTime
-        ? 'bg-blue-950/40 border-blue-800/40 text-blue-400'
-        : 'bg-amber-950/40 border-amber-800/40 text-amber-400';
+  const colorClass = isOvertimeWaived
+    ? 'bg-emerald-950/30 border-emerald-700/60 text-emerald-300'
+    : isOvertimeExtension
+      ? 'bg-orange-950/40 border-orange-500/80 text-orange-300'
+      : isOvertime
+        ? 'bg-rose-500/20 border-rose-500 text-rose-400 animate-pulse'
+        : isGrace
+          ? 'bg-amber-500/15 border-amber-500 text-amber-400 animate-pulse'
+          : isOpenTime
+            ? 'bg-blue-950/40 border-blue-800/40 text-blue-400'
+            : 'bg-amber-950/40 border-amber-800/40 text-amber-400';
 
-  const badgeClass = isOvertime
-    ? 'bg-rose-500/20 text-rose-400 border-rose-500/30'
-    : isGrace
-      ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-      : isOpenTime
-        ? 'bg-blue-500/20 text-blue-400 border-blue-500/30'
-        : 'bg-amber-500/20 text-amber-400 border-amber-500/30';
+  const badgeClass = isOvertimeWaived
+    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+    : isOvertimeExtension
+      ? 'bg-orange-500/20 text-orange-300 border-orange-500/40'
+      : isOvertime
+        ? 'bg-rose-500/20 text-rose-400 border-rose-500/30'
+        : isGrace
+          ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+          : isOpenTime
+            ? 'bg-blue-500/20 text-blue-400 border-blue-500/30'
+            : 'bg-amber-500/20 text-amber-400 border-amber-500/30';
 
-  const barClass = isOvertime
-    ? 'bg-rose-500/40'
-    : isGrace
-      ? 'bg-amber-500/50'
-      : isOpenTime
-        ? 'bg-blue-400/50'
-        : timer.percentLeft < 15
-          ? 'bg-rose-500'
-          : timer.percentLeft < 30
-            ? 'bg-amber-500'
-            : 'bg-emerald-500';
+  const barClass = isOvertimeWaived
+    ? 'bg-emerald-500/40'
+    : isOvertimeExtension
+      ? timer.percentLeft < 20 ? 'bg-rose-500' : 'bg-orange-400'
+      : isOvertime
+        ? 'bg-rose-500/40'
+        : isGrace
+          ? 'bg-amber-500/50'
+          : isOpenTime
+            ? 'bg-blue-400/50'
+            : timer.percentLeft < 15
+              ? 'bg-rose-500'
+              : timer.percentLeft < 30
+                ? 'bg-amber-500'
+                : 'bg-emerald-500';
 
   return (
     <div className={`relative border-2 rounded-2xl p-5 flex flex-col gap-3 overflow-hidden ${colorClass}`}>
@@ -226,7 +288,17 @@ function TableCard({
           <span className="font-black text-white">{badge}</span>
         </div>
         <div className={`text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border ${badgeClass}`}>
-          {isOvertime ? '⚠ OVERTIME' : isGrace ? 'LAST PLAY' : isOpenTime ? 'OPEN TIME' : 'IN USE'}
+          {isOvertimeWaived
+            ? 'OT WAIVED'
+            : isOvertimeExtension
+              ? 'OT EXTENSION'
+              : isOvertime
+                ? '⚠ OVERTIME'
+                : isGrace
+                  ? 'LAST PLAY'
+                  : isOpenTime
+                    ? 'OPEN TIME'
+                    : 'IN USE'}
         </div>
       </div>
 
@@ -236,24 +308,36 @@ function TableCard({
       </div>
 
       <div className="text-center">
-        <p className="text-[10px] uppercase tracking-wider mb-1 opacity-80">
+        <p className="text-[10px] uppercase tracking-wider mb-1 opacity-85">
           {isOpenTime
             ? 'Time Elapsed'
-            : isGrace
-              ? `Extend within ${EXTENSION_DECISION_MINUTES}m`
-              : isOvertime
-                ? timer.overtimeTierLabel || 'Overtime'
-                : 'Time Left'}
+            : isOvertimeWaived
+              ? 'Overtime Waived · Ready to Close'
+              : isGrace
+                ? `Extend within ${EXTENSION_DECISION_MINUTES}m`
+                : isOvertimeExtension
+                  ? timer.cappedByReservation && upcomingRes
+                    ? `Ends ${clockLabel(upcomingRes.timeSlot)} (Res.)`
+                    : 'OT Extension · Time Left'
+                  : isOvertime
+                    ? timer.overtimeTierLabel || 'Overtime'
+                    : 'Time Left'}
         </p>
         <div className="font-black text-4xl tabular-nums tracking-tight text-white">
           {isOvertime ? `+${timer.mm}:${timer.ss}` : `${timer.mm}:${timer.ss}`}
         </div>
 
+        {isOvertimeExtension && (
+          <p className="text-[9px] text-orange-300/80 font-semibold mt-1">
+            Overtime bill only · No extra 1hr
+          </p>
+        )}
+
         <div className="mt-2 h-1.5 bg-black/40 rounded-full overflow-hidden relative">
-          {!isOvertime && !isGrace && !isOpenTime && (
+          {!isOvertime && !isGrace && !isOpenTime && !isOvertimeWaived && (
             <div className={`h-full rounded-full transition-all duration-1000 ${barClass}`} style={{ width: `${timer.percentLeft}%` }} />
           )}
-          {(isOvertime || isGrace) && <div className={`h-full w-full ${barClass}`} />}
+          {(isOvertime || isGrace || isOvertimeWaived) && <div className={`h-full w-full ${barClass}`} />}
           {isOpenTime && (
             <div className="h-full w-full bg-blue-900/50 overflow-hidden relative">
               <div className={`absolute inset-0 w-1/2 ${barClass} animate-[ping_2s_cubic-bezier(0,0,0.2,1)_infinite] skew-x-12`} />
@@ -437,6 +521,8 @@ export function LiveMonitor() {
     return () => controller.abort();
   }, [fetchAIPrediction]);
 
+  const nowMs = now.getTime();
+
   // Compute next-person wait time + individual wait estimate for every waiting customer
   const { nextPersonWait, perPersonWaitMap } = useMemo(() => {
     const waitMap = new Map<string, string>();
@@ -458,20 +544,29 @@ export function LiveMonitor() {
     );
 
     activeTables.forEach(t => {
-      const start = new Date(t.session!.startTime);
-      const isOpen = Boolean(t.session!.isOpenTime || !t.session!.durationMinutes);
-      const elapsed = Math.max(0, differenceInMinutes(now, start));
+      const upcomingRes = findUpcomingReservationForTable(t, reservations);
+      const st = getSessionTimerState(t.session, nowMs, upcomingRes?.startMs ?? null);
 
-      if (!isOpen) {
-        const end = addMinutes(start, Number(t.session!.durationMinutes));
-        const remaining = differenceInMinutes(end, now);
-        if (remaining > 0) {
-          tableFreeAt.push(remaining + 2); // +2 mins table cleanup
-          return;
-        }
+      if (st.mode === 'overtime-waived') {
+        tableFreeAt.push(5); // Wrapping up now
+        return;
       }
 
-      // Open time or overtime: use Brain.js predicted session length minus elapsed time
+      if (st.mode === 'fixed' || st.mode === 'overtime-extension') {
+        const minsLeft = Math.ceil(st.displayMs / 60000);
+        // If capped by an upcoming reservation, the table won't be free for walk-ins until after that reservation
+        if (st.cappedByReservation && upcomingRes) {
+          const resObj = reservations.find(r => r.id === upcomingRes.id);
+          const resDurMins = (Number(resObj?.durationHours) || 1) * 60;
+          tableFreeAt.push(minsLeft + resDurMins + 2);
+        } else {
+          tableFreeAt.push(minsLeft + 2); // +2 mins table cleanup
+        }
+        return;
+      }
+
+      const start = new Date(t.session!.startTime);
+      const elapsed = Math.max(0, differenceInMinutes(now, start));
       const aiRemaining = Math.max(15, aiSessionMinutes - elapsed);
       tableFreeAt.push(aiRemaining + 2);
     });
@@ -522,7 +617,7 @@ export function LiveMonitor() {
       nextPersonWait: firstWait,
       perPersonWaitMap: waitMap,
     };
-  }, [tables, availableTables, safeHeldIds, reservationMoveError, reservations, calledQueue, waitingOnly, aiSessionMinutes, now]);
+  }, [tables, availableTables, safeHeldIds, reservationMoveError, reservations, calledQueue, waitingOnly, aiSessionMinutes, now, nowMs]);
 
   const availableCount = reservationMoveError ? '—' : availableTables.length;
   const occupiedCount = tables.filter(t => t.isActive && t.status === 'occupied').length;
@@ -530,7 +625,6 @@ export function LiveMonitor() {
 
   const timeStr = now.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
   const dateStr = now.toLocaleDateString('en-PH', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
-  const nowMs = now.getTime();
 
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col overflow-auto">
@@ -579,6 +673,10 @@ export function LiveMonitor() {
           <span className="text-xs font-medium text-blue-300">Open Time</span>
         </div>
         <div className="flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-full bg-orange-400" />
+          <span className="text-xs font-medium text-orange-300">OT Extension</span>
+        </div>
+        <div className="flex items-center gap-1.5">
           <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse" />
           <span className="text-xs font-medium text-rose-300">Overtime</span>
         </div>
@@ -614,6 +712,7 @@ export function LiveMonitor() {
                   held={safeHeldIds.has(table.id)}
                   availabilityVerified={availableTables.some(available => available.id === table.id)}
                   nowMs={nowMs}
+                  upcomingRes={findUpcomingReservationForTable(table, reservations)}
                 />
               ))}
           </div>
@@ -632,7 +731,7 @@ export function LiveMonitor() {
               </p>
             </div>
 
-            {/* 🟢 Next-Person AI Wait Banner (Matches Queue.tsx & Web) */}
+            {/* 🟢 Next-Person AI Wait Banner */}
             <div className="bg-gradient-to-r from-emerald-950/60 to-emerald-900/20 border border-emerald-800/50 rounded-xl p-3.5 flex items-center justify-between gap-3">
               <div className="flex items-center gap-2.5 min-w-0">
                 <div className="w-8 h-8 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center flex-shrink-0">
