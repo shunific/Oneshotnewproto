@@ -294,24 +294,21 @@ export function Queue() {
     finally{queueActionInFlight.current=false;}
   };
 
-  // 🟢 NEW: Calculate exact physical time until the closest table finishes
-  const getNearestEndTime = () => {
+  // Next table a walk-in can use: the first free table, otherwise the occupied
+  // table that finishes soonest.
+  const getNextAvailableTable = () => {
     if(reservationMoveError||heldTableIds.size)return null;
+    const free = availableTables[0];
+    if (free) return { name: free.name || `Table ${free.id}`, minutes: 0 };
     const active = tables.filter((t: any) => t.isActive && t.status === 'occupied' && t.session && !heldTableIds.has(t.id) && !t.session.isOpenTime && t.session.durationMinutes);
     if (active.length === 0) return null;
-    
-    const remainingTimes = active.map((t: any) => {
-      const endTime = addMinutes(new Date(t.session.startTime), t.session.durationMinutes);
-      return differenceInMinutes(endTime, now);
-    }).sort((a, b) => a - b);
-    
-    const nearest = remainingTimes[0];
-    if (nearest <= 0) return "Table finishing now";
-    
-    const hrs = Math.floor(nearest / 60);
-    const mins = nearest % 60;
-    if (hrs > 0) return `Next table ends in ${hrs}h ${mins}m`;
-    return `Next table ends in ~${mins}m`;
+    const next = active
+      .map((t: any) => ({
+        name: t.name || `Table ${t.id}`,
+        minutes: Math.max(0, differenceInMinutes(addMinutes(new Date(t.session.startTime), t.session.durationMinutes), now))
+      }))
+      .sort((a, b) => a.minutes - b.minutes)[0];
+    return next;
   };
 
   return (
@@ -548,12 +545,17 @@ export function Queue() {
                 {reservationMoveError || heldTableIds.size ? 'Check transfer recovery' : nextPersonWait}
               </span>
               <div className="flex flex-col items-end mt-1 space-y-1.5">
-                {/* 🟢 THE NEAREST END TIME BADGE */}
-                {getNearestEndTime() && availableTables.length === 0 && (
-                  <span className="text-[10px] text-emerald-300/90 font-semibold bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/50 flex items-center gap-1.5 shadow-sm">
-                    <Clock size={10} className="text-emerald-400" /> {getNearestEndTime()}
-                  </span>
-                )}
+                {/* 🟢 NEXT AVAILABLE TABLE */}
+                {(() => {
+                  const nextTable = getNextAvailableTable();
+                  if (!nextTable) return null;
+                  return (
+                    <span className="text-[10px] text-emerald-300/90 font-semibold bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/50 flex items-center gap-1.5 shadow-sm">
+                      <Clock size={10} className="text-emerald-400" /> Next available: {nextTable.name}
+                      {nextTable.minutes > 0 ? ` · ~${nextTable.minutes}m` : ' · now'}
+                    </span>
+                  );
+                })()}
               </div>
             </div>
           </div>
