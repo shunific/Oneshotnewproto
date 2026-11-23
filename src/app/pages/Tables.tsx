@@ -52,6 +52,15 @@ type PaymentStatus = 'paid' | 'partial' | 'unpaid';
 
 const formatPHP = (amount: any) => `₱${(Number(amount) || 0).toFixed(2)}`;
 
+// Readable labels for fixed and pro-rated play time.
+const formatPlayDuration = (minutes: number) => {
+  const total = Math.max(0, Math.round(Number(minutes) || 0));
+  const hours = Math.floor(total / 60);
+  const mins = total % 60;
+  if (hours <= 0) return `${mins}m`;
+  return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+};
+
 const reviewExtensionPayment = (minutes: number | 'open', status: PaymentStatus, method: PaymentMethod, charge: number, partialInput: string, cashInput: string, reference: string) => {
   if (!['paid','partial','unpaid'].includes(status)) throw new Error('Choose an extension payment status.');
   if (minutes === 'open' || status === 'unpaid') return {amount:0,payment:{method:'cash' as PaymentMethod}};
@@ -488,20 +497,41 @@ export function Tables() {
 
   const posInfo = getPosSessionInfo();
 
-  const getNextClosingTime = () => {
-    const now = new Date();
-    const isWeekend = now.getDay() === 5 || now.getDay() === 6;
-    const closeTimeStr = isWeekend ? rates?.weekendEndTime : rates?.weekdayEndTime;
-    if (!closeTimeStr) return null;
-    
-    const [hr, min] = closeTimeStr.split(':').map(Number);
-    const closeDate = new Date(now);
-    closeDate.setHours(hr, min, 0, 0);
-    
-    if (closeDate <= now) {
-      closeDate.setDate(closeDate.getDate() + 1);
+  const getNextClosingTime = (at: Date = new Date()) => {
+    // Mirror the server's operating-window rule: Friday, Saturday and Sunday
+    // nights are weekend windows, and a session that starts after midnight still
+    // belongs to the previous day's window. This keeps pro-rated play ending on
+    // the venue's real closing hour instead of a guessed weekday close.
+    const midnight = new Date(at);
+    midnight.setHours(0, 0, 0, 0);
+    const parseTime = (value: string | undefined): [number, number] | null => {
+      const [h, m] = String(value || '').split(':').map(Number);
+      return Number.isInteger(h) && Number.isInteger(m) ? [h, m] : null;
+    };
+
+    for (const offset of [-1, 0]) {
+      const anchor = new Date(midnight);
+      anchor.setDate(anchor.getDate() + offset);
+      const isWeekend = [0, 5, 6].includes(anchor.getDay());
+      const openTime = parseTime(isWeekend ? rates?.weekendStartTime : rates?.weekdayStartTime);
+      const closeTime = parseTime(isWeekend ? rates?.weekendEndTime : rates?.weekdayEndTime);
+      if (!openTime || !closeTime) continue;
+      const opening = new Date(anchor);
+      opening.setHours(openTime[0], openTime[1], 0, 0);
+      const closing = new Date(anchor);
+      closing.setHours(closeTime[0], closeTime[1], 0, 0);
+      if (closing < opening) closing.setDate(closing.getDate() + 1);
+      if (at >= opening && at < closing) return closing;
     }
-    return closeDate;
+
+    // Before opening: the next close still belongs to today's operating day.
+    const isWeekend = [0, 5, 6].includes(midnight.getDay());
+    const closeTime = parseTime(isWeekend ? rates?.weekendEndTime : rates?.weekdayEndTime);
+    if (!closeTime) return null;
+    const closing = new Date(midnight);
+    closing.setHours(closeTime[0], closeTime[1], 0, 0);
+    if (closing <= at) closing.setDate(closing.getDate() + 1);
+    return closing;
   };
 
   const hasUnconfirmedOrderForTable = (tableId: string) => {
@@ -531,30 +561,32 @@ export function Tables() {
   useEffect(() => {
     if (assigningTableId) {
       const availData = getAvailableDurations(assigningTableId, selectedCustomer?.kind === 'reservation' ? selectedCustomer.id : undefined);
-      if (durationMinutes !== 'open' && typeof durationMinutes === 'number') {
-        if (availData && durationMinutes > availData.maxMins) {
-          const newMins = (availData?.opts && availData.opts.length > 0) ? availData.opts[0] : 60;
+      if (availData && durationMinutes !== 'open' && typeof durationMinutes === 'number') {
+        if (durationMinutes > availData.maxMins && availData.maxMins > 0) {
+          // Keep the session ending at the latest allowed time (closing or the
+          // next reservation) instead of collapsing back to a full hour.
+          const newMins = availData.maxMins;
           setDurationMinutes(newMins);
           setAmountPaid(Math.round((newMins / 60) * effectiveHourly).toString());
         }
-      } else if (durationMinutes === 'open' && availData && availData.maxMins < 1440) {
-          const newMins = (availData?.opts && availData.opts.length > 0) ? availData.opts[0] : 60;
+      } else if (durationMinutes === 'open' && availData && availData.maxMins < 1440 && availData.maxMins > 0) {
+          const newMins = availData.maxMins;
           setDurationMinutes(newMins);
           setAmountPaid(Math.round((newMins / 60) * effectiveHourly).toString());
           setPaymentOption('payNow');
       }
     }
-  }, [reservations, assigningTableId, effectiveHourly]);
+  }, [reservations, assigningTableId, effectiveHourly, pricingClock]);
 
   // 🟢 NEW: Pro-Rated Table-Specific Gap Calculator
-  const getAvailableDurations = (tableId: string | null, excludeId?: string) => {
+  const getAvailableDurations = (tableId: string | null, excludeId?: string, at: Date = new Date()) => {
     if (!tableId) return { opts: [60], maxMins: 1440, conflictWarning: null, isBlocked: false };
-    const now = new Date();
+    const now = at;
     let maxMins = (reservationTerms?.maxHours || 8) * 60;
     let conflictWarning = null;
     let isBlocked = false;
 
-    const closeDate = getNextClosingTime();
+    const closeDate = getNextClosingTime(now);
     if (closeDate) {
       const minsLeft = Math.floor(differenceInSeconds(closeDate, now) / 60);
       if (minsLeft > 0) maxMins = Math.min(maxMins, minsLeft);
@@ -573,15 +605,15 @@ export function Tables() {
       }
     }
 
-    const opts = [];
+    const opts: number[] = [];
     for (let m = 60; m <= maxMins; m += 60) opts.push(m);
     
-    // Pro-rated fraction injection (e.g. 45m or 90m)
-    if (maxMins > 0 && !opts.includes(maxMins)) {
-       opts.push(maxMins);
-       opts.sort((a,b) => a-b);
-    }
-    if (opts.length === 0 && maxMins >= 30) opts.push(maxMins); 
+    // Always offer the exact remaining play time (for example until closing) so
+    // a pro-rated session can end on the venue's closing hour instead of being
+    // snapped down to a full hour.
+    if (maxMins > 0 && !opts.includes(maxMins)) opts.push(maxMins);
+    opts.sort((a, b) => a - b);
+    if (opts.length === 0 && maxMins > 0) opts.push(maxMins); 
 
     return { opts, maxMins, conflictWarning, isBlocked };
   };
@@ -732,13 +764,29 @@ export function Tables() {
     if (reviewedPricing.hourlyRate !== effectiveHourly) { setPricingClock(Date.now()); throw new Error('The start-time rate changed. Review the updated price before starting play.'); }
     if (!Number.isFinite(effectiveOvertime) || effectiveOvertime <= 0) throw new Error('Ask an administrator to configure the overtime rate before starting play.');
     const isOpenTime = durationMinutes === 'open';
-    const autoPayment = isOpenTime ? 0 : ((durationMinutes as number) / 60) * effectiveHourly;
+    const sessionStart = new Date();
+    let fixedDuration = isOpenTime ? null : (durationMinutes as number);
+    if (!isOpenTime) {
+      // Re-check the live limit at the exact start time so a pro-rated session
+      // always ends on or before closing instead of one full hour.
+      const liveAvailability = getAvailableDurations(assigningTableId, selectedCustomer?.kind === 'reservation' ? selectedCustomer.id : undefined, sessionStart);
+      if (liveAvailability.isBlocked || liveAvailability.maxMins <= 0) throw new Error('This table is no longer available for play. Recheck the schedule.');
+      fixedDuration = Math.max(1, Math.min(fixedDuration as number, liveAvailability.maxMins));
+      if (fixedDuration !== durationMinutes) {
+        setDurationMinutes(fixedDuration);
+        if (paymentOption === 'payNow') setAmountPaid(String(Math.round((fixedDuration / 60) * effectiveHourly)));
+      }
+    }
+    const autoPayment = isOpenTime ? 0 : ((fixedDuration as number) / 60) * effectiveHourly;
     
-    const credit = !isOpenTime && paymentOption === 'payNow' ? (amountPaid.trim() ? Number(amountPaid) : autoPayment) : 0;
+    const enteredAmount = amountPaid.trim() ? Number(amountPaid) : autoPayment;
+    // Never collect more than the quote, and stay within the server's limit when
+    // the pro-rated duration was clipped to closing time.
+    const credit = !isOpenTime && paymentOption === 'payNow' ? Math.min(enteredAmount, autoPayment) : 0;
     if (!Number.isFinite(credit) || credit < 0) throw new Error('Enter a valid amount received.');
     const parsedPartySize = Math.max(1, Math.min(99, parseInt(partySize, 10) || 1));
     const proposal = {
-      durationMinutes:isOpenTime?null:(durationMinutes as number),isOpenTime,
+      durationMinutes:fixedDuration,isOpenTime,
       hourlyRate:effectiveHourly,overtimeRate:effectiveOvertime,pricingVersion:1,
       amountPaid:credit,paymentStatus:isOpenTime?'payLater':paymentOption,
       partySize:parsedPartySize,
@@ -749,7 +797,7 @@ export function Tables() {
       result = await seatQueueCustomer(selectedCustomer.id,assigningTableId,proposal);
     } else {
       await assignTable(assigningTableId, {
-        ...proposal,customerName,startTime:new Date(),orders:[],
+        ...proposal,customerName,startTime:sessionStart,orders:[],
         isPaid:!isOpenTime && credit >= autoPayment,
       });
       if(selectedCustomer?.kind === 'reservation') updateReservationStatus(selectedCustomer.id,'completed');
@@ -1177,7 +1225,7 @@ export function Tables() {
               <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 space-y-2">
                 <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold mb-2">Live Bill Summary</p>
                 <div className="flex justify-between text-xs">
-                  <span className="text-neutral-400">Table Booked {posTable.session.isOpenTime ? '(Open Time)' : `(${(posTable.session.durationMinutes as number) < 60 ? `${posTable.session.durationMinutes}m` : `${(posTable.session.durationMinutes as number) / 60}h`})`}</span>
+                  <span className="text-neutral-400">Table Booked {posTable.session.isOpenTime ? '(Open Time)' : `(${formatPlayDuration(posTable.session.durationMinutes as number)})`}</span>
                   <span className="text-neutral-200">{formatPHP(posInfo.bookedCharge)}</span>
                 </div>
                 {posInfo.bookingDiscount > 0 && (<div className="flex justify-between text-xs text-emerald-400"><span>Booking Discount</span><span>−{formatPHP(posInfo.bookingDiscount)}</span></div>)}
@@ -1615,7 +1663,7 @@ export function Tables() {
                             setAmountPaid('0');
                             setPaymentOption('payLater');
                           } else {
-                            const d = Number(val);
+                            const d = Math.max(1, Math.min(Number(val), availData.maxMins));
                             setDurationMinutes(d);
                             if (paymentOption === 'payNow') setAmountPaid(Math.round((d / 60) * effectiveHourly).toString());
                           }
@@ -1624,7 +1672,7 @@ export function Tables() {
                       >
                         {availData.opts.map(d => (
                           <option key={d} value={d}>
-                            {d % 60 === 0 ? `${d / 60} Hour${d / 60 > 1 ? 's' : ''}` : `${d} Minutes (Pro-rated)`}
+                            {d % 60 === 0 ? `${d / 60} Hour${d / 60 > 1 ? 's' : ''}` : `${formatPlayDuration(d)} (Pro-rated)`}
                           </option>
                         ))}
                         <option value="open">
@@ -1681,7 +1729,7 @@ export function Tables() {
                           className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
                           placeholder={`₱${Math.round(((durationMinutes as number) / 60) * effectiveHourly)}`}
                         />
-                        <p className="text-[10px] text-neutral-600">Suggested: ₱{Math.round(((durationMinutes as number) / 60) * effectiveHourly)} (whole number) for {(durationMinutes as number) < 60 ? `${durationMinutes}min` : `${(durationMinutes as number) / 60}hr`}</p>
+                        <p className="text-[10px] text-neutral-600">Suggested: ₱{Math.round(((durationMinutes as number) / 60) * effectiveHourly)} (whole number) for {formatPlayDuration(durationMinutes as number)}</p>
                       </div>
                     )}
 
@@ -1742,7 +1790,7 @@ export function Tables() {
               <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 space-y-3">
                 <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold mb-1">Billing Breakdown</p>
                 <div className="flex justify-between text-xs">
-                  <span className="text-neutral-400">Table Booked {endInfo.isOpenTime ? '(Open Time)' : `(${(endingTable.session.durationMinutes as number) < 60 ? `${endingTable.session.durationMinutes}m` : `${(endingTable.session.durationMinutes as number) / 60}h`})`}</span>
+                  <span className="text-neutral-400">Table Booked {endInfo.isOpenTime ? '(Open Time)' : `(${formatPlayDuration(endingTable.session.durationMinutes as number)})`}</span>
                   <span className="text-neutral-200">{formatPHP(endInfo.bookedCharge)}</span>
                 </div>
                 {endInfo.bookingDiscount > 0 && (<div className="flex justify-between text-xs text-emerald-400"><span>Booking Discount</span><span>−{formatPHP(endInfo.bookingDiscount)}</span></div>)}
