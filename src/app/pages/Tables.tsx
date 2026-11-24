@@ -711,9 +711,13 @@ export function Tables() {
     const opts = [];
     for (let m = 60; m <= maxMins; m += 60) opts.push(m);
 
-    // Find free tables that have at least 60 mins clear before their own next reservation
+    // Find free tables that can actually take a one-hour extension: they must be
+    // clear of their own next reservation and also have an hour before closing.
+    const closing = getNextClosingTime();
+    const minutesBeforeClosing = closing ? Math.floor(differenceInSeconds(closing, baseEnd) / 60) : Infinity;
     const safeTables = safeAvailableTables.filter((t: any) => {
       if (t.id === tableId) return false;
+      if (minutesBeforeClosing < 60) return false;
       const otherRes = getNextReservation(t.id);
       if (!otherRes) return true;
       const gap = Math.floor(differenceInSeconds(otherRes.date, baseEnd) / 60) - 2;
@@ -2240,7 +2244,7 @@ export function Tables() {
                                         try {
                                           await migrateSession(extendingTableId, t.id);
                                           setExtendingTableId(t.id);
-                                          flash(`Moved to ${t.name}. You can now confirm the extension.`, 'success');
+                                          flash(`Moved to ${t.name}. Review the available extension time, then confirm.`, 'success');
                                         } catch (err: any) {
                                           flash(err?.message || 'Could not migrate table.', 'error');
                                         } finally {

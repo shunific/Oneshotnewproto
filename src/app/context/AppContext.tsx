@@ -1979,7 +1979,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       staffLoggedIn, adminLoggedIn, staffProfile,
       staffLogin, staffLogout, confirmPinBackup, adminLogout: staffLogout, updateStaffProfile,
       assignTable, freeTable, reserveTable, extendSession, migrateSession, setTableMaintenance, setTableEvent, addTable, updateTable, updateTableState, toggleTableActive, deleteTable,
-      checkoutTable, seatQueueCustomer, retryPendingOrder,
+      checkoutTable, seatQueueCustomer, retryPendingOrder, setSessionOvertimeWaived,
       addInventoryItem, updateInventoryItem, deleteInventoryItem, submitTableOrders, voidTableOrder,
       addToQueue, removeFromQueue, callQueueItem,
       addReservation, updateReservationStatus, updateReservation, cancelReservation, updateDownPayment, updateBalance,
