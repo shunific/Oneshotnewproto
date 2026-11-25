@@ -1,0 +1,15 @@
+# Local build artifacts and packaged Electron releases are not needed by the
+# Vercel Vite build and exceed its per-file upload limit.
+.git
+.vercel
+node_modules
+dist
+release
+release-newest
+tests
+supabase
+*.db
+*.db-wal
+*.db-shm
+*.exe
+*.asar

@@ -303,7 +303,11 @@ if (!sqlite3) {
     
     db.serialize(() => {
       db.run(`CREATE TABLE IF NOT EXISTS systemSettings (keyName TEXT PRIMARY KEY, settingValue TEXT, updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP)`);
-      db.run(`CREATE TABLE IF NOT EXISTS cms (keyName TEXT PRIMARY KEY, settingValue TEXT, updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+      db.run(`CREATE TABLE IF NOT EXISTS cms (keyName TEXT PRIMARY KEY, settingValue TEXT, updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP, dateAdded DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+      db.run('ALTER TABLE cms ADD COLUMN dateAdded DATETIME', err => {
+        if (err && !/duplicate column name/i.test(err.message)) console.error('CMS dateAdded migration failed:', err.message);
+      });
+      db.run(`UPDATE cms SET dateAdded = COALESCE(dateAdded, updatedAt, CURRENT_TIMESTAMP) WHERE dateAdded IS NULL`);
       db.run(`CREATE TABLE IF NOT EXISTS images (id TEXT PRIMARY KEY, mimeType TEXT, data BLOB)`);
       db.run(`CREATE TABLE IF NOT EXISTS staff (id TEXT PRIMARY KEY, username TEXT, password TEXT, fullName TEXT, role TEXT, phone TEXT, joinedDate TEXT, avatarImg TEXT, isActive INTEGER DEFAULT 1, isAdmin INTEGER DEFAULT 0, recoveryPin TEXT)`);
       db.run('ALTER TABLE staff ADD COLUMN isFirstLogin INTEGER DEFAULT 0', () => {});
@@ -867,6 +871,23 @@ app.post('/api/ai/predict-wait-time', (req, res) => {
 // ====================================================================
 
 
+// A CMS image value is only safe to publish when it points at a real host or
+// at this machine's uploaded image route. Blank/retired-host values must never
+// replace the older saved row.
+const localCmsImageIsValid = (key, value) => {
+  const isSource = (v) => typeof v === 'string' && (
+    /^https?:\/\//i.test(v) || v.startsWith('/api/images/')
+  );
+  if (key === 'heroImages') {
+    let list = value;
+    if (typeof value === 'string') {
+      try { list = JSON.parse(value); } catch { return false; }
+    }
+    return Array.isArray(list) && list.length > 0 && list.every(isSource);
+  }
+  return isSource(value);
+};
+
 app.put('/api/cms', (req, res) => {
   const payload = req.body;
   const keys = Object.keys(payload);
@@ -882,9 +903,27 @@ app.put('/api/cms', (req, res) => {
     const key = keys[index];
     const rawVal = payload[key];
     const value = (typeof rawVal === 'object' && rawVal !== null) ? JSON.stringify(rawVal) : String(rawVal ?? '');
+
+    if (key === 'heroImages' || key === 'aboutImage') {
+      // `[]` (gallery) and `""` (feature photo) are explicit admin clears.
+      // Everything else that is blank or invalid keeps the older saved row.
+      const explicitClear =
+        (key === 'heroImages' && value === '[]') ||
+        (key === 'aboutImage' && value === '');
+      if (!explicitClear && !localCmsImageIsValid(key, rawVal)) {
+        db.get(`SELECT settingValue FROM cms WHERE keyName = ?`, [key], (readErr) => {
+          if (readErr) errors.push({ key, error: readErr.message });
+          // A valid older row is left untouched. If there is no older valid
+          // row there is nothing to protect, so the write is skipped as well.
+          index++;
+          processNextKey();
+        });
+        return;
+      }
+    }
     
     db.run(
-      `INSERT INTO cms (keyName, settingValue, updatedAt) VALUES (?, ?, CURRENT_TIMESTAMP)
+      `INSERT INTO cms (keyName, settingValue, updatedAt, dateAdded) VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
        ON CONFLICT(keyName) DO UPDATE SET settingValue = excluded.settingValue, updatedAt = CURRENT_TIMESTAMP`,
       [key, value],
       function(err) {
@@ -1138,7 +1177,8 @@ if (error) {
         const rawVal = (r.settingValue !== undefined && r.settingValue !== null) ? r.settingValue : (r.settingvalue ?? "");
         return {
           keyname: k,
-          settingvalue: typeof rawVal === "object" ? JSON.stringify(rawVal) : String(rawVal)
+          settingvalue: typeof rawVal === "object" ? JSON.stringify(rawVal) : String(rawVal),
+          dateAdded: r.dateAdded || r.dateadded || null
         };
       }, "keyname"),
       syncTable('systemSettings', 'system_settings', r => ({ key_name: r.keyName, setting_value: r.settingValue }), 'key_name'),
@@ -1581,7 +1621,10 @@ app.post('/api/sync-from-cloud', async (req, res) => {
         const k = row.keyname || row.key_name || row.keyName;
         const v = row.settingvalue ?? row.setting_value ?? row.settingValue;
         if (k && v !== undefined && v !== null) {
-          await dbRun(`INSERT OR IGNORE INTO cms (keyName, settingValue) VALUES (?, ?)`, [k, String(v)]);
+          await dbRun(
+            `INSERT OR IGNORE INTO cms (keyName, settingValue, dateAdded) VALUES (?, ?, ?)`,
+            [k, String(v), row.dateAdded || row.dateadded || row.date_added || row.updatedat || new Date().toISOString()]
+          );
         }
       }
     }
@@ -1673,10 +1716,12 @@ app.post('/api/images', upload.single('image'), async (req, res) => {
       .from('oneshot-assets')
       .upload(fileName, req.file.buffer, { contentType: req.file.mimetype });
 
-    if (uploadError) {
+    if (uploadError && !/already exists|duplicate/i.test(uploadError.message || '')) {
       return res.status(500).json({ error: uploadError.message });
     }
 
+    // A same-name object already exists: keep the older file and return its
+    // public URL instead of overwriting it with the new upload.
     const { data: publicUrlData } = supabase.storage
       .from('oneshot-assets')
       .getPublicUrl(fileName);

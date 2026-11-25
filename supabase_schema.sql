@@ -174,6 +174,35 @@ CREATE TABLE public.closed_dates (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Website CMS
+-- The live table uses lower-case column names because it was created through
+-- PostgREST. `dateAdded` is quoted so the camelCase API name is preserved.
+CREATE TABLE public.cms (
+    keyname TEXT PRIMARY KEY,
+    settingvalue TEXT,
+    updatedat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    "dateAdded" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+CREATE OR REPLACE FUNCTION public.cms_set_date_added()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    NEW."dateAdded" := COALESCE(NEW."dateAdded", NEW.updatedat, NOW());
+  ELSE
+    NEW."dateAdded" := OLD."dateAdded";
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER cms_set_date_added
+  BEFORE INSERT OR UPDATE ON public.cms
+  FOR EACH ROW
+  EXECUTE FUNCTION public.cms_set_date_added();
+
 -- 4. RLS POLICIES (Row Level Security - Basic structure)
 -- Note: Replace placeholders or logic depending on how you use JWT auth in Supabase.
 -- By default, all tables are locked down if enabled. You can open them as needed.

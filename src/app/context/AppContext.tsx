@@ -4,6 +4,7 @@ import { bookingDay, bookingDayKey } from '../utils/bookingSchedule.js';
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef, useMemo } from 'react';
 import { toast } from 'sonner';
 import { publicSupabase, isWebsiteImageValue } from '../utils/supabase';
+import { CMS_IMAGE_KEYS, cmsRowKey, cmsRowValue, decideCmsImageWrite, parseCmsImageList } from '../utils/cmsImages';
 import { previewSessionBill, getSessionTimerState } from '../../../session-billing.mjs';
 
 
@@ -276,7 +277,7 @@ export type AppContextType = {
   events: Event[]; addEvent: (e: Omit<Event, 'id'>) => void; updateEvent: (id: string, updates: Partial<Omit<Event, 'id'>>) => void; deleteEvent: (id: string) => void;
   addStaffUser: (u: Omit<StaffUser, 'id'|'createdAt'>) => Promise<void>; updateStaffUser: (id: string, u: Partial<StaffUser>) => void; resetStaffUserPassword: (id: string) => Promise<string>; toggleStaffUserActive: (id: string) => void;
   updateRates: (r: Partial<RatesConfig>) => Promise<void>; updateReservationTerms: (t: Partial<ReservationTerms>) => Promise<void>; addAnnouncement: (a: Omit<Announcement, 'id'|'createdAt'>) => void; updateAnnouncement: (id: string, u: Partial<Announcement>) => void; deleteAnnouncement: (id: string) => void; toggleAnnouncement: (id: string) => void; addClosedDate: (c: Omit<ClosedDate, 'id'>) => void; removeClosedDate: (id: string) => void; updateClosedDate: (id: string, u: Partial<ClosedDate>) => void;
-  siteConfig: any; updateSiteConfig: (config: any) => void; refreshLiveMonitor: () => void;
+  siteConfig: any; updateSiteConfig: (config: any, options?: { allowImageClear?: boolean }) => void; refreshLiveMonitor: () => void;
   lostItems: LostItem[];
   addLostItem: (i: Omit<LostItem, 'id'>) => void;
   updateLostItem: (id: string, u: Partial<LostItem>) => void;
@@ -314,6 +315,25 @@ export type AppContextType = {
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
+
+/**
+ * Drop cached gallery values that can no longer load (retired Supabase host,
+ * deleted object, machine-local file). Keeping only valid entries means the
+ * website switches to its bundled fallback instead of showing a broken image.
+ */
+const sanitizeCmsImages = (config: any) => {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) return config;
+  const next: any = { ...config };
+  const heroList = parseCmsImageList(next.heroImages).filter((url) => isWebsiteImageValue(url));
+  if (next.heroImages !== undefined) {
+    if (heroList.length > 0) next.heroImages = heroList;
+    else delete next.heroImages;
+  }
+  if (next.aboutImage !== undefined && !isWebsiteImageValue(next.aboutImage)) {
+    delete next.aboutImage;
+  }
+  return next;
+};
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [isInitializing, setIsInitializing] = useState(true);
@@ -728,7 +748,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           delete configObj[key];
         }
       }
-      setSiteConfig((prev: any) => ({ ...(prev || {}), ...configObj }));
+      setSiteConfig((prev: any) => sanitizeCmsImages({ ...(prev || {}), ...configObj }));
 
       if (resData && (resData as any[]).length > 0) {
         const mappedRes = (resData as any[]).map(mapCloudReservation);
@@ -767,7 +787,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       if (resRes && resRes.ok) setReservations(await resRes.json());
       if (annRes && annRes.ok) setAnnouncements(await annRes.json());
-      if (cmsRes && cmsRes.ok) setSiteConfig(await cmsRes.json());
+      if (cmsRes && cmsRes.ok) setSiteConfig(sanitizeCmsImages(await cmsRes.json()));
       if (closedDatesRes && closedDatesRes.ok) setClosedDates(await closedDatesRes.json());
       if (promoRes && promoRes.ok) setPromoCodes(await promoRes.json());
       if (historyResFb && historyResFb.ok) setSessionHistory(await historyResFb.json()); // 🟢 Fallback retains local history
@@ -1927,27 +1947,87 @@ export function AppProvider({ children }: { children: ReactNode }) {
     addActivity('admin_action', `Deleted event ID: ${id}`);
   };
 
-  const updateSiteConfig = async (newConfig: any) => {
-    setSiteConfig((prev: any) => ({ ...prev, ...newConfig }));
+  const updateSiteConfig = async (newConfig: any, options: { allowImageClear?: boolean } = {}) => {
+    const incoming: any = { ...(newConfig || {}) };
+    const imageKeys = CMS_IMAGE_KEYS.filter((key) => Object.prototype.hasOwnProperty.call(incoming, key));
+
+    // Look at the rows already stored before writing. `dateAdded` tells us
+    // which value is the older, established image; a blank, retired-host or
+    // machine-local upload must never replace it.
+    const existingByKey = new Map<string, any>();
+    if (imageKeys.length > 0) {
+      try {
+        const { data, error } = await publicSupabase
+          .from('cms')
+          .select('*')
+          .in('keyname', imageKeys);
+        if (!error) {
+          for (const row of (data || [])) existingByKey.set(cmsRowKey(row).toLowerCase(), row);
+        }
+      } catch (e) {
+        console.warn('Could not read the saved CMS images before saving:', e);
+      }
+    }
+
+    const acceptedImages: any = {};
+    const imageRows: any[] = [];
+    for (const key of imageKeys) {
+      const existing = existingByKey.get(key.toLowerCase());
+      const decision = decideCmsImageWrite(key, incoming[key], existing, {
+        allowClear: options.allowImageClear === true,
+      });
+      if (decision.action === 'write') {
+        acceptedImages[key] = key === 'heroImages'
+          ? parseCmsImageList(incoming[key])
+          : String(incoming[key]).trim();
+        imageRows.push({
+          keyname: key,
+          settingvalue: decision.value,
+          dateAdded: decision.dateAdded,
+        });
+      } else {
+        // Keep the older value locally as well, so the editor and website do
+        // not suddenly show a blank gallery after a rejected write.
+        const kept = cmsRowValue(existing);
+        if (kept !== null && kept !== undefined) {
+          acceptedImages[key] = key === 'heroImages' ? parseCmsImageList(kept) : String(kept);
+        }
+      }
+      delete incoming[key];
+    }
+
+    const nextConfig = { ...incoming, ...acceptedImages };
+    setSiteConfig((prev: any) => sanitizeCmsImages({ ...prev, ...nextConfig }));
 
     // 1. Direct Supabase sync so live website receives changes immediately
     try {
-      const cmsRows = Object.entries(newConfig).map(([k, v]) => ({
-        keyname: k,
-        settingvalue: typeof v === 'object' ? JSON.stringify(v) : String(v ?? '')
-      }));
-      const { error: cmsErr } = await publicSupabase.from('cms').upsert(cmsRows, { onConflict: 'keyname' });
-      if (cmsErr) {
-        const altRows = Object.entries(newConfig).map(([k, v]) => ({
-          key_name: k,
-          setting_value: typeof v === 'object' ? JSON.stringify(v) : String(v ?? '')
-        }));
-        await publicSupabase.from('cms').upsert(altRows, { onConflict: 'key_name' });
+      const cmsRows = [
+        ...imageRows,
+        ...Object.entries(incoming).map(([k, v]) => ({
+          keyname: k,
+          settingvalue: typeof v === 'object' ? JSON.stringify(v) : String(v ?? '')
+        })),
+      ];
+      if (cmsRows.length > 0) {
+        let { error: cmsErr } = await publicSupabase.from('cms').upsert(cmsRows, { onConflict: 'keyname' });
+        // Older deployments do not have the dateAdded column yet. Retrying
+        // without it keeps the save working while the migration is rolled out.
+        if (cmsErr && /dateAdded|column .* does not exist/i.test(cmsErr.message || '')) {
+          const rowsWithoutDate = cmsRows.map(({ dateAdded, ...row }) => row);
+          ({ error: cmsErr } = await publicSupabase.from('cms').upsert(rowsWithoutDate, { onConflict: 'keyname' }));
+        }
+        if (cmsErr) {
+          const altRows = cmsRows.map(({ dateAdded, ...row }) => ({
+            key_name: row.keyname,
+            setting_value: row.settingvalue
+          }));
+          await publicSupabase.from('cms').upsert(altRows, { onConflict: 'key_name' });
+        }
       }
       // Dual-sync to system_settings for total redundancy. Gallery images stay
       // out of this table: the website CMS owns them, and a copy here would be
       // re-seeded onto fresh installs as a machine-local, blank image.
-      const settingsRows = Object.entries(newConfig)
+      const settingsRows = Object.entries(incoming)
         .filter(([k]) => k !== 'heroImages' && k !== 'aboutImage')
         .map(([k, v]) => ({
           key_name: k,
@@ -1959,7 +2039,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
 
     // 2. Local SQLite DB sync
-    syncToDB('/api/cms', 'PUT', newConfig, `Updated Website Content`).then(runCloudBackup).catch(()=>{});
+    syncToDB('/api/cms', 'PUT', nextConfig, `Updated Website Content`).then(runCloudBackup).catch(()=>{});
     addActivity('admin_action', `Updated public website CMS content`);
   };
 

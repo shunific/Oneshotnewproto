@@ -1,14 +1,21 @@
 import React, { useEffect, useState } from 'react'
+import defaultFallbackImage from 'figma:asset/15fb8dcab89448c8f2ad20fb9946631b1c246968.png'
 
 const ERROR_IMG_SRC =
   'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODgiIGhlaWdodD0iODgiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgc3Ryb2tlPSIjMDAwIiBzdHJva2UtbGluZWpvaW49InJvdW5kIiBvcGFjaXR5PSIuMyIgZmlsbD0ibm9uZSIgc3Ryb2tlLXdpZHRoPSIzLjciPjxyZWN0IHg9IjE2IiB5PSIxNiIgd2lkdGg9IjU2IiBoZWlnaHQ9IjU2IiByeD0iNiIvPjxwYXRoIGQ9Im0xNiA1OCAxNi0xOCAzMiAzMiIvPjxjaXJjbGUgY3g9IjUzIiBjeT0iMzUiIHI9IjciLz48L3N2Zz4KCg=='
 
+// The live CMS can point at a retired Supabase project, a deleted storage
+// object, or a machine-local file. Every image therefore falls back to a
+// bundled, branded photo instead of showing the browser's broken-image icon.
+export const DEFAULT_IMAGE_FALLBACK = defaultFallbackImage
+
 type Props = React.ImgHTMLAttributes<HTMLImageElement> & {
-  // Local bundled image shown if the primary (usually cloud) source fails.
+  // Optional page-specific image (for example the venue photo). When omitted
+  // the bundled default above is used automatically.
   fallbackSrc?: string
 }
 
-export function ImageWithFallback({ fallbackSrc, ...props }: Props) {
+export function ImageWithFallback({ fallbackSrc = DEFAULT_IMAGE_FALLBACK, ...props }: Props) {
   const [didError, setDidError] = useState(false)
   const [usingFallback, setUsingFallback] = useState(false)
 
@@ -29,7 +36,8 @@ export function ImageWithFallback({ fallbackSrc, ...props }: Props) {
   }
 
   const { src, alt, style, className, ...rest } = props
-  const effectiveSrc = usingFallback ? fallbackSrc : src
+  // A missing source never reaches the network: show the fallback immediately.
+  const effectiveSrc = usingFallback || !src ? fallbackSrc : src
 
   return didError ? (
     <div
@@ -41,6 +49,14 @@ export function ImageWithFallback({ fallbackSrc, ...props }: Props) {
       </div>
     </div>
   ) : (
-    <img src={effectiveSrc} alt={alt} className={className} style={style} {...rest} onError={handleError} />
+    <img
+      src={effectiveSrc}
+      alt={alt}
+      className={className}
+      style={style}
+      {...rest}
+      data-original-url={src || undefined}
+      onError={handleError}
+    />
   )
 }

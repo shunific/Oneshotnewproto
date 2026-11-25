@@ -358,7 +358,7 @@ export function AdminSiteSettings() {
     }
     setIsProcessing(true);
     try {
-      await updateSiteConfig({ heroImages: form.heroImages });
+      await updateSiteConfig({ heroImages: form.heroImages }, { allowImageClear: true });
       flash("Hero gallery saved and synchronized to Cloud & Local!", "success");
     } catch (err: any) {
       flash("Failed to update hero gallery.", "error");
@@ -378,7 +378,7 @@ export function AdminSiteSettings() {
     }
     setIsProcessing(true);
     try {
-      await updateSiteConfig({ aboutImage: form.aboutImage });
+      await updateSiteConfig({ aboutImage: form.aboutImage }, { allowImageClear: true });
       flash("Featured image saved and synchronized to Cloud & Local!", "success");
     } catch (err: any) {
       flash("Failed to update featured image.", "error");
@@ -414,24 +414,68 @@ export function AdminSiteSettings() {
     try {
       for (const file of files) {
         const fileExt = file.name.split(".").pop();
-        const fileName = `${target}_${Date.now()}_${Math.floor(Math.random() * 1000)}.${fileExt}`;
-        
-        const { error: uploadError } = await supabase.storage
-          .from("oneshot-assets")
-          .upload(fileName, file);
-          
-        if (uploadError) throw uploadError;
-        
+        let fileName = `${target}_${Date.now()}_${Math.floor(Math.random() * 1000)}.${fileExt}`;
+        let uploaded = false;
+
+        for (let attempt = 0; attempt < 2 && !uploaded; attempt++) {
+          const { error: uploadError } = await supabase.storage
+            .from("oneshot-assets")
+            .upload(fileName, file, { contentType: file.type });
+
+          if (!uploadError) {
+            uploaded = true;
+            break;
+          }
+
+          // A same-name object already exists. Never overwrite the older file:
+          // reuse it if it still loads, otherwise retry with a fresh name.
+          if (/already exists|duplicate/i.test(uploadError.message || "")) {
+            const { data: existingUrlData } = supabase.storage
+              .from("oneshot-assets")
+              .getPublicUrl(fileName);
+            const existingUrl = existingUrlData?.publicUrl;
+            if (existingUrl && isWebsiteImageValue(existingUrl)) {
+              try {
+                const probe = await fetch(existingUrl, { method: "HEAD" });
+                if (probe.ok) {
+                  if (target === "hero") {
+                    setForm((prev: any) => {
+                      const current = Array.isArray(prev.heroImages) ? prev.heroImages : [];
+                      if (current.length >= 5 || current.includes(existingUrl)) return prev;
+                      return { ...prev, heroImages: [...current, existingUrl] };
+                    });
+                  } else {
+                    setForm((prev: any) => ({ ...prev, aboutImage: existingUrl }));
+                  }
+                  uploaded = true;
+                  break;
+                }
+              } catch {
+                // Fall through and retry with a new name.
+              }
+            }
+            fileName = `${target}_${Date.now()}_${Math.floor(Math.random() * 1000)}.${fileExt}`;
+            continue;
+          }
+
+          throw uploadError;
+        }
+
+        if (!uploaded) throw new Error("The image could not be stored without overwriting an older file.");
+
         const { data: publicUrlData } = supabase.storage
           .from("oneshot-assets")
           .getPublicUrl(fileName);
           
         const url = publicUrlData.publicUrl;
+        if (!url || !isWebsiteImageValue(url)) {
+          throw new Error("The uploaded image URL could not be verified.");
+        }
         
         if (target === "hero") {
           setForm((prev: any) => {
             const current = Array.isArray(prev.heroImages) ? prev.heroImages : [];
-            if (current.length >= 5) return prev; 
+            if (current.length >= 5 || current.includes(url)) return prev;
             return { ...prev, heroImages: [...current, url] };
           });
         } else {
